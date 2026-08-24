@@ -64,6 +64,11 @@ func StartAIProxyService(cfg *config.LsmTokensServerConfig) {
 	}
 
 	logger.Printf("[PROXY] AI proxy server listening on :%d (HTTP)", port)
+	logger.Printf("[PROXY] =====================================================================")
+	logger.Printf("[PROXY] AI 代理端口迁移提示：旧工程 LsmHttpAgent 监听 29000/29003；")
+	logger.Printf("[PROXY] 本工程 LsmTokensServer 监听 %d(HTTP) / %d(HTTPS)。", port, config.G.AgentHttpsListenPort)
+	logger.Printf("[PROXY] 如果客户端 Claude Code / Cursor / Cline 等仍配置旧端口，请改为 %d。", port)
+	logger.Printf("[PROXY] =====================================================================")
 	go func() {
 		if err := aiProxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Printf("[PROXY] AI proxy server error: %v", err)
@@ -138,6 +143,62 @@ func anthropicProxyHandler(w http.ResponseWriter, r *http.Request) {
 // openAIProxyHandler OpenAI 协议代理处理
 func openAIProxyHandler(w http.ResponseWriter, r *http.Request) {
 	handleAIProxyRequest(w, r, protocol.AgentProtocolType_OpenAI)
+}
+
+// isUpstreamConnectError 判断错误消息是否是上游连接类错误
+// （DNS / TCP 拒绝 / TLS / 超时 / 握手 / 连接重置等非 HTTP 响应错误）。
+// 用于将这类错误以 502 + JSON 形式返回给客户端，便于 Claude Code 等 IDE 插件展示。
+func isUpstreamConnectError(errMsg string) bool {
+	keys := []string{
+		"connection refused",
+		"connection reset",
+		"connection closed",
+		"no such host",
+		"i/o timeout",
+		"TLS handshake",
+		"handshake timeout",
+		"network is unreachable",
+		"broken pipe",
+		"EOF",
+		"EOF occurred in violation of protocol",
+		"dial tcp",
+		"dial:",
+		"connectex",
+		"DNS",
+	}
+	for _, k := range keys {
+		if strings.Contains(errMsg, k) {
+			return true
+		}
+	}
+	return false
+}
+
+// jsonEscape 将字符串转义为合法 JSON 字符串字面量（最小实现，仅处理控制字符与双引号）。
+// 仅用于错误消息嵌入 http.Error 的 JSON body；不含 \u 转义，仅保证基本安全。
+func jsonEscape(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '"':
+			b.WriteString(`\"`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if c < 0x20 {
+				continue // 丢弃不可打印控制字符
+			}
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 type proxyForwardResult struct {
@@ -250,9 +311,18 @@ func handleAIProxyRequest(w http.ResponseWriter, r *http.Request, protocolType i
 	if err != nil {
 		// 所有重试都失败了
 		logger.Printf("[PROXY] All endpoints failed for route id=%d: %v", cachedRoute.ID, err)
+		errMsg := err.Error()
 		// 检查是否所有源站都被禁用
-		if strings.Contains(err.Error(), "is disabled") {
+		if strings.Contains(errMsg, "is disabled") {
 			http.Error(w, `{"error":"Forbidden","message":"All endpoints are disabled"}`, http.StatusForbidden)
+			return
+		}
+		// 上游连接类错误（DNS / TCP / TLS / timeout / reset）—— 返回 502 + JSON，
+		// 客户端拿到的是可解析的错误而不是裸 connection error。
+		if isUpstreamConnectError(errMsg) {
+			clientIP := getProxyClientIP(r)
+			logger.Printf("[PROXY][CONNECT_FAIL] client=%s route=%d model=%s upstream_connect_failed err=%q", clientIP, cachedRoute.ID, userModel.ModelName, errMsg)
+			http.Error(w, `{"error":"Bad Gateway","message":"upstream connect failed: `+jsonEscape(errMsg)+`"}`, http.StatusBadGateway)
 			return
 		}
 		http.Error(w, `{"error":"Service Unavailable","message":"All endpoints failed"}`, http.StatusServiceUnavailable)

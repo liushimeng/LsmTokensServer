@@ -102,7 +102,6 @@ func replaceModelInBody(body []byte, oldModel, newModel string) []byte {
 	return body
 }
 
-// protocol.SSEEvent 表示一个 SSE 事件
 // parseTokensFromResponseBody 从响应体中解析 Tokens 使用量
 // 支持非流式 JSON 和流式 SSE 两种格式
 // Anthropic 协议: usage.input_tokens / usage.output_tokens
@@ -185,84 +184,8 @@ func parseTokensFromSSEResponse(respBody string, protocolType int) (input, outpu
 	return
 }
 
-// parseSSEEvents 将 SSE 文本解析为事件列表（等效于 JS 的 parseSSE）
-// v2.0.72: 兼容 CRLF（\r\n 流中空白行是 "\r"，此前事件永不 flush、data 粘连全流解析失败）
-// v2.0.73: 截断末尾不完整 UTF-8 多字节序列（防御性：当前 io.ReadAll 路径不会触发，
-// 为未来流式逐 chunk 读取预留；借鉴 cc-switch append_utf8_safe）
-func ParseSSEEvents(text string) []protocol.SSEEvent {
-	// 截断末尾不完整的多字节 UTF-8 序列（防御性）
-	text = trimIncompleteTrailingUTF8(text)
-	var events []protocol.SSEEvent
-	lines := strings.Split(text, "\n")
-	var currentEvent protocol.SSEEvent
-
-	for _, line := range lines {
-		line = strings.TrimRight(line, "\r")
-		if line == "" {
-			if currentEvent.Data != "" || currentEvent.Event != "" {
-				events = append(events, currentEvent)
-				currentEvent = protocol.SSEEvent{}
-			}
-		} else if strings.HasPrefix(line, "event:") {
-			currentEvent.Event = strings.TrimSpace(line[6:])
-		} else if strings.HasPrefix(line, "data:") {
-			dataPart := line[5:]
-			if currentEvent.Data == "" {
-				currentEvent.Data = dataPart
-			} else {
-				currentEvent.Data += "\n" + dataPart
-			}
-		}
-	}
-
-	// 流尾残留的未完成事件不丢（上游漏发末尾空行时最后一个事件仍能解析）
-	if currentEvent.Data != "" || currentEvent.Event != "" {
-		events = append(events, currentEvent)
-	}
-
-	return events
-}
-
-// trimIncompleteTrailingUTF8 截断字符串末尾不完整的多字节 UTF-8 序列。
-// 当前 io.ReadAll 一次性读入路径不会触发（完整 UTF-8 字符不会被拆分），
-// 为未来流式逐 chunk 读取预留（借鉴 cc-switch append_utf8_safe）。
-func trimIncompleteTrailingUTF8(s string) string {
-	n := len(s)
-	if n == 0 {
-		return s
-	}
-	// 从末尾向前找到最后一个非延续字节（即一个 rune 的起始字节或 ASCII）
-	i := n - 1
-	for i >= 0 && s[i]&0xC0 == 0x80 {
-		i--
-	}
-	if i < 0 {
-		// 全部是延续字节，无起始字节 → 全截断
-		return ""
-	}
-	startByte := s[i]
-	var expectedLen int
-	switch {
-	case startByte&0x80 == 0x00:
-		expectedLen = 1 // ASCII (0xxxxxxx)
-	case startByte&0xE0 == 0xC0:
-		expectedLen = 2 // 110xxxxx
-	case startByte&0xF0 == 0xE0:
-		expectedLen = 3 // 1110xxxx
-	case startByte&0xF8 == 0xF0:
-		expectedLen = 4 // 11110xxx
-	default:
-		// 非法起始字节（单独的延续字节不应到达此处），截断
-		return s[:i]
-	}
-	if i+expectedLen == n {
-		return s // 完整
-	}
-	if i+expectedLen > n {
-		return s[:i] // 末尾 rune 不完整，截断
-	}
-	return s
-}
+// parseSSEEvents 已迁至 protocol/sse.go，统一通过 protocol.ParseSSEEvents 调用。
+// 旧工程迁移期遗留的重复定义已移除。
 
 // extractTokensFromAnthropicSSE 从 Anthropic SSE 事件流中提取 Tokens
 // 等效于 JS aggregateSSE 中的 usage 提取逻辑
