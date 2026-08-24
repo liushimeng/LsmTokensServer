@@ -28,7 +28,7 @@ import (
 func TestGetSubTableInspector_SQLiteExactPath(t *testing.T) {
 	restore := setupCleanupSQLite(t)
 	defer restore()
-	invalidateSubTableInspector()
+	InvalidateSubTableInspector()
 
 	tableName := "TAgentHttpTransactionDataItem_00"
 	rows := make([]*TAgentHttpTransactionDataItem, 0, 7)
@@ -78,7 +78,7 @@ func TestGetSubTableInspector_SQLiteExactPath(t *testing.T) {
 func TestGetSubTableInspector_MissingTable(t *testing.T) {
 	restore := setupCleanupSQLite(t)
 	defer restore()
-	invalidateSubTableInspector()
+	InvalidateSubTableInspector()
 
 	// 删掉分表 07 模拟缺失
 	if err := database.DB.Exec("DROP TABLE IF EXISTS TAgentHttpTransactionDataItem_07").Error; err != nil {
@@ -107,7 +107,7 @@ func TestGetSubTableInspector_MissingTable(t *testing.T) {
 func TestGetSubTableInspector_CacheHitAndInvalidate(t *testing.T) {
 	restore := setupCleanupSQLite(t)
 	defer restore()
-	invalidateSubTableInspector()
+	InvalidateSubTableInspector()
 
 	entries1, err := GetSubTableInspector(8)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestGetSubTableInspector_CacheHitAndInvalidate(t *testing.T) {
 		t.Errorf("缓存应命中：entries2=%d, entries1=%d", entries2[0].RowCount, entries1[0].RowCount)
 	}
 
-	invalidateSubTableInspector()
+	InvalidateSubTableInspector()
 	entries3, err := GetSubTableInspector(8)
 	if err != nil {
 		t.Fatalf("third: %v", err)
