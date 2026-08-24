@@ -36,4 +36,6 @@ LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，由私有项
 - 测试运行：`cd ServerGo && go test ./...` 或 `cd ClientWeb && npm run test`
 - 编译部署：`./rebuild_restart_app.sh`
 - git 操作：提交、推送（双远端：gitcode + gitee）
+- **本地私有 Python 工具（仓库根目录，不入库）**：
+  - `python-generate-image-tool/` — 火山引擎方舟大模型图片生成 SDK，模型固定 `doubao-seedream-5-0-pro-260628`，接口 `https://ark.cn-beijing.volces.com/api/v3/images/generations`；调用方式见 [`CLAUDE.md`](CLAUDE.md) §6.1
 

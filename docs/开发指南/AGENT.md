@@ -7,6 +7,33 @@
 
 ---
 
+## 🧰 本地私有 Python 工具集（Agent 加载用）
+
+> 这些工具以本地目录形式存在于工程根目录，**仅在本机使用，不入库**（`.gitignore` 已排除）。
+> AI Agent（Claude Code / Codex / OpenCode / pi / Hermes / OpenClaw 等）启动时扫描项目根目录，结合本节说明加载。
+
+| 工具目录 | 模型 / 接口 | 用途 |
+|----------|------|------|
+| `python-generate-image-tool/` | `doubao-seedream-5-0-pro-260628`（固定），API `https://ark.cn-beijing.volces.com/api/v3/images/generations` | 火山引擎方舟大模型图片生成 SDK，含单元测试与端到端测试 |
+
+调用示例：
+
+```python
+from src import ArkImageGenerator
+
+gen = ArkImageGenerator()
+path = gen.generate_and_save(
+    prompt="赛博朋克风格城市夜景",
+    size="2560x1440",        # 最小像素 3,686,400
+    watermark=False,
+    filename_prefix="cover",
+)
+```
+
+API Key 加载优先级：环境变量 `ARK_API_KEY` > `.env` > 代码内置默认值。详细约束（异常层级、超时、小图标 workaround）见 [`CLAUDE.md`](../../CLAUDE.md) §6。
+
+---
+
 ## 🕷️ MCP 爬虫服务快速参考（v2.0.0 / 接口 v2.0.0）
 
 **服务地址**: http://localhost:29002

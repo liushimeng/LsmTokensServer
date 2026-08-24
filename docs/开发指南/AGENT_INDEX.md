@@ -21,6 +21,14 @@
 | [`MEMORY.md`](MEMORY.md) | 项目记忆与上下文 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 完整版本历史（v2.0.0-v2.0.66 根因分析、修复步骤、测试详情） |
 
+### 🧰 本地私有 Python 工具（AI Agent 加载）
+
+> 工程根目录下的本地私有工具，**仅在本机使用，不入库**（`.gitignore` 已排除）。
+
+| 工具目录 | 用途 |
+|----------|------|
+| `python-generate-image-tool/` | 火山引擎方舟大模型图片生成 SDK；模型 `doubao-seedream-5-0-pro-260628`（固定）；详细用法见 [`CLAUDE.md`](../../CLAUDE.md) §6 |
+
 ### 🕷️ MCP 爬虫服务接口文档（v2.0.0）
 
 | 文件 | 用途 |

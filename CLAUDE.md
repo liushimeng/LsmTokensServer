@@ -34,6 +34,7 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 - `server.crt` / `server.key`（TLS 证书私钥）
 - `*.log`、二进制、pid 文件
 - `tools/go-web-debug-tool/`（本地私有子模块）
+- `python-generate-image-tool/`（本地私有 Python SDK，仅供本机 Agent 加载，不入库）
 - `node_modules/`、`ClientWeb/dist/`
 
 ### 2.4 提交规范
@@ -69,3 +70,57 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 
 - 实际配置文件路径：工程根目录 `LsmTokensServer.conf`（勿提交）
 - 脱敏模板：`LsmTokensServer.conf.example`
+
+## 6. 本地私有 Python 工具（AI Agent 加载使用）
+
+> 这些工具以本地目录形式存在于工程根目录，**仅在本机使用，不入库**（已在 `.gitignore` 中排除）。
+> AI Agent（Claude Code / Codex / OpenCode / pi / Hermes / OpenClaw）启动时会自动扫描项目根目录，结合本节说明即可加载。
+
+| 工具目录 | 用途 | 关键能力 |
+|----------|------|----------|
+| `python-generate-image-tool/` | 火山引擎方舟大模型 `doubao-seedream-5-0-pro-260628` 图片生成 SDK | `ArkImageGenerator().generate_and_save(prompt, size, watermark=False)`；默认输出 `ImageOutput/{prefix}_{timestamp}_{seq:03d}.png`；最小像素 3,686,400；可调用 `resize_image()` 二次缩放得到小图标 |
+
+### 6.1 python-generate-image-tool 快速用法
+
+```bash
+# 安装依赖
+cd python-generate-image-tool
+pip install -r requirements.txt
+
+# 单元测试（mock，不消耗 API 配额）
+python -m pytest tests/ -v
+
+# 端到端测试（调用真实 API）
+python test_generate_e2e.py
+```
+
+```python
+from src import ArkImageGenerator
+
+gen = ArkImageGenerator()
+path = gen.generate_and_save(
+    prompt="赛博朋克风格城市夜景，霓虹灯光",
+    size="2560x1440",          # 默认；最小像素 3,686,400
+    response_format="url",
+    watermark=False,
+    filename_prefix="cover",
+)
+print("图片已保存:", path)
+```
+
+### 6.2 API Key 加载优先级（高 → 低）
+
+1. 环境变量 `ARK_API_KEY`
+2. `.env` 文件中的 `ARK_API_KEY`
+3. 代码内置 `DEFAULT_API_KEY`（仓库内已埋默认值，本机可直接调用）
+
+### 6.3 异常层级
+
+`ArkBaseError` → `ConfigError` / `ValidationError` / `ArkAPIError` / `NetworkError`，捕获基类即可统一处理。
+
+### 6.4 Agent 调用约束
+
+- **模型固定**：禁止修改 `model` 字段，必须为 `doubao-seedream-5-0-pro-260628`。
+- **超时**：HTTP 请求超时 120 秒（`ArkImageGenerator.REQUEST_TIMEOUT_SECONDS`）。
+- **小图标 workaround**：API 拒绝低于 3,686,400 像素，先用 `2048x2048` 生成，再用 `resize_image()` 缩到目标尺寸。
+- **多媒体处理**：图片/音频/视频优先使用本机 `ffmpeg`。

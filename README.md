@@ -11,6 +11,7 @@ LsmTokensServer/
 ├── ClientWeb/    前端（React + Vite）
 ├── docs/         知识库与迁移文档
 ├── rebuild_restart_app.sh    一键编译前后端+部署+运行
+├── python-generate-image-tool/   本地私有 Python SDK（图片生成，仅本机 Agent 加载，不入库）
 └── LsmTokensServer.conf.example  配置模板（实际配置 git 忽略）
 ```
 
