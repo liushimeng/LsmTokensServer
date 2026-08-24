@@ -18,7 +18,7 @@ LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，由私有项
 ## Agent 必读
 
 1. **不要停止旧服务**：`/usr/local/LsmHttpAgent` 必须持续运行，AI 代理端口全量验证前严禁停。
-2. **编译/启动走脚本**：`./scripts/rebuild_restart_app.sh`，迁移期用 `--build-only`。
+2. **编译/启动走脚本**：`./rebuild_restart_app.sh`，迁移期用 `--build-only`。
 3. **敏感信息不提交**：`LsmTokensServer.conf`、证书、日志、tools/ 私有子模块。
 4. **中文 commit**：分阶段提交，格式 `阶段X：说明`。
 
@@ -34,6 +34,6 @@ LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，由私有项
 
 - 代码读写：修改后端 Go 模块 / 前端 React 页面
 - 测试运行：`cd ServerGo && go test ./...` 或 `cd ClientWeb && npm run test`
-- 编译部署：`./scripts/rebuild_restart_app.sh`
+- 编译部署：`./rebuild_restart_app.sh`
 - git 操作：提交、推送（双远端：gitcode + gitee）
 

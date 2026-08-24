@@ -44,7 +44,7 @@ LsmTokensServer/
 ├── ServerGo/       后端 Go（按模块分包：config/logger/database/models/proxy/protocol/api/spider/websocket/system/webserver）
 ├── ClientWeb/      前端 React + Vite
 ├── docs/           本文档目录
-├── scripts/        编译/部署/重启脚本（rebuild_restart_app.sh）
+├── rebuild_restart_app.sh    一键编译前后端+部署+运行
 ├── tools/          本地私有工具（go-web-debug-tool，git 忽略）
 ├── LsmTokensServer.conf.example   配置模板（开源可提交）
 ├── LsmTokensServer.conf           实际配置（含敏感信息，git 忽略）
@@ -55,10 +55,10 @@ LsmTokensServer/
 
 ```bash
 # 编译前后端（迁移期默认 build-only，不启动不占端口）
-./scripts/rebuild_restart_app.sh --build-only
+./rebuild_restart_app.sh --build-only
 
 # 仅编译后端
-./scripts/rebuild_restart_app.sh --build-only --skip-web
+./rebuild_restart_app.sh --build-only --skip-web
 
 # 运行测试
 cd ServerGo && go test ./...

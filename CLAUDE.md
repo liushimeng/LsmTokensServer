@@ -10,16 +10,16 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 - 后端：`ServerGo/`（Go，按业务域分包）
 - 前端：`ClientWeb/`（React + Vite）
 - 文档：`docs/`
-- 脚本：`scripts/rebuild_restart_app.sh`
+- 脚本：`rebuild_restart_app.sh`
 
 ## 2. 必须遵守的规则
 
 ### 2.1 编译 / 启动必须走脚本
-所有涉及编译、启动、重启的操作，必须通过 `./scripts/rebuild_restart_app.sh`：
+所有涉及编译、启动、重启的操作，必须通过 `./rebuild_restart_app.sh`：
 ```bash
-./scripts/rebuild_restart_app.sh --build-only           # 仅编译（迁移期默认推荐）
-./scripts/rebuild_restart_app.sh --build-only --skip-web # 仅编译后端
-./scripts/rebuild_restart_app.sh                        # 完整重启（切换时才用）
+./rebuild_restart_app.sh --build-only           # 仅编译（迁移期默认推荐）
+./rebuild_restart_app.sh --build-only --skip-web # 仅编译后端
+./rebuild_restart_app.sh                        # 完整重启（切换时才用）
 ```
 禁止直接 `go build` 或 `nohup ./LsmTokensServer`。
 
@@ -62,7 +62,7 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 1. 先读 `docs/项目迁移解决方案/` 对应阶段文档，确认设计。
 2. 在对应包内实现/修改，保持包内自洽，减少跨包循环依赖。
 3. 单元测试 + `go vet` 通过。
-4. `./scripts/rebuild_restart_app.sh --build-only` 编译验证。
+4. `./rebuild_restart_app.sh --build-only` 编译验证。
 5. 中文 commit 提交。
 
 ## 5. 敏感配置获取

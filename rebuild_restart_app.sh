@@ -15,6 +15,7 @@ APP_NAME="LsmTokensServer"
 CONFIG_FILE="LsmTokensServer.conf"
 
 # 获取脚本所在目录（兼容 macOS 和 Linux）
+# 脚本位于工程根目录，直接返回其所在目录
 get_script_dir() {
     local src="${BASH_SOURCE[0]}"
     while [ -L "$src" ]; do
@@ -22,7 +23,7 @@ get_script_dir() {
         src="$(readlink "$src")"
         [[ "$src" != /* ]] && src="$dir/$src"
     done
-    cd "$(dirname "$src")/.." && pwd   # scripts/ 的上一级 = 工程根目录
+    cd "$(dirname "$src")" && pwd
 }
 
 PROJECT_DIR="$(get_script_dir)"

@@ -14,10 +14,10 @@
 
 ```bash
 # 编译（迁移期默认）
-./scripts/rebuild_restart_app.sh --build-only
+./rebuild_restart_app.sh --build-only
 
 # 仅后端
-./scripts/rebuild_restart_app.sh --build-only --skip-web
+./rebuild_restart_app.sh --build-only --skip-web
 
 # 运行后端测试
 cd ServerGo && go test ./... && go vet ./...

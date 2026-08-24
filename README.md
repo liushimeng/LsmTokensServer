@@ -10,7 +10,7 @@ LsmTokensServer/
 ├── ServerGo/     后端（Go，按基础/业务模块分包）
 ├── ClientWeb/    前端（React + Vite）
 ├── docs/         知识库与迁移文档
-├── scripts/      编译/部署/重启脚本
+├── rebuild_restart_app.sh    一键编译前后端+部署+运行
 └── LsmTokensServer.conf.example  配置模板（实际配置 git 忽略）
 ```
 
@@ -18,13 +18,13 @@ LsmTokensServer/
 
 ```bash
 # 编译前后端（迁移期默认 build-only，不启动不占端口）
-./scripts/rebuild_restart_app.sh --build-only
+./rebuild_restart_app.sh --build-only
 
 # 仅编译后端
-./scripts/rebuild_restart_app.sh --build-only --skip-web
+./rebuild_restart_app.sh --build-only --skip-web
 
-# 全量启动（端口与旧程序相同，切换前请先停止旧服务）
-./scripts/rebuild_restart_app.sh
+# 全量启动（使用 LsmTokensServer.conf 中的端口；当前为 40000 段不与旧服务冲突）
+./rebuild_restart_app.sh
 ```
 
 ## 开发指引
