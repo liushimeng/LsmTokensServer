@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { get, post, download } from '../shared/api'
 import Modal from './Modal'
 
@@ -173,6 +173,40 @@ function CertDialog({ onClose }) {
           </dl>
           <button className="btn btn-primary" disabled={!info.cert_exists}
                   onClick={() => download('CertDownloadInterface')}>下载证书</button>
+          <div className="guide" style={{ marginTop: 14 }}>
+            <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 8px' }}>证书安装指引（跨平台）</p>
+            <details>
+              <summary>Windows</summary>
+              <ol style={{ fontSize: 13, paddingLeft: 18 }}>
+                <li>下载证书文件 <code>LsmTokensServer.crt</code></li>
+                <li>双击 → 「安装证书」→ 存储区域选「本地计算机」</li>
+                <li>选择「将所有的证书都放入下列存储」→ 浏览 → 「受信任的根证书颁发机构」→ 完成</li>
+                <li>打开 <code>cmd</code> 执行 <code>certutil -store Root</code> 确认已安装</li>
+              </ol>
+            </details>
+            <details>
+              <summary>macOS</summary>
+              <ol style={{ fontSize: 13, paddingLeft: 18 }}>
+                <li>下载证书文件后双击，加入「钥匙串访问」</li>
+                <li>找到该证书 → 双击 → 「信任」→ 安全套接字层设为「始终信任」</li>
+                <li>或命令行：<code>sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain LsmTokensServer.crt</code></li>
+              </ol>
+            </details>
+            <details>
+              <summary>Ubuntu / Debian</summary>
+              <ol style={{ fontSize: 13, paddingLeft: 18 }}>
+                <li><code>sudo cp LsmTokensServer.crt /usr/local/share/ca-certificates/</code></li>
+                <li><code>sudo update-ca-certificates</code></li>
+              </ol>
+            </details>
+            <details>
+              <summary>CentOS / RHEL</summary>
+              <ol style={{ fontSize: 13, paddingLeft: 18 }}>
+                <li><code>sudo cp LsmTokensServer.crt /etc/pki/ca-trust/source/anchors/</code></li>
+                <li><code>sudo update-ca-trust</code></li>
+              </ol>
+            </details>
+          </div>
         </>
       )}
       {!info && !err && <div className="table-loading">加载中…</div>}
@@ -184,6 +218,7 @@ function CertDialog({ onClose }) {
 function GitDialog({ onClose }) {
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
+  const [openHash, setOpenHash] = useState(null) // 展开文件变更的 commit hash（迁移自旧 toggleCommitFiles）
 
   useEffect(() => {
     get('GitInfoInterface').then((d) => {
@@ -199,16 +234,28 @@ function GitDialog({ onClose }) {
         <>
           <p style={{ fontSize: 13 }}>分支：<strong>{info.branch || '-'}</strong>
             {info.remote ? <span style={{ color: 'var(--muted)' }}>（{info.remote}）</span> : null}
-            ，共 {info.count || 0} 次提交</p>
+            ，共 {info.count || 0} 次提交<span style={{ color: 'var(--muted)' }}>（点击行展开文件变更）</span></p>
           <div className="table-wrap"><table className="data-table">
             <thead><tr><th>Hash</th><th>作者</th><th>日期</th><th>说明</th></tr></thead>
             <tbody>{(info.commits || []).map((c) => (
-              <tr key={c.hash}>
-                <td><code>{String(c.hash || '').slice(0, 7)}</code></td>
-                <td>{c.author}</td>
-                <td>{c.date}</td>
-                <td className="wrap">{c.message}</td>
-              </tr>
+              <Fragment key={c.hash}>
+                <tr className="row-click" onClick={() => setOpenHash(openHash === c.hash ? null : c.hash)}
+                    style={openHash === c.hash ? { background: '#eef4ff' } : undefined}>
+                  <td><code>{String(c.hash || '').slice(0, 7)}</code></td>
+                  <td>{c.author}</td>
+                  <td>{c.date}</td>
+                  <td className="wrap">{c.message}</td>
+                </tr>
+                {openHash === c.hash && (
+                  <tr><td colSpan={4}>
+                    <div className="commit-files">
+                      {c.changes && c.changes.length ? c.changes.map((f, i) => (
+                        <div key={i}><span className={`chg chg-${f.status}`}>{f.status}</span><code>{f.path}</code></div>
+                      )) : '无文件变更信息'}
+                    </div>
+                  </td></tr>
+                )}
+              </Fragment>
             ))}</tbody>
           </table></div>
         </>
@@ -218,21 +265,33 @@ function GitDialog({ onClose }) {
   )
 }
 
-// ===== 系统信息弹窗 =====
+// ===== 系统信息弹窗（5 秒自动刷新，迁移自旧 setInterval 逻辑）=====
+const SYS_REFRESH_MS = 5000
 function SysDialog({ onClose }) {
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
+  const [auto, setAuto] = useState(true)
 
   useEffect(() => {
-    get('SystemInfoInterface').then((d) => {
+    let stop = false
+    const load = () => get('SystemInfoInterface').then((d) => {
+      if (stop) return
       if (d.error) { setErr(d.error); return }
-      setInfo(d)
-    }).catch((e) => setErr(e.message || '加载失败'))
-  }, [])
+      setErr(''); setInfo(d)
+    }).catch((e) => { if (!stop) setErr(e.message || '加载失败') })
+    load()
+    if (!auto) return undefined
+    const timer = setInterval(load, SYS_REFRESH_MS)
+    return () => { stop = true; clearInterval(timer) }
+  }, [auto])
 
   const Row = ({ k, v }) => <><dt>{k}</dt><dd>{v}</dd></>
   return (
-    <Modal title="系统信息" onClose={onClose} width={720}>
+    <Modal title="系统信息" onClose={onClose} width={720}
+           footer={<label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+             自动刷新（每 5 秒）
+           </label>}>
       {err ? <div className="alert alert-error">{err}</div> : null}
       {info && (
         <>
@@ -299,12 +358,63 @@ function BuildLogDialog({ onClose }) {
   )
 }
 
+// ===== 源码统计弹窗（迁移自旧 server_web_common_dialog_sourcecode.go）=====
+function SourceCodeDialog({ onClose }) {
+  const [stats, setStats] = useState(null)
+  const [file, setFile] = useState(null) // {name, content}
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    post('SourceCodeInterface', {}).then((d) => {
+      if (d.error) { setErr(d.error); return }
+      setStats(d)
+    }).catch((e) => setErr(e.message || '加载失败'))
+  }, [])
+
+  const openFile = async (f) => {
+    setErr('')
+    setFile({ name: f.name, content: '加载中…' })
+    try {
+      const d = await post('SourceCodeInterface', { action: 'get_content', file_path: f.name })
+      if (d.error) { setErr(d.error); setFile(null); return }
+      setFile({ name: f.name, content: d.content || '' })
+    } catch (e) { setErr(e.message || '读取失败'); setFile(null) }
+  }
+
+  return (
+    <Modal title={file ? `源码 — ${file.name}` : '源码统计'} onClose={file ? () => setFile(null) : onClose} width={860}
+           footer={file ? <button className="btn" onClick={() => setFile(null)}>返回列表</button> : null}>
+      {err ? <div className="alert alert-error">{err}</div> : null}
+      {!file && stats && (
+        <>
+          <p style={{ fontSize: 13 }}>共 <strong>{stats.total_files}</strong> 个 .go 文件，
+            <strong>{stats.total_lines}</strong> 行，总大小 {stats.size_human || '-'}</p>
+          <div className="table-wrap"><table className="data-table">
+            <thead><tr><th>文件</th><th style={{ width: 100 }}>行数</th><th style={{ width: 100 }}>大小</th><th style={{ width: 80 }}>操作</th></tr></thead>
+            <tbody>{(stats.files || []).map((f) => (
+              <tr key={f.name}>
+                <td className="wrap"><code>{f.name}</code></td>
+                <td>{f.lines}</td>
+                <td>{f.size_human}</td>
+                <td><button className="btn btn-sm" onClick={() => openFile(f)}>查看</button></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        </>
+      )}
+      {file && <div className="log-box">{file.content}</div>}
+      {!stats && !file && !err ? <div className="table-loading">加载中…</div> : null}
+    </Modal>
+  )
+}
+
 // 工具按钮注册表
 const DIALOGS = {
   userlog: { label: '用户日志', Comp: UserLogDialog },
   wiki: { label: 'Wiki', Comp: WikiDialog },
   cert: { label: '证书', Comp: CertDialog },
   git: { label: 'Git', Comp: GitDialog },
+  sourcecode: { label: '源码', Comp: SourceCodeDialog },
   sysinfo: { label: '系统信息', Comp: SysDialog },
   readme: { label: 'README', Comp: ReadmeDialog },
   buildlog: { label: '构建日志', Comp: BuildLogDialog },

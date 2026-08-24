@@ -80,6 +80,18 @@ a { color: var(--primary); text-decoration: none; }
 .modal-close { border: none; background: none; font-size: 16px; cursor: pointer; color: var(--muted); }
 .modal-body { padding: 16px 18px; overflow: auto; }
 .modal-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+.modal-full { max-width: none !important; max-height: none !important; width: 100vw; height: 100vh; border-radius: 0; }
+
+/* Git 变更状态徽标 */
+.chg { display: inline-block; min-width: 18px; text-align: center; border-radius: 4px; font-size: 11px; font-weight: 600; padding: 1px 4px; margin-right: 6px; color: #fff; }
+.chg-A { background: #16a34a; } .chg-M { background: #d97706; } .chg-D { background: #dc2626; } .chg-R { background: #2563eb; }
+.commit-files { background: #f6f8fa; border-radius: 6px; padding: 8px 12px; margin: 6px 0 10px; font-size: 12px; }
+.row-click { cursor: pointer; }
+
+/* 折叠安装指引 */
+.guide details { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; background: #fafbfc; }
+.guide summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.guide code { background: #f0f3f7; border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
 
 /* 提示 */
 .alert { border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }

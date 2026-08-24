@@ -89,17 +89,17 @@ func sourceCodeInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		projectDir := system.GetProjectDir()
-		absPath, err := filepath.Abs(req.FilePath)
+		absPath, err := filepath.Abs(filepath.Join(projectDir, req.FilePath))
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"error": "无效的文件路径"})
 			return
 		}
 		absProjectDir, _ := filepath.Abs(projectDir)
-		if !strings.HasPrefix(absPath, absProjectDir) {
+		if !strings.HasPrefix(absPath, absProjectDir+string(filepath.Separator)) {
 			json.NewEncoder(w).Encode(map[string]interface{}{"error": "路径超出项目范围"})
 			return
 		}
-		content, err := os.ReadFile(req.FilePath)
+		content, err := os.ReadFile(absPath)
 		if err != nil {
 			json.NewEncoder(w).Encode(map[string]interface{}{"error": "读取文件失败: " + err.Error()})
 			return
@@ -120,8 +120,13 @@ func sourceCodeInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 func readmeInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	readmePath := filepath.Join(config.GetConfigDir(), "README.md")
-	content, err := os.ReadFile(readmePath)
+	// 与旧工程一致：读取工程根目录 README.md。
+	// 二进制可能位于 ServerGo/ 子目录，故先取可执行文件目录，找不到再回退上一级（工程根）。
+	projectDir := system.GetProjectDir()
+	content, err := os.ReadFile(filepath.Join(projectDir, "README.md"))
+	if err != nil {
+		content, err = os.ReadFile(filepath.Join(filepath.Dir(projectDir), "README.md"))
+	}
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": "读取 README.md 失败: " + err.Error()})
 		return
