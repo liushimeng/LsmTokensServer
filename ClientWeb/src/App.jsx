@@ -55,11 +55,14 @@ export default function App() {
 
   useEffect(() => {
     if (route.path === 'Login') return
-    get('UserInfoInterface')
-      .then((d) => setUserInfo({ ...(d && d.data) || d, loaded: true }))
-      .catch(() => { window.location.hash = '#/Login' })
-    // 角色探测：管理端 mux 独有 UserManageInterface POST 接口，用户端 404 → user 角色
-    fetch('UserManageInterface', {
+    let alive = true
+    // 登录信息与角色探测并发获取后合并为一次 setState，避免两个 setState 竞态
+    // 导致 isAdmin 被后到的 UserInfoInterface 结果覆盖（管理端误显示为“用户端”）。
+    const infoP = get('UserInfoInterface')
+      .then((d) => ({ ...((d && d.data) || d), loaded: true }))
+      .catch(() => null)
+    // 角色探测：管理端 mux 独有 UserManageInterface POST 接口，用户端 302/404 → user 角色
+    const roleP = fetch('UserManageInterface', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -67,9 +70,15 @@ export default function App() {
     })
       .then((r) => {
         const ct = r.headers.get('content-type') || ''
-        setUserInfo((u) => ({ ...u, isAdmin: r.status !== 404 && ct.includes('json') }))
+        return r.status !== 404 && ct.includes('json')
       })
-      .catch(() => setUserInfo((u) => ({ ...u, isAdmin: false })))
+      .catch(() => false)
+    Promise.all([infoP, roleP]).then(([info, isAdmin]) => {
+      if (!alive) return
+      if (!info) { window.location.hash = '#/Login'; return }
+      setUserInfo({ ...info, isAdmin })
+    })
+    return () => { alive = false }
   }, [route.path])
 
   if (route.path === 'Login') return <Login />

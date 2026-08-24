@@ -147,9 +147,10 @@ export default function ProtocolConvertAnalyzer() {
 
   // 初始加载：角色探测 + 状态 + 记录 + 映射
   useEffect(() => {
-    // 管理端 mux 独有 Toggle 接口（用户端 404）；GET 在管理端返回 405，探测一次
+    // 管理端 mux 独有 Toggle 接口；GET 在管理端返回 405（POST-only），
+    // 用户端无该接口会回落到 SPA 首页返回 200，据此区分管理/用户角色。
     fetch('ProtocolConvertAnalyzerToggle', { credentials: 'include' })
-      .then((r) => setIsAdmin(r.status !== 404))
+      .then((r) => setIsAdmin(r.status === 405))
       .catch(() => setIsAdmin(false))
     get('ProtocolConvertAnalyzerStatus').then((d) => setEnabled(!!d.enabled)).catch(() => {})
     get('ProtocolConvertAnalyzerMapping').then(setMapping).catch(() => {})

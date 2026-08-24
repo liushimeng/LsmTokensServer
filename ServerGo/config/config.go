@@ -726,6 +726,12 @@ func validateAndFixConfig(cfg *LsmTokensServerConfig) bool {
 func LoadConfig(path string) (*LsmTokensServerConfig, error) {
 	cfg := getDefaultConfig()
 
+	// 记录配置文件所在目录（工程根目录），供 ResolvePath 解析相对运行时产物路径。
+	// 传入的 path 通常已由 loadConfigSafe 解析为绝对路径；相对路径时先转绝对再取目录。
+	if absPath, err := filepath.Abs(path); err == nil {
+		configDir = filepath.Dir(absPath)
+	}
+
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		fmt.Printf("[CONFIG] Config file not found, creating default: %s\n", path)
 		_ = WriteConfig(path, cfg)

@@ -169,7 +169,7 @@ function CertDialog({ onClose }) {
             <dt>证书文件</dt><dd>{info.cert_file || '-'}</dd>
             <dt>证书状态</dt><dd>{info.cert_exists ? `存在（${info.cert_size} 字节）` : '不存在'}</dd>
             <dt>HTTPS 代理</dt><dd>{info.https_enabled ? '已启用' : '未启用'}</dd>
-            <dt>Web HTTPS</dt><dd>{info.user_web_enabled ? '已启用' : '未启用'}</dd>
+            <dt>Web HTTPS</dt><dd>{info.user_web_https_enabled ? '已启用' : '未启用'}</dd>
           </dl>
           <button className="btn btn-primary" disabled={!info.cert_exists}
                   onClick={() => download('CertDownloadInterface')}>下载证书</button>

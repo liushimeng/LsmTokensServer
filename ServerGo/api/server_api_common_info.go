@@ -120,7 +120,7 @@ func sourceCodeInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 func readmeInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	readmePath := filepath.Join(system.GetProjectDir(), "README.md")
+	readmePath := filepath.Join(config.GetConfigDir(), "README.md")
 	content, err := os.ReadFile(readmePath)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{"error": "读取 README.md 失败: " + err.Error()})
