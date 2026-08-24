@@ -63,9 +63,27 @@ func RegisterManagerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/SpiderDailyInfoInterface", func(w http.ResponseWriter, r *http.Request) {
 		SpiderDailyInfoInterfaceHandler(w, r, true, 0)
 	})
+	mux.HandleFunc("/SpiderDataSourceCrawl", func(w http.ResponseWriter, r *http.Request) {
+		SpiderDataSourceCrawlHandler(w, r, true, 0)
+	})
 
 	// v2.0.47: 过期数据清理报告
 	mux.HandleFunc("/CleanupReportInterface", cleanupReportInterfaceHandle)
+
+	// 协议转换分析器（管理端 7 条）
+	mux.HandleFunc("/ProtocolConvertAnalyzerStatus", protocolConvertAnalyzerStatusInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerToggle", protocolConvertAnalyzerToggleInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerTest", protocolConvertAnalyzerTestInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerRecords", protocolConvertAnalyzerRecordsInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerRecordDetail", protocolConvertAnalyzerRecordDetailInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerUsers", protocolConvertAnalyzerUsersInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerMapping", protocolConvertAnalyzerMappingInterface)
+
+	// 工具类公共接口（证书下载 / Wiki / 用户操作日志）
+	mux.HandleFunc("/CertDownloadInfoInterface", certDownloadInfoInterfaceHandle)
+	mux.HandleFunc("/CertDownloadInterface", certDownloadInterfaceHandle)
+	mux.HandleFunc("/WikiInterface", wikiInterfaceHandle)
+	mux.HandleFunc("/UserInfoLogInterface", userInfoLogInterfaceHandle)
 }
 
 // RegisterUserAPIRoutes 挂载用户端（userWebListenPort）REST API 路由
@@ -118,7 +136,24 @@ func RegisterUserAPIRoutes(mux *http.ServeMux) {
 		claims := getUserToken(r)
 		SpiderDailyInfoInterfaceHandler(w, r, false, claims.UserID)
 	})
+	mux.HandleFunc("/SpiderDataSourceCrawl", func(w http.ResponseWriter, r *http.Request) {
+		claims := getUserToken(r)
+		SpiderDataSourceCrawlHandler(w, r, false, claims.UserID)
+	})
 
 	// v2.0.47: 过期数据清理报告（用户端）
 	mux.HandleFunc("/CleanupReportInterface", userCleanupReportInterfaceHandle)
+
+	// 协议转换分析器（用户端 5 条，无 Toggle/Users；记录强制按登录用户过滤）
+	mux.HandleFunc("/ProtocolConvertAnalyzerStatus", protocolConvertAnalyzerStatusInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerTest", protocolConvertAnalyzerTestInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerRecords", userProtocolConvertAnalyzerRecordsInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerRecordDetail", userProtocolConvertAnalyzerRecordDetailInterface)
+	mux.HandleFunc("/ProtocolConvertAnalyzerMapping", protocolConvertAnalyzerMappingInterface)
+
+	// 工具类公共接口（证书下载 / Wiki / 用户操作日志）
+	mux.HandleFunc("/CertDownloadInfoInterface", certDownloadInfoInterfaceHandle)
+	mux.HandleFunc("/CertDownloadInterface", certDownloadInterfaceHandle)
+	mux.HandleFunc("/WikiInterface", wikiInterfaceHandle)
+	mux.HandleFunc("/UserInfoLogInterface", userInfoLogInterfaceHandle)
 }

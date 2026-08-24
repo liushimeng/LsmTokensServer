@@ -251,6 +251,11 @@ type rawLsmTokensServerConfig struct {
 	TransactionRetentionDays int `json:"transactionRetentionDays,omitempty"`
 }
 
+// GetDefaultConfig 返回默认配置（导出版，供测试/初始化全局配置使用）
+func GetDefaultConfig() *LsmTokensServerConfig {
+	return getDefaultConfig()
+}
+
 // getDefaultConfig 返回默认配置
 func getDefaultConfig() *LsmTokensServerConfig {
 	return &LsmTokensServerConfig{
