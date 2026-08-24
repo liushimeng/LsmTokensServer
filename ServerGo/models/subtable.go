@@ -289,7 +289,8 @@ type taskFeatureBackfillConfig struct {
 }
 
 type taskFeatureBackfillEstimate struct {
-	Rows         uint64 `gorm:"column:rows"`
+	// 注意：列别名不能使用 rows（MySQL/MariaDB 保留字），映射到 row_count。
+	Rows         uint64 `gorm:"column:row_count"`
 	MinID        uint64 `gorm:"column:min_id"`
 	MaxID        uint64 `gorm:"column:max_id"`
 	RequestBytes uint64 `gorm:"column:request_bytes"`
@@ -348,7 +349,7 @@ func estimateTransactionTaskFeatures(ctx context.Context, subTableNum int) error
 		}
 		var stat taskFeatureBackfillEstimate
 		err := database.DB.WithContext(ctx).Table(tableName).
-			Select("COALESCE(MIN(id),0) AS min_id, COALESCE(MAX(id),0) AS max_id, COUNT(*) AS rows, COALESCE(SUM(request_content_length),0) AS request_bytes").
+			Select("COALESCE(MIN(id),0) AS min_id, COALESCE(MAX(id),0) AS max_id, COUNT(*) AS row_count, COALESCE(SUM(request_content_length),0) AS request_bytes").
 			Where("is_parsed IS NULL OR is_parsed = ? OR user_message_count IS NULL", false).
 			Scan(&stat).Error
 		if err != nil {

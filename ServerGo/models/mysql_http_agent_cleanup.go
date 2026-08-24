@@ -254,7 +254,7 @@ func runDailyCleanup(cfg *config.LsmTokensServerConfig) int {
 
 	// v2.0.63: 清理完成后让分表元数据缓存过期，/CleanupReport 页面下一轮
 	// 访问能立刻看到删除后的最新行数（而不是等 10 分钟 TTL 自然过期）。
-	invalidateSubTableInspector()
+	InvalidateSubTableInspector()
 	return failedTables
 }
 
@@ -1255,7 +1255,7 @@ var _ = context.Background
 // subTableInspectorTTL 分表元数据进程内缓存有效期。
 //
 // information_schema.TABLES 本身是统计快照，缓存 10 分钟足以平衡「页面刷新
-// 响应快」与「数字不太旧」。清理服务每次跑完后主动调 invalidateSubTableInspector
+// 响应快」与「数字不太旧」。清理服务每次跑完后主动调 InvalidateSubTableInspector
 // 让下一轮页面访问拿到最新值。
 const subTableInspectorTTL = 10 * time.Minute
 
@@ -1283,8 +1283,8 @@ var subTableInspectorCache struct {
 	expires time.Time
 }
 
-// invalidateSubTableInspector 清理完成后让缓存立即过期（测试 + runDailyCleanup 调用）
-func invalidateSubTableInspector() {
+// InvalidateSubTableInspector 清理完成后让缓存立即过期（测试 + runDailyCleanup 调用）
+func InvalidateSubTableInspector() {
 	subTableInspectorCache.mu.Lock()
 	subTableInspectorCache.entries = nil
 	subTableInspectorCache.expires = time.Time{}

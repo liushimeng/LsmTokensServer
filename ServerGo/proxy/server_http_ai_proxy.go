@@ -19,8 +19,8 @@ import (
 // 保证两套协议对外行为完全一致）。
 func buildAIProxyMux(cfg *config.LsmTokensServerConfig) *http.ServeMux {
 	mux := http.NewServeMux()
-	anthropicPath := "/" + config.G.AgentAnthropicListenURL
-	openaiPath := "/" + config.G.AgentOpenAIListenURL
+	anthropicPath := "/" + cfg.AgentAnthropicListenURL
+	openaiPath := "/" + cfg.AgentOpenAIListenURL
 	mux.HandleFunc(anthropicPath+"/", anthropicProxyHandler)
 	mux.HandleFunc(openaiPath+"/", openAIProxyHandler)
 	mux.HandleFunc(anthropicPath, anthropicProxyHandler)
@@ -51,10 +51,10 @@ func StartAIProxyService(cfg *config.LsmTokensServerConfig) {
 		return
 	}
 
-	mux := buildAIProxyMux(config.G)
+	mux := buildAIProxyMux(cfg)
 
 	// HTTP 代理服务（保留原有 agentListenPort）
-	port := config.G.AgentListenPort
+	port := cfg.AgentListenPort
 	aiProxyServer = &http.Server{
 		Addr:         ":" + strconv.Itoa(port),
 		Handler:      mux,
@@ -66,7 +66,7 @@ func StartAIProxyService(cfg *config.LsmTokensServerConfig) {
 	logger.Printf("[PROXY] AI proxy server listening on :%d (HTTP)", port)
 	logger.Printf("[PROXY] =====================================================================")
 	logger.Printf("[PROXY] AI 代理端口迁移提示：旧工程 LsmHttpAgent 监听 29000/29003；")
-	logger.Printf("[PROXY] 本工程 LsmTokensServer 监听 %d(HTTP) / %d(HTTPS)。", port, config.G.AgentHttpsListenPort)
+	logger.Printf("[PROXY] 本工程 LsmTokensServer 监听 %d(HTTP) / %d(HTTPS)。", port, cfg.AgentHttpsListenPort)
 	logger.Printf("[PROXY] 如果客户端 Claude Code / Cursor / Cline 等仍配置旧端口，请改为 %d。", port)
 	logger.Printf("[PROXY] =====================================================================")
 	go func() {
@@ -77,32 +77,32 @@ func StartAIProxyService(cfg *config.LsmTokensServerConfig) {
 
 	// HTTPS 代理服务（agentHttpsListenPort，复用同一 mux/handler）
 	// config.validateAndFixConfig 已保证 AgentHttpsListenPort > 0，此处仅做冲突/证书兜底。
-	if config.G.AgentHttpsListenPort <= 0 {
+	if cfg.AgentHttpsListenPort <= 0 {
 		logger.Printf("[PROXY] AI proxy HTTPS disabled (agentHttpsListenPort <= 0)")
 		return
 	}
-	httpsPort := config.G.AgentHttpsListenPort
+	httpsPort := cfg.AgentHttpsListenPort
 	if httpsPort == port {
 		logger.Printf("[PROXY] AgentHttpsListenPort (%d) equals AgentListenPort, skip HTTPS proxy", httpsPort)
 		return
 	}
 
 	// 证书路径解析（支持相对路径，与 UserWeb HTTPS 一致）
-	certFile, err := config.ResolvePath(config.G.UserWebCertFile)
+	certFile, err := config.ResolvePath(cfg.UserWebCertFile)
 	if err != nil {
 		logger.Printf("[PROXY] Failed to resolve cert file path: %v, using original", err)
-		certFile = config.G.UserWebCertFile
+		certFile = cfg.UserWebCertFile
 	}
-	keyFile, err := config.ResolvePath(config.G.UserWebKeyFile)
+	keyFile, err := config.ResolvePath(cfg.UserWebKeyFile)
 	if err != nil {
 		logger.Printf("[PROXY] Failed to resolve key file path: %v, using original", err)
-		keyFile = config.G.UserWebKeyFile
+		keyFile = cfg.UserWebKeyFile
 	}
 	// v2.0.73+ 迁移修复：
 	// ResolvePath 基于可执行文件目录（ServerGo/）解析，但证书通常在工程根目录（../server.crt）。
 	// 首次查找失败时回退到可执行文件父目录（工程根目录）查找，保持与旧工程行为一致。
 	if _, err := os.Stat(certFile); err != nil {
-		parentCert := filepath.Join(filepath.Dir(os.Args[0]), "..", config.G.UserWebCertFile)
+		parentCert := filepath.Join(filepath.Dir(os.Args[0]), "..", cfg.UserWebCertFile)
 		if _, err2 := os.Stat(parentCert); err2 == nil {
 			certFile = parentCert
 		} else {
@@ -111,7 +111,7 @@ func StartAIProxyService(cfg *config.LsmTokensServerConfig) {
 		}
 	}
 	if _, err := os.Stat(keyFile); err != nil {
-		parentKey := filepath.Join(filepath.Dir(os.Args[0]), "..", config.G.UserWebKeyFile)
+		parentKey := filepath.Join(filepath.Dir(os.Args[0]), "..", cfg.UserWebKeyFile)
 		if _, err2 := os.Stat(parentKey); err2 == nil {
 			keyFile = parentKey
 		} else {

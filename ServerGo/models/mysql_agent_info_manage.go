@@ -172,9 +172,7 @@ func MigrateAgentToolColumns(subTableNum int) error {
 		tableName := GetAgentHttpTableName("", "", i+1)
 
 		// 检查并添加 agent_tool_name 字段
-		var columnExist bool
-		database.DB.Raw("SHOW COLUMNS FROM " + tableName + " LIKE 'agent_tool_name'").Scan(&columnExist)
-		if !columnExist {
+		if !tableHasColumn(tableName, "agent_tool_name") {
 			logger.Printf("[database.DB] Adding column agent_tool_name to %s", tableName)
 			err := database.DB.Exec("ALTER TABLE " + tableName + " ADD COLUMN agent_tool_name VARCHAR(64) DEFAULT ''").Error
 			if err != nil {
@@ -186,8 +184,7 @@ func MigrateAgentToolColumns(subTableNum int) error {
 		}
 
 		// 检查并添加 agent_tool_info 字段
-		database.DB.Raw("SHOW COLUMNS FROM " + tableName + " LIKE 'agent_tool_info'").Scan(&columnExist)
-		if !columnExist {
+		if !tableHasColumn(tableName, "agent_tool_info") {
 			logger.Printf("[database.DB] Adding column agent_tool_info to %s", tableName)
 			err := database.DB.Exec("ALTER TABLE " + tableName + " ADD COLUMN agent_tool_info VARCHAR(512) DEFAULT ''").Error
 			if err != nil {
@@ -198,4 +195,27 @@ func MigrateAgentToolColumns(subTableNum int) error {
 
 	logger.Printf("[database.DB] Agent tool columns migration completed")
 	return nil
+}
+
+// tableHasColumn 判断指定分表是否已存在某列。
+//
+// 通过 information_schema.COLUMNS 精确判断（MySQL/MariaDB）。
+// 旧实现用 `SHOW COLUMNS ... LIKE ?` 返回 6 列却 Scan 进单个 bool，导致
+// "expected 6 destination arguments in Scan, not 1" 恒失败、列检查恒为 false，
+// 每次启动都重复 ALTER（Duplicate column name 噪音）且索引分支永不执行。
+// SQLite 无 information_schema 时查询报错 → 按「列不存在」处理（返回 false），
+// 语义与旧版对齐但不引入 MySQL 噪音。
+func tableHasColumn(tableName, columnName string) bool {
+	if database.DB == nil {
+		return false
+	}
+	var count int64
+	err := database.DB.Raw(
+		"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+		tableName, columnName,
+	).Scan(&count).Error
+	if err != nil {
+		return false
+	}
+	return count > 0
 }
