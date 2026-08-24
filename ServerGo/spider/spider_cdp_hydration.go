@@ -257,8 +257,7 @@ func probeAndWaitForHydration(ctx context.Context, maxWaitMs int) *HydrationDiag
 		}
 		s, err := probeHydrationOnce(ctx)
 		if err != nil {
-			// 单次探测失败：记 warning 但继续
-			last.ConsoleLines = last.ConsoleLines // 保留上次
+			// 单次探测失败：保留上次快照，继续下一轮
 			continue
 		}
 		last = s

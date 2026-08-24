@@ -45,7 +45,7 @@ LsmTokensServer/
 ├── ClientWeb/      前端 React + Vite
 ├── docs/           本文档目录
 ├── rebuild_restart_app.sh    一键编译前后端+部署+运行
-├── tools/          本地私有工具（go-web-debug-tool，git 忽略）
+├── go-web-debug-tool/   本地私有调试子模块（git 忽略）
 ├── LsmTokensServer.conf.example   配置模板（开源可提交）
 ├── LsmTokensServer.conf           实际配置（含敏感信息，git 忽略）
 └── server.crt / server.key        TLS 证书（git 忽略）
@@ -54,7 +54,7 @@ LsmTokensServer/
 ## 快速开始
 
 ```bash
-# 编译前后端（迁移期默认 build-only，不启动不占端口）
+# 编译前后端（不启动、不占端口）
 ./rebuild_restart_app.sh --build-only
 
 # 仅编译后端

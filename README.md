@@ -18,13 +18,13 @@ LsmTokensServer/
 ## 快速开始
 
 ```bash
-# 编译前后端（迁移期默认 build-only，不启动不占端口）
+# 编译前后端（不启动、不占端口）
 ./rebuild_restart_app.sh --build-only
 
 # 仅编译后端
 ./rebuild_restart_app.sh --build-only --skip-web
 
-# 全量启动（使用 LsmTokensServer.conf 中的端口；当前为 40000 段不与旧服务冲突）
+# 全量启动（使用 LsmTokensServer.conf 中的端口 9101/29000/29001/29002/29003）
 ./rebuild_restart_app.sh
 ```
 

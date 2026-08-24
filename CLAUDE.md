@@ -17,23 +17,23 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 ### 2.1 编译 / 启动必须走脚本
 所有涉及编译、启动、重启的操作，必须通过 `./rebuild_restart_app.sh`：
 ```bash
-./rebuild_restart_app.sh --build-only           # 仅编译（迁移期默认推荐）
+./rebuild_restart_app.sh --build-only           # 仅编译（不启动、不占端口）
 ./rebuild_restart_app.sh --build-only --skip-web # 仅编译后端
-./rebuild_restart_app.sh                        # 完整重启（切换时才用）
+./rebuild_restart_app.sh                        # 完整重启（编译 + 运行）
 ```
 禁止直接 `go build` 或 `nohup ./LsmTokensServer`。
 
 ### 2.2 旧服务不得停止
 - **旧服务 `/usr/local/LsmHttpAgent` 必须持续运行**，在 AI 代理端口（29000/29003）全量验证通过并人工确认之前，禁止停止。
-- 新程序迁移期默认 `--build-only` 模式，不占用生产端口。
-- 端口与旧版一致（9101/29000/29001/29002/29003），切换需在同一时间窗口完成。
+- 端口规范：管理端 `9101`、AI 代理 `29000`（HTTP）/`29003`（HTTPS）、用户端 `29001`、MCP `29002`、爬虫 CDP `9222`。
+- 新旧服务并行期间需保持端口不冲突（旧服务已偏移至 19000 段，新服务占用规范端口）。
 
 ### 2.3 敏感信息严禁提交
 以下文件/目录绝不能提交到 git（已在 `.gitignore` 中）：
 - `LsmTokensServer.conf`（MySQL 密码、openClaw API Key 等）
 - `server.crt` / `server.key`（TLS 证书私钥）
 - `*.log`、二进制、pid 文件
-- `tools/go-web-debug-tool/`（本地私有子模块）
+- `go-web-debug-tool/`（本地私有子模块）
 - `python-generate-image-tool/`（本地私有 Python SDK，仅供本机 Agent 加载，不入库）
 - `node_modules/`、`ClientWeb/dist/`
 

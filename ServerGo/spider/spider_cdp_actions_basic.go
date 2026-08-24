@@ -362,7 +362,9 @@ func actionScroll(session *SpiderSession, action *InteractiveAction, req *Spider
 				return err
 			}
 			var st struct {
-				Y, Max, VH int `json:"y,max,vh"`
+				Y   int `json:"y"`
+				Max int `json:"max"`
+				VH  int `json:"vh"`
 			}
 			_ = json.Unmarshal([]byte(info), &st)
 			hasMore = st.Y+st.VH < st.Max
@@ -412,7 +414,9 @@ func actionScrollTo(session *SpiderSession, action *InteractiveAction, req *Spid
 			return err
 		}
 		var st struct {
-			Y, Max, VH int `json:"y,max,vh"`
+			Y   int `json:"y"`
+			Max int `json:"max"`
+			VH  int `json:"vh"`
 		}
 		_ = json.Unmarshal([]byte(info), &st)
 		hasMore = st.Y+st.VH < st.Max
