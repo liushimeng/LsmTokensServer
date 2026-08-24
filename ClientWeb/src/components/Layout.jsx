@@ -1,46 +1,41 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { logout } from '../shared/auth'
+import { loadSidebarCollapsed, saveSidebarCollapsed } from '../shared/navConfig'
 import ToolbarDialogs from './ToolbarDialogs'
+import SideNav from './SideNav'
 
-// 导航定义（与旧 server_web_common_nav_admin.go / nav_user.go 一致）
-const ADMIN_NAV = [
-  ['Home', '首页'],
-  ['UserManage', '用户管理'],
-  ['DstEndPointManage', '端点管理'],
-  ['AIRouteManage', '路由管理'],
-  ['ModelInfo', '模型信息'],
-  ['AgentInfo', 'Agent信息'],
-  ['ProtocolConvertAnalyzer', '协议分析器'],
-  ['SpiderDataSource', '爬虫数据源'],
-  ['SpiderDailyInfo', '爬虫日报'],
-  ['CleanupReport', '清理报告'],
-]
-const USER_NAV = [
-  ['Home', '首页'],
-  ['ChatAnalysis', '对话分析'],
-  ['ChatAnalysisTotal', '汇总统计'],
-  ['ChatAnalysisSession', '会话分析'],
-  ['ChatAnalysisTask', '任务分析'],
-  ['ChatDialog', '对话查看'],
-  ['AIRouteManage', '路由管理'],
-  ['ModelInfo', '模型信息'],
-  ['AgentInfo', 'Agent信息'],
-  ['ProtocolConvertAnalyzer', '协议分析器'],
-  ['DstEndPointManage', '端点管理'],
-  ['SpiderDataSource', '爬虫数据源'],
-  ['SpiderDailyInfo', '爬虫日报'],
-  ['CleanupReport', '清理报告'],
-]
+const MOBILE_MQ = '(max-width: 860px)'
+
+function useIsMobile() {
+  const [mobile, setMobile] = useState(() => window.matchMedia(MOBILE_MQ).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(MOBILE_MQ)
+    const onChange = (e) => setMobile(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return mobile
+}
 
 export default function Layout({ route, userInfo, children }) {
   const isAdmin = !!(userInfo && userInfo.isAdmin)
-  const nav = isAdmin ? ADMIN_NAV : USER_NAV
+  const role = isAdmin ? 'admin' : 'user'
+  const isMobile = useIsMobile()
+  // 移动端：抽屉开关；桌面端：整侧栏折叠（localStorage 记忆）
   const [menuOpen, setMenuOpen] = useState(false)
+  const [navCollapsed, setNavCollapsed] = useState(loadSidebarCollapsed)
+
+  const onToggle = () => {
+    if (isMobile) { setMenuOpen(!menuOpen); return }
+    setNavCollapsed((v) => { saveSidebarCollapsed(!v); return !v })
+  }
+
   return (
     <div className="layout">
       <header className="layout-header">
         <div className="header-left">
-          <button className="menu-toggle" onClick={() => setMenuOpen(!menuOpen)}>☰</button>
+          <button className="menu-toggle" onClick={onToggle}>☰</button>
+          <img className="app-logo" src="/logo-48.png" alt="logo" />
           <span className="app-title">LsmTokensServer</span>
           <span className="app-role">{isAdmin ? '管理端' : '用户端'}</span>
         </div>
@@ -55,13 +50,15 @@ export default function Layout({ route, userInfo, children }) {
         </div>
       </header>
       <div className="layout-body">
-        <nav className={'layout-nav' + (menuOpen ? ' open' : '')}>
-          {nav.map(([key, label]) => (
-            <a key={key} href={`#/${key}`}
-               className={'nav-item' + (route === key ? ' active' : '')}
-               onClick={() => setMenuOpen(false)}>{label}</a>
-          ))}
-        </nav>
+        <SideNav
+          role={role}
+          route={route}
+          collapsed={!isMobile && navCollapsed}
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+          onExpand={() => { saveSidebarCollapsed(false); setNavCollapsed(false) }}
+        />
+        {isMobile && menuOpen && <div className="nav-mask" onClick={() => setMenuOpen(false)} />}
         <main className="layout-main">{children}</main>
       </div>
     </div>
