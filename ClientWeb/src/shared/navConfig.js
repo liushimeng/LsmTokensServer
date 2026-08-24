@@ -22,7 +22,7 @@ export const NAV_TREES = {
       { key: 'ChatAnalysisTotal', label: '汇总统计' },
       { key: 'ChatAnalysisSession', label: '会话分析' },
       { key: 'ChatAnalysisTask', label: '任务分析' },
-      { key: 'ChatDialog', label: '对话查看' },
+      { key: 'ChatDialog', label: '对话' },
     ]},
     { id: 'spider', label: '爬虫与数据', icon: '🕷', items: [
       { key: 'SpiderDataSource', label: '爬虫数据源' },
@@ -39,7 +39,7 @@ export const NAV_TREES = {
       { key: 'ChatAnalysisTotal', label: '汇总统计' },
       { key: 'ChatAnalysisSession', label: '会话分析' },
       { key: 'ChatAnalysisTask', label: '任务分析' },
-      { key: 'ChatDialog', label: '对话查看' },
+      { key: 'ChatDialog', label: '对话' },
     ]},
     { id: 'route-model', label: '路由与模型', icon: '🧭', items: [
       { key: 'AIRouteManage', label: '路由管理' },
