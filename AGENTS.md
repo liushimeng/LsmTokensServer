@@ -1,0 +1,39 @@
+# AGENTS.md - LsmTokensServer AI Agent 通用入口
+
+> 面向 Claude Code、Codex、OpenCode、pi、Hermes、OpenClaw 等 AI Agent 工具的高密度上下文。
+> 工具特定说明见 [`CLAUDE.md`](CLAUDE.md)；完整源码索引见 [`docs/开发指南/AGENT_INDEX.md`](docs/开发指南/AGENT_INDEX.md)。
+
+## 项目概述
+
+LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，由私有项目 LsmHttpAgent 迁移重构，前后端分离：
+
+- **后端 Go**（`ServerGo/`）：按业务域分包，核心能力：
+  - AI 代理转发（29000 HTTP / 29003 HTTPS），支持 Anthropic / OpenAI 协议互转
+  - 用户端 REST（29001）+ 管理端 REST（9101），JWT 鉴权
+  - MCP 爬虫服务（29002，CDP + 反爬）
+  - WebSocket 推送（ChatTotal 流式统计）
+- **前端 React + Vite**（`ClientWeb/`）：管理端 + 用户端两个 SPA
+- **文档**（`docs/`）：迁移方案 + 开发指南 + 协议分析 + MCP 定义
+
+## Agent 必读
+
+1. **不要停止旧服务**：`/usr/local/LsmHttpAgent` 必须持续运行，AI 代理端口全量验证前严禁停。
+2. **编译/启动走脚本**：`./scripts/rebuild_restart_app.sh`，迁移期用 `--build-only`。
+3. **敏感信息不提交**：`LsmTokensServer.conf`、证书、日志、tools/ 私有子模块。
+4. **中文 commit**：分阶段提交，格式 `阶段X：说明`。
+
+## 快速定位
+
+- 迁移设计：[`docs/项目迁移解决方案/00-总体迁移方案.md`](docs/项目迁移解决方案/00-总体迁移方案.md)
+- 源码索引：[`docs/开发指南/AGENT_INDEX.md`](docs/开发指南/AGENT_INDEX.md)
+- 代码结构对照：见 [`CLAUDE.md`](CLAUDE.md) §3
+- 开发 SOP：[`docs/开发指南/Developer_SOP.md`](docs/开发指南/Developer_SOP.md)
+- 知识库首页：[`docs/INDEX.md`](docs/INDEX.md)
+
+## 代理可用的工具集（本工程提供的能力）
+
+- 代码读写：修改后端 Go 模块 / 前端 React 页面
+- 测试运行：`cd ServerGo && go test ./...` 或 `cd ClientWeb && npm run test`
+- 编译部署：`./scripts/rebuild_restart_app.sh`
+- git 操作：提交、推送（双远端：gitcode + gitee）
+

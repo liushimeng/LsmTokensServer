@@ -1,6 +1,12 @@
 # AGENT_INDEX.md - LsmTokensServer 源码索引
 
 > 本文档为所有 AI Agent 工具（Claude Code、Kilo Code、OpenCode、pi、OpenClaw 等）提供源码文件快速定位。
+> **开源版结构说明**：
+> 旧 LsmHttpAgent 为根目录平铺 `.go` 文件；新工程按模块分包（见 [docs/INDEX.md](../INDEX.md)）。
+> 本文保留旧版文件名说明，便于对照检索；新路径按 [迁移方案](项目迁移解决方案/00-总体迁移方案.md) 映射。
+> 新版源码根目录：`ServerGo/`（`config/` `logger/` `database/` `models/` `proxy/` `protocol/` `api/` `spider/` `websocket/` `system/` `webserver/`）。
+> 新版前端：`ClientWeb/`（React + Vite）。
+
 > 修改代码前，请先阅读与你所用工具对应的上下文文件（[`AGENT.md`](AGENT.md) / [`CLAUDE.md`](CLAUDE.md) / [`KILO.md`](KILO.md)）。
 
 ## 文档导航
