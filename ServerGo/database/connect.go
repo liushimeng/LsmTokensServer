@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -47,7 +48,7 @@ func StatsDB() (*gorm.DB, context.CancelFunc) {
 // 避免高频代理写库 + 2 万行统计查询把 LsmTokensServer.log 撑爆、拖慢 IO。
 func buildGormConfig() *gorm.Config {
 	newLogger := gormLogger.New(
-		nil, // Writer 置空：gormLogger.Warn 级别下不额外输出
+		log.New(io.Discard, "", 0), // 用空 Printf-Writer：gormLogger.Warn 级别下不额外输出
 		gormLogger.Config{
 			SlowThreshold:             2 * time.Second, // 仅 >2s 的查询打慢查询日志
 			LogLevel:                  gormLogger.Warn, // 只打 warning / error，不逐条打印 SQL
