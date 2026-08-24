@@ -327,3 +327,8 @@ func Printf(format string, v ...interface{}) {
 	}
 	logger.Printf(format, v...)
 }
+
+// Ready 返回底层 logger 是否已初始化（供调用方做兜底判断）
+func Ready() bool {
+	return logger != nil
+}

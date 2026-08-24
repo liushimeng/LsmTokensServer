@@ -892,3 +892,6 @@ func DefaultConfig() *LsmTokensServerConfig {
 
 // G 运行时全局配置（由 main 在 LoadConfig 后赋值，替代旧工程 package main 的全局 cfg）
 var G *LsmTokensServerConfig
+
+// APP_VERSION 应用版本（自旧工程 main.go 迁移）
+const APP_VERSION = "v2.0.73"

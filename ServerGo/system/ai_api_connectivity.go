@@ -19,13 +19,13 @@ import (
 var htmlTagRe = regexp.MustCompile(`<[^>]+>`)
 
 // stripHTMLTags 去除字符串中的 HTML 标签
-func stripHTMLTags(s string) string {
+func StripHTMLTags(s string) string {
 	return htmlTagRe.ReplaceAllString(s, "")
 }
 
 // cleanErrorBody 清理错误响应体：去除 HTML 标签、合并空白、截断过长内容
 func cleanErrorBody(body string) string {
-	s := stripHTMLTags(body)
+	s := StripHTMLTags(body)
 	s = strings.TrimSpace(s)
 	// 合并连续空白
 	fields := strings.Fields(s)

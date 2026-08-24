@@ -37,7 +37,7 @@ import (
 // 背景：v2.0.56/57 的「All」聚合函数对 8 张分表逐张 Find(&rows) 一次性拉全表
 // （生产 160K+ 行），造成内存尖峰 + 单条语句长停顿 + 最坏被 25s ctx 取消返回空。
 // 本 helper 把「单张分表扫描」改为按主键 id 的 keyset 分页批量扫描，每批固定
-// statsShardScanBatch 行，回调 fn 增量聚合，内存有界。
+// StatsShardScanBatch 行，回调 fn 增量聚合，内存有界。
 //
 // 为什么用 keyset(id > lastID) 而非 LIMIT/OFFSET：
 //   - 并发插入不重不漏（新行 id 更大，落在后续批次；旧行只读一次）
@@ -47,9 +47,9 @@ import (
 // 一致性语义：扫描过程中新插入的行会被后续批次纳入（结果为「近似当前」）。
 // 对统计看板可接受（无需快照事务）。
 
-// statsShardScanBatch 单批扫描行数。Plan 校验推荐 5000（内存 ~320KB/批，
+// StatsShardScanBatch 单批扫描行数。Plan 校验推荐 5000（内存 ~320KB/批，
 // 20K 行/分表约 4 批）；范围 [2000, 10000]。
-const statsShardScanBatch = 5000
+const StatsShardScanBatch = 5000
 
 // shardScanRow 分页扫描通用行结构。仅小字段（禁含 8 个 longtext，v2.0.42 白名单）。
 // 各聚合函数按需读取所需列（未 SELECT 的列保持零值）。
@@ -70,7 +70,7 @@ type shardScanRow struct {
 //
 // days<=0 省略 created_at 过滤；days>0 加 created_at >= cutoff（Go 端计算，避免 SQL 方言差异）。
 //
-// 终止条件：某批返回行数 < statsShardScanBatch，或 ctx 取消。
+// 终止条件：某批返回行数 < StatsShardScanBatch，或 ctx 取消。
 // ctx.Canceled / DeadlineExceeded 直接返回该 err（调用方按现有约定 break 返回部分结果）。
 //
 // GORM 链复用陷阱：每批必须从 sdb.Table(tableName) 新建链，禁止跨批复用同一 *gorm.DB
@@ -95,14 +95,14 @@ func scanShardPaged(sdb *gorm.DB, tableName, selectCols string, days int, fn fun
 		if filterTime {
 			q = q.Where("created_at >= ?", cutoff)
 		}
-		if err := q.Order("id ASC").Limit(statsShardScanBatch).Find(&rows).Error; err != nil {
+		if err := q.Order("id ASC").Limit(StatsShardScanBatch).Find(&rows).Error; err != nil {
 			return err
 		}
 		if len(rows) > 0 {
 			fn(rows)
 			lastID = rows[len(rows)-1].ID
 		}
-		if len(rows) < statsShardScanBatch {
+		if len(rows) < StatsShardScanBatch {
 			// 短批 → 该分表扫描结束
 			break
 		}
@@ -132,7 +132,7 @@ func GetTimeRangeStatsAll(subTableNum int, days int) ([]TimeRangeStat, error) {
 	}
 
 	granularity := "hour"
-	if days > timeStatsMaxDays {
+	if days > TimeStatsMaxDays {
 		granularity = "day"
 	}
 	goFmt := "2006-01-02 15:04"

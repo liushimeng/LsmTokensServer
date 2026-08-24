@@ -988,13 +988,13 @@ func GetIDRangeStats(userName, modelName string, subTableNum int, rangeSize int)
 	return stats, nil
 }
 
-// timeStatsMaxDays 时间调用次数统计的"按小时聚合"上限天数；
+// TimeStatsMaxDays 时间调用次数统计的"按小时聚合"上限天数；
 // 超过此阈值时自动降级为"按天聚合"，避免返回过多桶（days=90 时 2160 桶）导致网络传输和前端渲染卡死。
 // 前端 brush 选区生成报告仍可按 hour/day 颗粒度拉（走 GetTokensRangeReport），仅影响首屏概览柱图。
-const timeStatsMaxDays = 7
+const TimeStatsMaxDays = 7
 
 // GetTimeRangeStats 查询指定用户按小时/天的调用统计
-// v2.0.48: days > timeStatsMaxDays(7) 时自动降级为"按天聚合"，减少返回桶数。
+// v2.0.48: days > TimeStatsMaxDays(7) 时自动降级为"按天聚合"，减少返回桶数。
 // v2.0.52: 改用 Go 端聚合 — 旧实现 SELECT DATE_FORMAT(created_at)+COUNT GROUP BY
 //
 //	会让 MySQL 走 "Using temporary; Using filesort"，对 7 天 20K 行场景有 GROUP BY 开销。
@@ -1013,7 +1013,7 @@ func GetTimeRangeStats(userName, modelName string, subTableNum int, days int) ([
 
 	// 按实际颗粒度拼缓存 key，避免小时/天不同颗粒度碰撞
 	granularity := "hour"
-	if days > timeStatsMaxDays {
+	if days > TimeStatsMaxDays {
 		granularity = "day"
 	}
 	cacheKey := makeStatsCacheKey("GetTimeRangeStats", userName, modelName, subTableNum, days, granularity)
