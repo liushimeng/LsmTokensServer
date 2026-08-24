@@ -511,7 +511,7 @@ func invalidateDstEndPointCache(id uint64) {
 }
 
 // addUserToCache 将用户添加到缓存
-func addUserToCache(u *TAgentHttpUserInfo) {
+func AddUserToCache(u *TAgentHttpUserInfo) {
 	agentCache.mu.Lock()
 	defer agentCache.mu.Unlock()
 	agentCache.users[u.ID] = u
@@ -519,7 +519,7 @@ func addUserToCache(u *TAgentHttpUserInfo) {
 }
 
 // addModelToCache 将模型添加到缓存
-func addModelToCache(m *TAgentHttpUserModelInfo) {
+func AddModelToCache(m *TAgentHttpUserModelInfo) {
 	agentCache.mu.Lock()
 	defer agentCache.mu.Unlock()
 	agentCache.models[m.ID] = m

@@ -227,7 +227,7 @@ func NormalizeDstEndPointAlgorithmTypeList(endpointList, algorithmList string) (
 	return FormatDstEndPointAlgorithmTypeList(types), types, nil
 }
 
-func getDstEndPointAlgorithmTypeName(algorithmType int) string {
+func GetDstEndPointAlgorithmTypeName(algorithmType int) string {
 	switch algorithmType {
 	case DstEndPointAlgorithmType_ProtocolConverter:
 		return "协议转换器"

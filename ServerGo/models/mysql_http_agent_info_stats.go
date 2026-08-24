@@ -92,7 +92,7 @@ func GetAgentInfoUsageStatsAll(subTableNum int, days int) (*AgentInfoUsageSummar
 		return nil, nil, fmt.Errorf("database not initialized")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = clampStatsDays(days)
+	days = ClampStatsDays(days)
 
 	acc := make(map[string]*agentInfoUsageAccumulator)
 	for i := 0; i < subTableNum; i++ {
@@ -154,7 +154,7 @@ func GetAgentInfoUsageStatsByUser(userName string, modelNames []string, subTable
 		return nil, nil, fmt.Errorf("user_name is required")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = clampStatsDays(days)
+	days = ClampStatsDays(days)
 
 	// 一个用户的多个模型可能落在同一张分表，需对 (表名) 去重，避免重复累加。
 	seenTable := make(map[string]struct{})

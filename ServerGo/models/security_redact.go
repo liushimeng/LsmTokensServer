@@ -9,12 +9,12 @@ import (
 
 var authorizationBearerHeaderTextRegexp = regexp.MustCompile(`(?im)(^|[\r\n])([ \t]*Authorization[ \t]*:[ \t]*Bearer[ \t]+)([^\s\r\n]+)`)
 
-const authorizationBearerAPIKeyMask = "************************"
+const AuthorizationBearerAPIKeyMask = "************************"
 
 // redactAuthorizationBearerHeaderText 将文本形式的请求头中的 Bearer Token 掩码
-func redactAuthorizationBearerHeaderText(headers string) string {
+func RedactAuthorizationBearerHeaderText(headers string) string {
 	if headers == "" {
 		return ""
 	}
-	return authorizationBearerHeaderTextRegexp.ReplaceAllString(headers, "${1}${2}"+authorizationBearerAPIKeyMask)
+	return authorizationBearerHeaderTextRegexp.ReplaceAllString(headers, "${1}${2}"+AuthorizationBearerAPIKeyMask)
 }

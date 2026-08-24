@@ -40,9 +40,9 @@ type TokensReportStat struct {
 	Series       []TokensRangeStat   `json:"series"`
 }
 
-// normalizeTokensGranularity 校验并规范化颗粒度字符串（minute/hour/day）
+// NormalizeTokensGranularity 校验并规范化颗粒度字符串（minute/hour/day）
 // 仅接受 minute / hour / day，其它值统一回落到 "day"
-func normalizeTokensGranularity(g string) string {
+func NormalizeTokensGranularity(g string) string {
 	switch strings.ToLower(strings.TrimSpace(g)) {
 	case "minute":
 		return "minute"
@@ -315,7 +315,7 @@ func GetTokensRangeReport(userName, modelName string, subTableNum int, start, en
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	granularity = normalizeTokensGranularity(granularity)
+	granularity = NormalizeTokensGranularity(granularity)
 
 	tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
 	if !isValidTableName(tableName) {

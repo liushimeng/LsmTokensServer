@@ -1,2 +1,2 @@
-// Package proxy - LsmTokensServer 后端模块（迁移中，见 docs/项目迁移解决方案/）
+// Package proxy - LsmTokensServer 后端模块
 package proxy

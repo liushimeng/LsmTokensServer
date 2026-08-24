@@ -869,14 +869,14 @@ var chatAnalysisDetailFieldColumns = map[string]string{
 	"response_src_protocol_body": "response_src_protocol_body",
 }
 
-func resolveChatAnalysisDetailColumn(field string) (string, bool) {
+func ResolveChatAnalysisDetailColumn(field string) (string, bool) {
 	column, ok := chatAnalysisDetailFieldColumns[field]
 	return column, ok
 }
 
 // GetAgentHttpTransactionFieldByID 根据 ID 只查询一个详情字段（用于列表页点击展开后按需加载）。
 func GetAgentHttpTransactionFieldByID(userName, modelName string, subTableNum int, id uint64, field string) (string, error) {
-	column, ok := resolveChatAnalysisDetailColumn(field)
+	column, ok := ResolveChatAnalysisDetailColumn(field)
 	if !ok {
 		return "", fmt.Errorf("unsupported detail field: %s", field)
 	}
@@ -902,7 +902,7 @@ func GetAgentHttpTransactionFieldByID(userName, modelName string, subTableNum in
 		return "", fmt.Errorf("record not found (id=%d)", id)
 	}
 	if field == "request_headers" || field == "response_headers" {
-		value = redactAuthorizationBearerHeaderText(value)
+		value = RedactAuthorizationBearerHeaderText(value)
 	}
 	return value, nil
 }
@@ -927,8 +927,8 @@ func GetAgentHttpTransactionByID(userName, modelName string, subTableNum int, id
 		}
 		return nil, fmt.Errorf("failed to query record: %w", result.Error)
 	}
-	record.RequestHeaders = redactAuthorizationBearerHeaderText(record.RequestHeaders)
-	record.RequestSrcProtocolHeaders = redactAuthorizationBearerHeaderText(record.RequestSrcProtocolHeaders)
+	record.RequestHeaders = RedactAuthorizationBearerHeaderText(record.RequestHeaders)
+	record.RequestSrcProtocolHeaders = RedactAuthorizationBearerHeaderText(record.RequestSrcProtocolHeaders)
 	return &record, nil
 }
 
@@ -1408,7 +1408,7 @@ func finalizeModelInfoUsageStats(acc map[string]*modelInfoUsageAccumulator) (*Mo
 }
 
 // clampStatsDays 把 days 限制到合法范围（0=无限制；>0 限制到 365）
-func clampStatsDays(days int) int {
+func ClampStatsDays(days int) int {
 	if days < 0 {
 		return 0
 	}
@@ -1435,7 +1435,7 @@ func resolveStatsSpanCutoff(span int) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	if span > 0 {
-		days := clampStatsDays(span)
+		days := ClampStatsDays(span)
 		if days <= 0 {
 			return time.Time{}, false
 		}
@@ -1456,7 +1456,7 @@ func widerStatsSpan(a, b int) int {
 	}
 	spanHours := func(s int) int {
 		if s > 0 {
-			return clampStatsDays(s) * 24
+			return ClampStatsDays(s) * 24
 		}
 		h := -s
 		if h > maxStatsSpanHours {
@@ -1504,7 +1504,7 @@ func GetDailyStatsAll(subTableNum int, days int) ([]DailyStat, error) {
 		return []DailyStat{}, nil
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = clampStatsDays(days)
+	days = ClampStatsDays(days)
 
 	acc := make(map[string]*DailyStat)
 	for i := 0; i < subTableNum; i++ {
@@ -1576,7 +1576,7 @@ func GetModelInfoUsageStatsAll(subTableNum int, days int) (*ModelInfoUsageSummar
 		return nil, nil, fmt.Errorf("database not initialized")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = clampStatsDays(days)
+	days = ClampStatsDays(days)
 
 	acc := make(map[string]*modelInfoUsageAccumulator)
 	for i := 0; i < subTableNum; i++ {
@@ -1641,7 +1641,7 @@ func GetModelInfoUsageStatsByUser(userName string, modelNames []string, subTable
 		return nil, nil, fmt.Errorf("user_name is required")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = clampStatsDays(days)
+	days = ClampStatsDays(days)
 
 	seen := make(map[string]struct{})
 	acc := make(map[string]*modelInfoUsageAccumulator)
@@ -1705,7 +1705,7 @@ func GetModelInfoUsageStatsByUserDstModel(userName string, modelNames []string, 
 		return nil, nil, fmt.Errorf("user_name is required")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = clampStatsDays(days)
+	days = ClampStatsDays(days)
 
 	seen := make(map[string]struct{})
 	acc := make(map[string]*modelInfoUsageAccumulator)
@@ -1967,7 +1967,7 @@ func DeleteAgentHttpTransactions(userName, modelName string, subTableNum int, id
 //
 // 解析规则：从左到右扫描首个连续三位数字 token；找不到或数字不合法返回 0。
 // 调用方约定 0 = 无记录/未使用/不可解析（与 LastResponseStatusCode 的零值语义一致）。
-func parseResponseStatusCode(s string) int {
+func ParseResponseStatusCode(s string) int {
 	if s == "" {
 		return 0
 	}
@@ -2035,7 +2035,7 @@ type lastRecordRow struct {
 //     记录（"暂无成功/失败记录"语义，非故障）。
 //   - err: 仅在 SQL 执行失败时返回；err != nil 时 row 应整体丢弃（Batch 上层
 //     标记 LastSuccessFailed/LastFailureFailed=true）。
-func getRouteLastRecordByStatus(userName, modelName string, protocolType int, subTableNum int, success bool) (lastRecordRow, error) {
+func GetRouteLastRecordByStatus(userName, modelName string, protocolType int, subTableNum int, success bool) (lastRecordRow, error) {
 	if database.DB == nil {
 		return lastRecordRow{}, fmt.Errorf("database not initialized")
 	}
@@ -2229,8 +2229,8 @@ func BatchGetRouteLastUsedTimes(items []RouteBatchStatItem, subTableNum int) map
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if len(items) > batchRouteStatsKeyPairMax {
-		items = items[:batchRouteStatsKeyPairMax]
+	if len(items) > BatchRouteStatsKeyPairMax {
+		items = items[:BatchRouteStatsKeyPairMax]
 	}
 
 	// 去重：同一 (user, model, protocol) 只查一次，结果回填给所有关联路由。
@@ -2296,7 +2296,7 @@ func BatchGetRouteLastUsedTimes(items []RouteBatchStatItem, subTableNum int) map
 			// 均走 ORDER BY id DESC LIMIT 1 快路径。两轮共享同一连接并发槽，
 			// 总开销约 2×16ms；结果进 5 分钟缓存，重复刷新零 database.DB 压力。
 			out := luOut{key: k}
-			sRow, sErr := getRouteLastRecordByStatus(k.user, k.model, k.protocol, subTableNum, true)
+			sRow, sErr := GetRouteLastRecordByStatus(k.user, k.model, k.protocol, subTableNum, true)
 			if sErr != nil {
 				logger.Printf("[AIRouteManage] last success record query failed for %s/%s pt=%d: %v",
 					k.user, k.model, k.protocol, sErr)
@@ -2304,7 +2304,7 @@ func BatchGetRouteLastUsedTimes(items []RouteBatchStatItem, subTableNum int) map
 			} else {
 				out.successRow = sRow
 			}
-			fRow, fErr := getRouteLastRecordByStatus(k.user, k.model, k.protocol, subTableNum, false)
+			fRow, fErr := GetRouteLastRecordByStatus(k.user, k.model, k.protocol, subTableNum, false)
 			if fErr != nil {
 				logger.Printf("[AIRouteManage] last failure record query failed for %s/%s pt=%d: %v",
 					k.user, k.model, k.protocol, fErr)
@@ -2332,7 +2332,7 @@ func BatchGetRouteLastUsedTimes(items []RouteBatchStatItem, subTableNum int) map
 				r.LastSuccessAt = out.successRow.CreatedAt
 				r.LastSuccessAtUnix = out.successRow.CreatedAt.Unix()
 				r.LastSuccessStatus = out.successRow.ResponseStatus
-				r.LastSuccessStatusCode = parseResponseStatusCode(out.successRow.ResponseStatus)
+				r.LastSuccessStatusCode = ParseResponseStatusCode(out.successRow.ResponseStatus)
 				r.LastSuccessDstModelName = out.successRow.DstModelName
 				r.LastSuccessHasRecord = true
 			}
@@ -2342,7 +2342,7 @@ func BatchGetRouteLastUsedTimes(items []RouteBatchStatItem, subTableNum int) map
 				r.LastFailureAt = out.failureRow.CreatedAt
 				r.LastFailureAtUnix = out.failureRow.CreatedAt.Unix()
 				r.LastFailureStatus = out.failureRow.ResponseStatus
-				r.LastFailureStatusCode = parseResponseStatusCode(out.failureRow.ResponseStatus)
+				r.LastFailureStatusCode = ParseResponseStatusCode(out.failureRow.ResponseStatus)
 				r.LastFailureDstModelName = out.failureRow.DstModelName
 				r.LastFailureHasRecord = true
 			}
@@ -2378,7 +2378,7 @@ func BatchGetRouteLastUsedTimes(items []RouteBatchStatItem, subTableNum int) map
 //   - user_name / model_name / protocol_type / days 全部走参数化占位符 (?)，
 //     不直接拼到 SQL 字符串。
 
-const batchRouteStatsKeyPairMax = 2000
+const BatchRouteStatsKeyPairMax = 2000
 
 // RouteBatchStatKey 批量统计时客户端传入的一次查询需求标识
 type RouteBatchStatKey struct {
@@ -2416,7 +2416,7 @@ type RouteBatchStatResult struct {
 
 	// v2.0.71：最后成功记录（response_status 2xx）相关字段。
 	//
-	// 由 BatchGetRouteLastUsedTimes 内层 getRouteLastRecordByStatus(success=true)
+	// 由 BatchGetRouteLastUsedTimes 内层 GetRouteLastRecordByStatus(success=true)
 	// 单 SQL 同时 SELECT created_at, response_status, dst_model_name —— 三者严格
 	// 来自同一条记录，禁止另起一轮独立查询导致串行不一致。
 	//
@@ -2435,7 +2435,7 @@ type RouteBatchStatResult struct {
 
 	// v2.0.71：最后失败记录（response_status 非 2xx，含空串=传输层错误）相关字段。
 	// 字段语义与 LastSuccess* 完全同构，数据源为
-	// getRouteLastRecordByStatus(success=false)（response_status NOT LIKE '2%'）。
+	// GetRouteLastRecordByStatus(success=false)（response_status NOT LIKE '2%'）。
 	LastFailureAt           time.Time `json:"last_failure_at,omitempty"`             // 最后一条非 2xx 响应记录的时间
 	LastFailureAtUnix       int64     `json:"last_failure_at_unix,omitempty"`        // 同上，unix 秒
 	LastFailureStatus       string    `json:"last_failure_status,omitempty"`         // 原始 ResponseStatus 文本，如 "500 Internal Server Error"；空串表示传输层错误
@@ -2466,8 +2466,8 @@ func BatchGetRouteStatsByRouteIDs(items []RouteBatchStatItem, subTableNum int) (
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if len(items) > batchRouteStatsKeyPairMax {
-		items = items[:batchRouteStatsKeyPairMax]
+	if len(items) > BatchRouteStatsKeyPairMax {
+		items = items[:BatchRouteStatsKeyPairMax]
 	}
 
 	// pairKey: 子表名 + (user_name, model_name) 笛卡尔配对 —— 作为 GROUP BY 聚合的输入条件

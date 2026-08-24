@@ -353,7 +353,7 @@ func SaveSpiderDailyInfo(info *TSpiderDailyInfo) error {
 	}
 
 	// v2.0.24：写入后失效列表缓存，避免 2 分钟 TTL 窗口内前端看到不一致状态。
-	invalidateSpiderDailyInfoCacheByPrefix("spider_daily_info:")
+	InvalidateSpiderDailyInfoCacheByPrefix("spider_daily_info:")
 
 	return nil
 }
@@ -394,7 +394,7 @@ func CleanupEmptySpiderDailyInfos() (int64, error) {
 	if result.RowsAffected > 0 {
 		logger.Printf("[SPIDER-CLEANUP] removed %d empty daily info records", result.RowsAffected)
 		// 清理后失效缓存，避免前端 2 分钟内继续看到已删记录。
-		invalidateSpiderDailyInfoCacheByPrefix("spider_daily_info:")
+		InvalidateSpiderDailyInfoCacheByPrefix("spider_daily_info:")
 	}
 
 	return result.RowsAffected, nil
@@ -438,7 +438,7 @@ func QuerySpiderDailyInfo(
 	}
 
 	// 获取可访问的数据源ID列表（一次查询）
-	dsIDs, err := getAccessibleDataSourceIDs(userID, isAdmin)
+	dsIDs, err := GetAccessibleDataSourceIDs(userID, isAdmin)
 	if err != nil || len(dsIDs) == 0 {
 		return []TSpiderDailyInfo{}, 0, nil
 	}
@@ -534,7 +534,7 @@ func DeleteSpiderDailyInfo(id uint64) error {
 		return fmt.Errorf("删除信息失败: %w", err)
 	}
 
-	invalidateSpiderDailyInfoCacheByPrefix("spider_daily_info:")
+	InvalidateSpiderDailyInfoCacheByPrefix("spider_daily_info:")
 
 	return nil
 }
@@ -710,7 +710,7 @@ func GetDistinctSpiderPlatforms(userID uint64, isAdmin bool) ([]string, error) {
 // ============================================================================
 
 // getAccessibleDataSourceIDs 获取用户可访问的数据源ID列表（优化版本）
-func getAccessibleDataSourceIDs(userID uint64, isAdmin bool) ([]uint64, error) {
+func GetAccessibleDataSourceIDs(userID uint64, isAdmin bool) ([]uint64, error) {
 	// 先尝试从缓存获取
 	cachedList := GetCachedSpiderDataSourcesList()
 	if len(cachedList) > 0 {
@@ -840,7 +840,7 @@ func invalidateSpiderDailyInfoCache(key string) {
 }
 
 // invalidateSpiderDailyInfoCacheByPrefix 按前缀使缓存失效（用于数据写入后批量清除）
-func invalidateSpiderDailyInfoCacheByPrefix(prefix string) {
+func InvalidateSpiderDailyInfoCacheByPrefix(prefix string) {
 	spiderDailyInfoCache.mu.Lock()
 	defer spiderDailyInfoCache.mu.Unlock()
 

@@ -58,7 +58,7 @@ type ModelNameUsageStat struct {
 // ctx 取消安全：context.Canceled / DeadlineExceeded 直接返回，不当作 error。
 func GetModelNameUsageStatsByRange(subTableNum int, days int) ([]ModelNameUsageStat, error) {
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = clampStatsDays(days)
+	days = ClampStatsDays(days)
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -275,7 +275,7 @@ func GetDstModelUsageStatsByUserModel(userName, modelName string, subTableNum in
 		return nil, fmt.Errorf("GetDstModelUsageStatsByUserModel: user_name 与 model_name 都必须非空")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = clampStatsDays(days)
+	days = ClampStatsDays(days)
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()

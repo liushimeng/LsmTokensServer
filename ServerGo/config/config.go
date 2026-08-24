@@ -889,3 +889,6 @@ func tryProxyScheme(s string) bool {
 func DefaultConfig() *LsmTokensServerConfig {
 	return getDefaultConfig()
 }
+
+// G 运行时全局配置（由 main 在 LoadConfig 后赋值，替代旧工程 package main 的全局 cfg）
+var G *LsmTokensServerConfig

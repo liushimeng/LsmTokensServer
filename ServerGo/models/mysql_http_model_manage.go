@@ -96,7 +96,7 @@ func AddUserModel(item *TAgentHttpUserModelInfo) error {
 		return fmt.Errorf("failed to create user model: %w", err)
 	}
 
-	addModelToCache(item)
+	AddModelToCache(item)
 	logger.Printf("[database.DB] Added user model: %s (api_key prefix: %s...)", item.ModelName, item.APIKey[:8])
 
 	// 记录用户操作日志（复用前面已查询的 user 变量）
@@ -151,7 +151,7 @@ func UpdateUserModel(item *TAgentHttpUserModelInfo) error {
 	// 重新加载模型到缓存，确保代理热路径立即生效
 	updatedModel, err := GetUserModelByID(item.ID)
 	if err == nil {
-		addModelToCache(updatedModel)
+		AddModelToCache(updatedModel)
 	}
 
 	logger.Printf("[database.DB] Updated user model (id=%d): %s", item.ID, item.ModelName)

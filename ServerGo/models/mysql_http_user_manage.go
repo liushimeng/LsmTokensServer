@@ -130,7 +130,7 @@ func AddUser(item *TAgentHttpUserInfo) error {
 		return fmt.Errorf("failed to create user: %w", err)
 	}
 
-	addUserToCache(item)
+	AddUserToCache(item)
 	logger.Printf("[database.DB] Added user: %s", item.UserName)
 
 	// 记录用户操作日志（管理员操作）
@@ -216,12 +216,12 @@ func UpdateUser(item *TAgentHttpUserInfo) error {
 	// 重新加载用户到缓存，确保代理热路径立即生效
 	updatedUser, err := GetUserByID(item.ID)
 	if err == nil {
-		addUserToCache(updatedUser)
+		AddUserToCache(updatedUser)
 		// 重新加载该用户的所有模型到缓存（更新 modelsByUserModel 索引）
 		models, err := GetUserModelsByUserID(item.ID)
 		if err == nil {
 			for i := range models {
-				addModelToCache(&models[i])
+				AddModelToCache(&models[i])
 			}
 		}
 	}
