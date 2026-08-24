@@ -1,0 +1,34 @@
+# ===== 敏感信息（禁止提交）=====
+LsmTokensServer.conf
+*.conf
+!LsmTokensServer.conf.example
+server.crt
+server.key
+*.pem
+*.p12
+
+# ===== Go =====
+ServerGo/LsmTokensServer
+ServerGo/LsmTokensServer.exe
+*.test
+*.out
+vendor/
+
+# ===== 日志与运行时 =====
+*.log
+*.pid
+*.tmp
+
+# ===== 前端 =====
+node_modules/
+ClientWeb/dist/
+ClientWeb/node_modules/
+*.local
+
+# ===== IDE / 编辑器 =====
+.vscode/
+.idea/
+.claude/
+.kilo/
+.DS_Store
+EOF
