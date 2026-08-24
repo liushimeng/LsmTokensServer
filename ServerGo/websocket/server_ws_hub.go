@@ -31,7 +31,7 @@ type wsHub struct {
 	upgrader websocket.Upgrader
 }
 
-// wsConn 单个 WS 连接（生命周期 = chatAnalysisTotalWSHandle 一次调用）
+// wsConn 单个 WS 连接（生命周期 = ChatAnalysisTotalWSHandle 一次调用）
 type wsConn struct {
 	hub        *wsHub
 	ws         *websocket.Conn

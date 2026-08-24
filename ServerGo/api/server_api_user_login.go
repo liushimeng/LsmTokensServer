@@ -87,6 +87,11 @@ var (
 )
 
 // getClientIP 获取客户端 IP
+// GetClientIP 导出（webserver 安全中间件跨包使用）
+func GetClientIP(r *http.Request) string {
+	return getClientIP(r)
+}
+
 func getClientIP(r *http.Request) string {
 	ip := r.Header.Get("X-Forwarded-For")
 	if ip == "" {

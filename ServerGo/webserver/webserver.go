@@ -11,8 +11,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 	"strings"
 
+	"github.com/lishimeng/LsmTokensServer/api"
 	"github.com/lishimeng/LsmTokensServer/config"
 	"github.com/lishimeng/LsmTokensServer/logger"
 )
@@ -69,8 +71,7 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-// RegisterAPIRoutes 挂载后端 REST API 路由（阶段5 按旧版路径逐步补齐）
-// 目前提供健康检查；API 处理器来自 api 包。
+// RegisterAPIRoutes 挂载健康检查（阶段5：其余路由见 buildManagerMux / buildUserMux）
 func RegisterAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -78,41 +79,57 @@ func RegisterAPIRoutes(mux *http.ServeMux) {
 	})
 }
 
-// buildWebMux 构造 Web 端口公共 mux：API + SPA 静态资源
-func buildWebMux() (*http.ServeMux, error) {
-	mux := http.NewServeMux()
-	RegisterAPIRoutes(mux)
+// mountSPA 在 mux 上挂载前端静态资源（找不到 dist 时仅记日志，API 不受影响）
+func mountSPA(mux *http.ServeMux) {
 	dist, err := clientWebDist()
 	if err != nil {
 		logger.Printf("[WEB] Warning: %v, Web UI unavailable (API only)", err)
-	} else {
-		mux.Handle("/", &spaFileServer{root: http.Dir(dist)})
-		logger.Printf("[WEB] Serving ClientWeb dist: %s", dist)
-	}
-	return mux, nil
-}
-
-// StartManagerWebServer 启动管理员 Web 服务（管理后台，默认 9101）
-func StartManagerWebServer(cfg *config.LsmTokensServerConfig) {
-	mux, err := buildWebMux()
-	if err != nil {
-		logger.Printf("[ERROR] Manager web init failed: %v", err)
 		return
 	}
+	mux.Handle("/", &spaFileServer{root: http.Dir(dist)})
+	logger.Printf("[WEB] Serving ClientWeb dist: %s", dist)
+}
+
+// buildManagerMux 构造管理端 mux：管理 API + SPA（安全链在 Start 时套上）
+func buildManagerMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	RegisterAPIRoutes(mux)
+	api.RegisterManagerAPIRoutes(mux)
+	mountSPA(mux)
+	return mux
+}
+
+// buildUserMux 构造用户端 mux：用户 API（含登录）+ SPA（鉴权中间件在 Start 时套上）
+func buildUserMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	RegisterAPIRoutes(mux)
+	api.RegisterUserAPIRoutes(mux)
+	mountSPA(mux)
+	return mux
+}
+
+// StartManagerWebServer 启动管理员 Web 服务（管理后台，默认 49101）
+func StartManagerWebServer(cfg *config.LsmTokensServerConfig) {
+	mux := buildManagerMux()
 	addr := fmt.Sprintf(":%d", cfg.ManagerWebListenPort)
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      ManagerSecurityChain(mux),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 120 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
 	logger.Printf("[WEB] Manager Web listening on http://localhost:%d/", cfg.ManagerWebListenPort)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := server.ListenAndServe(); err != nil {
 		logger.Printf("[ERROR] Manager Web server failed: %v", err)
 	}
 }
 
-// StartUserWebServer 启动用户 Web 服务（用户门户，默认 29001，支持 HTTPS）
+// StartUserWebServer 启动用户 Web 服务（用户门户，默认 42901，支持 HTTPS）
+// 与旧版一致：UserSecurityChain(userAuthMiddleware(mux))
 func StartUserWebServer(cfg *config.LsmTokensServerConfig) {
-	mux, err := buildWebMux()
-	if err != nil {
-		logger.Printf("[ERROR] User web init failed: %v", err)
-		return
-	}
+	mux := buildUserMux()
+	handler := UserSecurityChain(api.UserAuthMiddleware(mux))
 	addr := fmt.Sprintf(":%d", cfg.UserWebListenPort)
 	if cfg.UserWebUseHTTPS {
 		certFile := cfg.UserWebCertFile
@@ -133,13 +150,13 @@ func StartUserWebServer(cfg *config.LsmTokensServerConfig) {
 			}
 		}
 		logger.Printf("[WEB] User Web listening on https://localhost:%d/", cfg.UserWebListenPort)
-		if err := http.ListenAndServeTLS(addr, certFile, keyFile, mux); err != nil {
+		if err := http.ListenAndServeTLS(addr, certFile, keyFile, handler); err != nil {
 			logger.Printf("[ERROR] User Web server failed: %v", err)
 		}
 		return
 	}
 	logger.Printf("[WEB] User Web listening on http://localhost:%d/", cfg.UserWebListenPort)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		logger.Printf("[ERROR] User Web server failed: %v", err)
 	}
 }

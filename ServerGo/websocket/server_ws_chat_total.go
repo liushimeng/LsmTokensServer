@@ -92,8 +92,8 @@ type wsPongFrame struct {
 	RequestID string `json:"request_id,omitempty"`
 }
 
-// chatAnalysisTotalWSHandle HTTP handler 入口；注册到 /ChatAnalysisTotalWS
-func chatAnalysisTotalWSHandle(w http.ResponseWriter, r *http.Request) {
+// ChatAnalysisTotalWSHandle HTTP handler 入口；注册到 /ChatAnalysisTotalWS
+func ChatAnalysisTotalWSHandle(w http.ResponseWriter, r *http.Request) {
 	// Hub 超限 → 503；upgrader 自身失败也会写响应（400/426 等），我们直接 return
 	if chatStatsHub.count() >= int64(config.CHAT_STATS_MAX_CONNS) {
 		http.Error(w, "chat stats hub is full", http.StatusServiceUnavailable)
