@@ -520,7 +520,12 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 			"/CaptchaGenerate":    true,
 			"/UserLoginInterface": true,
 		}
-		if len(r.URL.Path) > 8 && r.URL.Path[:8] == "/static/" {
+		// 放行静态资源（旧版 /static/ + Vite 构建产物 /assets/ + 根目录静态文件）
+		if len(r.URL.Path) > 8 && (r.URL.Path[:8] == "/static/" || r.URL.Path[:8] == "/assets/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if isStaticFile(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -557,4 +562,15 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isStaticFile 判断是否为 SPA 静态资源文件（favicon、JS、CSS、图片等）
+func isStaticFile(path string) bool {
+	exts := []string{".svg", ".png", ".ico", ".js", ".css", ".woff", ".woff2", ".ttf", ".map"}
+	for _, ext := range exts {
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+	return false
 }

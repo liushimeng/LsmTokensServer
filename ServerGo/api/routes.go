@@ -42,6 +42,10 @@ func RegisterManagerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ModelInfoManageInterface", modelInfoManageInterfaceHandle)
 	mux.HandleFunc("/AgentInfoInterface", agentInfoInterfaceHandle)
 
+	// 管理端首页信息（无登录态，返回管理员标识）
+	mux.HandleFunc("/UserInfoInterface", managerInfoInterfaceHandle)
+	mux.HandleFunc("/UserModelListInterface", managerModelListInterfaceHandle)
+
 	// 系统信息
 	mux.HandleFunc("/BuildTimeLogInterface", buildTimeLogInterfaceHandle)
 	mux.HandleFunc("/GitInfoInterface", gitInfoInterfaceHandle)

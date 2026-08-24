@@ -222,6 +222,23 @@ func GetUserModelsByUserID(userID uint64) ([]TAgentHttpUserModelInfo, error) {
 	return items, nil
 }
 
+// GetAllUserModels 获取所有用户的所有模型（管理端用）
+func GetAllUserModels() ([]TAgentHttpUserModelInfo, error) {
+	if database.DB == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	var items []TAgentHttpUserModelInfo
+	err := database.DB.Table(AgentHttpUserModelInfoTableName).
+		Where("deleted_at IS NULL").
+		Order("id ASC").
+		Find(&items).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all user models: %w", err)
+	}
+	return items, nil
+}
+
 // GetUserModelByUserIDAndModelName 根据用户ID和模型名称查询用户模型
 func GetUserModelByUserIDAndModelName(userID uint64, modelName string) (*TAgentHttpUserModelInfo, error) {
 	if database.DB == nil {

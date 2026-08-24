@@ -20,15 +20,27 @@ import ChatDialog from './pages/ChatDialog'
 
 // 页面注册表：key = hash 路由名
 const PAGES = {
-  Home, UserManage, DstEndPointManage, AIRouteManage, ModelInfo, AgentInfo,
+  Login, Home, UserManage, DstEndPointManage, AIRouteManage, ModelInfo, AgentInfo,
   ProtocolConvertAnalyzer, SpiderDataSource, SpiderDailyInfo, CleanupReport,
   ChatAnalysis, ChatAnalysisTotal, ChatAnalysisSession, ChatAnalysisTask, ChatDialog,
 }
 
+// 路径别名映射：兼容服务端 redirect（如 /UserLogin → Login）
+const PATH_ALIASES = {
+  UserLogin: 'Login',
+  ManagerHome: 'Home',
+}
+
 function currentRoute() {
-  const h = window.location.hash.replace(/^#\/?/, '')
+  let h = window.location.hash.replace(/^#\/?/, '')
+  // 兼容直接通过 pathname 访问（如 /UserManage → 视为对应页面）
+  if (!h) {
+    h = window.location.pathname.replace(/^\//, '')
+  }
   const [path, query] = h.split('?')
-  return { path: PAGES[path] ? path : 'Home', query: new URLSearchParams(query || '') }
+  // 路径别名归一化
+  const normalized = PATH_ALIASES[path] || path
+  return { path: PAGES[normalized] ? normalized : 'Home', query: new URLSearchParams(query || '') }
 }
 
 export default function App() {
@@ -46,9 +58,17 @@ export default function App() {
     get('UserInfoInterface')
       .then((d) => setUserInfo({ ...(d && d.data) || d, loaded: true }))
       .catch(() => { window.location.hash = '#/Login' })
-    // 角色探测：管理端 mux 独有 /UserManageInterface，用户端 404 → user 角色
-    fetch('UserManageInterface', { credentials: 'include' })
-      .then((r) => setUserInfo((u) => ({ ...u, isAdmin: r.status !== 404 })))
+    // 角色探测：管理端 mux 独有 UserManageInterface POST 接口，用户端 404 → user 角色
+    fetch('UserManageInterface', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list' }),
+    })
+      .then((r) => {
+        const ct = r.headers.get('content-type') || ''
+        setUserInfo((u) => ({ ...u, isAdmin: r.status !== 404 && ct.includes('json') }))
+      })
       .catch(() => setUserInfo((u) => ({ ...u, isAdmin: false })))
   }, [route.path])
 
