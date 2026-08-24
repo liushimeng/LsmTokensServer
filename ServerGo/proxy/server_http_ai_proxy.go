@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -92,13 +93,26 @@ func StartAIProxyService(cfg *config.LsmTokensServerConfig) {
 		logger.Printf("[PROXY] Failed to resolve key file path: %v, using original", err)
 		keyFile = config.G.UserWebKeyFile
 	}
+	// v2.0.73+ 迁移修复：
+	// ResolvePath 基于可执行文件目录（ServerGo/）解析，但证书通常在工程根目录（../server.crt）。
+	// 首次查找失败时回退到可执行文件父目录（工程根目录）查找，保持与旧工程行为一致。
 	if _, err := os.Stat(certFile); err != nil {
-		logger.Printf("[PROXY] HTTPS proxy cert file not found (%s), skip HTTPS proxy on :%d: %v", certFile, httpsPort, err)
-		return
+		parentCert := filepath.Join(filepath.Dir(os.Args[0]), "..", config.G.UserWebCertFile)
+		if _, err2 := os.Stat(parentCert); err2 == nil {
+			certFile = parentCert
+		} else {
+			logger.Printf("[PROXY] HTTPS proxy cert file not found (%s), skip HTTPS proxy on :%d: %v", certFile, httpsPort, err)
+			return
+		}
 	}
 	if _, err := os.Stat(keyFile); err != nil {
-		logger.Printf("[PROXY] HTTPS proxy key file not found (%s), skip HTTPS proxy on :%d: %v", keyFile, httpsPort, err)
-		return
+		parentKey := filepath.Join(filepath.Dir(os.Args[0]), "..", config.G.UserWebKeyFile)
+		if _, err2 := os.Stat(parentKey); err2 == nil {
+			keyFile = parentKey
+		} else {
+			logger.Printf("[PROXY] HTTPS proxy key file not found (%s), skip HTTPS proxy on :%d: %v", keyFile, httpsPort, err)
+			return
+		}
 	}
 
 	aiProxyTLSServer = &http.Server{

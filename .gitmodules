@@ -1,0 +1,4 @@
+[submodule "go-web-debug-tool"]
+	path = go-web-debug-tool
+	url = /usr/local/git-local-repos/go-web-debug-tool.git
+	branch = main

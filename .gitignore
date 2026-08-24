@@ -33,4 +33,4 @@ ClientWeb/node_modules/
 .DS_Store
 
 # ===== 本地子模块/工具（不上传开源仓库）=====
-tools/go-web-debug-tool/
+go-web-debug-tool/

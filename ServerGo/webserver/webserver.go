@@ -117,12 +117,18 @@ func StartUserWebServer(cfg *config.LsmTokensServerConfig) {
 	if cfg.UserWebUseHTTPS {
 		certFile := cfg.UserWebCertFile
 		keyFile := cfg.UserWebKeyFile
-		// 相对路径基于配置文件目录/工作目录解析
+		// 相对路径查找顺序：① 可执行文件目录 ② 可执行文件父目录（工程根目录） ③ 当前工作目录
 		if !filepath.IsAbs(certFile) {
 			if dir, err := config.GetExecutableDir(); err == nil {
 				if _, err := os.Stat(filepath.Join(dir, certFile)); err == nil {
 					certFile = filepath.Join(dir, certFile)
 					keyFile = filepath.Join(dir, keyFile)
+				} else {
+					parentCert := filepath.Join(dir, "..", certFile)
+					if _, err := os.Stat(parentCert); err == nil {
+						certFile = parentCert
+						keyFile = filepath.Join(dir, "..", keyFile)
+					}
 				}
 			}
 		}
