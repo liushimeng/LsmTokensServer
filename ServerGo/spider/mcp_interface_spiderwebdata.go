@@ -45,7 +45,7 @@ import (
 // 调用方行为：Agent 收到 503 server_busy 后等待 2-5s 重试，而非无限挂着
 // 等 HTTP:000，避免整个 mux 调度饿死。
 //
-// `initMCPHandlerSem(cap int)` 在 main.go 启动钩子调用；运行期不重建 channel
+// `InitMCPHandlerSem(cap int)` 在 main.go 启动钩子调用；运行期不重建 channel
 // （避免 send on closed channel 风险）。
 
 var (
@@ -56,7 +56,7 @@ var (
 
 // initMCPHandlerSem 初始化 MCP handler 并发限流 channel（一次性）。
 // cap=0 时使用默认 8；负数或 nil channel 视为未初始化。
-func initMCPHandlerSem(cap int) {
+func InitMCPHandlerSem(cap int) {
 	mcpHandlerSemOnce.Do(func() {
 		if cap <= 0 {
 			cap = 8

@@ -31,4 +31,6 @@ ClientWeb/node_modules/
 .claude/
 .kilo/
 .DS_Store
-EOF
+
+# ===== 本地子模块/工具（不上传开源仓库）=====
+tools/go-web-debug-tool/

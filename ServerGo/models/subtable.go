@@ -147,7 +147,7 @@ func formatBackfillBytes(n uint64) string {
 }
 
 // setAppContext 注入主进程 context（由 main.go 调用）。
-func setAppContext(ctx context.Context) {
+func SetAppContext(ctx context.Context) {
 	appContextMu.Lock()
 	defer appContextMu.Unlock()
 	appContext = ctx

@@ -34,7 +34,7 @@ var statsCache StatsCache
 const statsCacheTTL = 5 * time.Minute
 
 // initStatsCache 初始化统计缓存
-func initStatsCache() {
+func InitStatsCache() {
 	statsCache.mu.Lock()
 	defer statsCache.mu.Unlock()
 	statsCache.entries = make(map[string]*StatsCacheEntry)
