@@ -85,7 +85,7 @@ export default function ChatAnalysisTask({ route }) {
       {error ? <div className="alert alert-error">{error}</div> : null}
 
       {data ? (
-        <div className="card-grid">
+        <div className="card-grid kpi-grid">
           <div className="card"><h3>总任务数</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.total_tasks)}</div></div>
           <div className="card"><h3>流式 / 非流式</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.stream_count)} / {fmtNum(data.non_stream_count)}</div></div>
           <div className="card"><h3>含系统提示词</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.has_system_prompt)}</div></div>

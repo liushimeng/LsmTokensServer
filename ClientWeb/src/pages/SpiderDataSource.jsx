@@ -145,7 +145,7 @@ export default function SpiderDataSource() {
     ) },
     { key: 'updated_at', title: '更新时间', render: (v) => fmtTime(v) },
     { key: 'op', title: '操作', render: (_, rec) => (
-      <span style={{ display: 'flex', gap: 4 }}>
+      <span className="op-btns" style={{ display: 'flex', gap: 4 }}>
         <button className="btn btn-sm btn-primary" onClick={() => openCrawl(rec)}
                 disabled={rec.status !== 1} title={rec.status !== 1 ? '数据源已禁用' : ''}>爬取</button>
         <button className="btn btn-sm" onClick={() => setEditing({
@@ -211,10 +211,10 @@ export default function SpiderDataSource() {
                  </button>
                </>}>
           <label className="field"><span>提示词（支持 {'{{.DataSourceID}}'} 占位符）</span>
-            <textarea rows={8} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+            <textarea className="crawl-prompt" rows={8} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
           </label>
           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>爬取输出：</div>
-          <div className="log-box">{logText || '（尚未开始）'}</div>
+          <div className="log-box crawl-log" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}>{logText || '（尚未开始）'}</div>
         </Modal>
       )}
     </div>

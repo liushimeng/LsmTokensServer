@@ -354,7 +354,7 @@ export default function ProtocolConvertAnalyzer() {
             </div>
             {testMsg ? <div className="alert alert-ok">{testMsg}</div> : null}
             {testErr ? <div className="alert alert-error">{testErr}</div> : null}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(420px, 100%), 1fr))', gap: 16 }}>
               {/* 输入面板 */}
               <div className="card" style={{ margin: 0 }}>
                 <h3>输入（可手动编辑或从记录载入）</h3>

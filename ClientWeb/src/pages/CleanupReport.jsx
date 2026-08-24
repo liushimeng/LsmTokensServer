@@ -44,7 +44,7 @@ function statusTag(status, errMsg) {
   if (s === 'failed') return (
     <span>
       <span style={{ background: '#fee2e2', color: '#991b1b', padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>失败</span>
-      {String(errMsg || '').indexOf('下次运行自动继续') >= 0 ? <span title="服务将自动重试，无需人工干预" style={{ marginLeft: 4, fontSize: 12, color: '#6b7280' }}>⏳ 自动重试中</span> : null}
+      {String(errMsg || '').indexOf('下次运行自动继续') >= 0 ? <span style={{ marginLeft: 4, fontSize: 12, color: '#6b7280' }}>⏳ 自动重试中（服务将自动重试，无需人工干预）</span> : null}
     </span>
   )
   return <span>{s}</span>
@@ -57,6 +57,7 @@ export default function CleanupReport() {
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState({})
   const [daily, setDaily] = useState([])
+  const [selDay, setSelDay] = useState(null) // 趋势图选中日期（触屏点击替代 hover title）
   const [state, setState] = useState(null)
   const [tables, setTables] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -158,7 +159,7 @@ export default function CleanupReport() {
 
       {!loading && !error ? (
         <>
-          <div className="card-grid">
+          <div className="card-grid kpi-grid">
             <div className="card"><h3>累计删除条数</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.total_deleted_rows)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>所有清理任务累计</div></div>
             <div className="card"><h3>累计释放磁盘空间</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtBytes(summary.total_freed_bytes)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>来自 information_schema.DATA_FREE</div></div>
             <div className="card"><h3>累计回收 Tokens</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.total_tokens_all)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>输入 + 输出 累计</div></div>
@@ -168,14 +169,21 @@ export default function CleanupReport() {
           {daily.length ? (
             <div className="card">
               <h3>每日清理趋势</h3>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 160 }}>
+              <div className="trend-chart" style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 160 }}>
                 {daily.map((s) => (
-                  <div key={s.date} title={`${s.date}：删除 ${fmt(s.deleted_rows)} 条 / 释放 ${fmtBytes(s.freed_bytes)} / Tokens ${fmt(s.deleted_tokens_all)}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
-                    <div style={{ width: '70%', height: Math.max(2, ((s.deleted_rows || 0) / dailyMax) * 130), background: 'linear-gradient(180deg,#34d399,#10b981)', borderRadius: 4 }} />
-                    <span style={{ fontSize: 10, color: '#888', whiteSpace: 'nowrap' }}>{(s.date || '').substring(5)}</span>
+                  <div key={s.date} className="trend-bar"
+                       onClick={() => setSelDay(selDay === s.date ? null : s.date)}
+                       title={`${s.date}：删除 ${fmt(s.deleted_rows)} 条 / 释放 ${fmtBytes(s.freed_bytes)} / Tokens ${fmt(s.deleted_tokens_all)}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end', cursor: 'pointer' }}>
+                    <div style={{ width: '70%', height: Math.max(2, ((s.deleted_rows || 0) / dailyMax) * 130), background: selDay === s.date ? 'linear-gradient(180deg,#059669,#047857)' : 'linear-gradient(180deg,#34d399,#10b981)', borderRadius: 4 }} />
+                    <span style={{ fontSize: 10, color: selDay === s.date ? '#047857' : '#888', whiteSpace: 'nowrap' }}>{(s.date || '').substring(5)}</span>
                   </div>
                 ))}
               </div>
+              {selDay ? (
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
+                  {(() => { const s = daily.find((x) => x.date === selDay); return s ? `${s.date}：删除 ${fmt(s.deleted_rows)} 条 / 释放 ${fmtBytes(s.freed_bytes)} / Tokens ${fmt(s.deleted_tokens_all)}` : '' })()}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -185,7 +193,7 @@ export default function CleanupReport() {
               行数默认来自 information_schema.TABLES（估算值）。点击「精确计数」执行 COUNT(*)（25s 超时保护，超时回退近似值）。
             </div>
             {tables == null ? <div className="table-loading">加载中…</div> : !tables.length ? <div className="table-empty">暂无分表元数据。</div> : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(min(280px,100%),1fr))', gap: 12 }}>
                 {tables.map((e) => (
                   <div key={e.table_name} style={{ border: '1px solid #e5e7eb', borderRadius: 14, padding: 14 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>

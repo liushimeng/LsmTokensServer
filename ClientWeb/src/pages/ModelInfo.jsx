@@ -84,7 +84,7 @@ export default function ModelInfo(props) {
 
       {models.length ? (
         <>
-          <div className="card-grid">
+          <div className="card-grid kpi-grid">
             <div className="card"><h3>统计模型数</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.model_count)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>按目标模型聚合</div></div>
             <div className="card"><h3>全站调用次数</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.total_call_count)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>请求记录总量</div></div>
             <div className="card"><h3>全站 Tokens</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.tokens_all_size)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>输入 + 输出</div></div>

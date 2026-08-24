@@ -82,7 +82,7 @@ export default function ChatAnalysisSession({ route }) {
       {error ? <div className="alert alert-error">{error}</div> : null}
 
       {data ? (
-        <div className="card-grid">
+        <div className="card-grid kpi-grid">
           <div className="card"><h3>总会话数</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.total_sessions)}</div></div>
           <div className="card"><h3>总任务数</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.total_tasks)}</div></div>
           <div className="card"><h3>总请求数</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.total_requests)}</div></div>

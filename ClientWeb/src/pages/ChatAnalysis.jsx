@@ -242,7 +242,7 @@ export default function ChatAnalysis({ route }) {
 
       {detailRow ? (
         <Modal title={`对话详情 #${detailRow.id}`} width={860} onClose={() => setDetailRow(null)}>
-          <div className="toolbar" style={{ padding: '6px 10px' }}>
+          <div className="toolbar detail-tabs" style={{ padding: '6px 10px' }}>
             {DETAIL_FIELDS.map((f) => (
               <button key={f.key} className={`btn btn-sm${detailTab === f.key ? ' btn-primary' : ''}`}
                       onClick={() => openDetail(detailRow, f.key)}>{f.title}</button>

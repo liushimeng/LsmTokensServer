@@ -166,7 +166,7 @@ export default function ChatAnalysisTotal({ route }) {
       ) : null}
 
       {/* 维度 1：KPI 卡片 */}
-      <div className="card-grid">
+      <div className="card-grid kpi-grid">
         <div className="card">
           <h3>总请求数</h3>
           <div style={{ fontSize: 26, fontWeight: 700 }}>{kpi ? fmtNum(kpi.total_calls) : '-'}</div>

@@ -61,7 +61,7 @@ a { color: var(--primary); text-decoration: none; }
 .page-title { margin: 0 0 16px; font-size: 20px; }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
 .card h3 { margin: 0 0 12px; font-size: 15px; }
-.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; }
 .kv { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; margin: 0; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; word-break: break-all; }
 .tag-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -142,9 +142,107 @@ a { color: var(--primary); text-decoration: none; }
 .md-body code { background: #f0f3f7; border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
 .md-body pre code { background: none; padding: 0; }
 
+/* ===== 移动端适配（docs/Web页面手机端UI设计以及美化方案/00） ===== */
+
+/* 触控基础：去掉 iOS 点击蓝闪 */
+a, button, summary { -webkit-tap-highlight-color: transparent; }
+
+/* 顶栏工具按钮组：桌面一排平铺，移动端收进「⋯」下拉 */
+.header-tools { position: relative; display: flex; align-items: center; }
+.tools-list { display: flex; align-items: center; gap: 4px; }
+.tool-btn { color: #d1d5db; white-space: nowrap; }
+.tools-more { display: none; background: none; border: none; color: #fff; font-size: 20px; line-height: 1; padding: 8px 10px; cursor: pointer; border-radius: 6px; }
+.tools-more:hover { background: #374151; }
+.tools-close-mask { position: fixed; inset: 0; z-index: 25; }
+
 /* 移动端 */
 @media (max-width: 860px) {
-  .layout-nav { display: none; position: fixed; top: 52px; bottom: 0; z-index: 15; width: 200px; box-shadow: 4px 0 16px rgba(0,0,0,.12); }
+  .layout-nav { display: none; position: fixed; top: 52px; bottom: 0; z-index: 15; width: min(280px, 78vw); box-shadow: 4px 0 16px rgba(0,0,0,.12); }
   .layout-nav.open { display: block; }
+  /* 抽屉菜单触控命中区 ≥ 44px */
+  .layout-nav .nav-group-title { padding: 12px 14px; font-size: 14px; }
+  .layout-nav .nav-item { padding: 12px 14px 12px 42px; font-size: 14px; }
   .layout-main { padding: 12px; }
+  /* 工具按钮收进「⋯」 */
+  .tools-more { display: block; }
+  .tools-list { display: none; position: absolute; top: calc(100% + 14px); right: 0; flex-direction: column; align-items: stretch; gap: 0; background: var(--panel); border-radius: 10px; box-shadow: 0 10px 30px rgba(15,23,42,.25); padding: 6px; min-width: 148px; z-index: 30; }
+  .tools-list.open { display: flex; }
+  .tools-list .tool-btn { color: var(--text); text-align: left; padding: 10px 14px; border-radius: 6px; font-size: 14px; }
+  .tools-list .tool-btn:hover { background: #f0f3f7; }
+  /* 表格：保持横向滚动，收紧密度 + 滚动惯性 */
+  .table-wrap { -webkit-overflow-scrolling: touch; }
+  .data-table th, .data-table td { padding: 8px 10px; font-size: 12.5px; }
+  /* 头部右侧间距收紧 */
+  .header-right { gap: 4px; }
+  .user-chip { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* 手机（≤600px）：弹窗全屏、表格卡片化、表单堆叠 */
+@media (max-width: 600px) {
+  body { font-size: 14px; }
+  .app-title { display: none; }
+  .layout-main { padding: 12px 10px; }
+  .page-title { font-size: 18px; margin-bottom: 12px; }
+  .card { padding: 12px; border-radius: 10px; box-shadow: 0 1px 3px rgba(15,23,42,.06); }
+  .card-grid { gap: 12px; grid-template-columns: 1fr; }
+  .kv { grid-template-columns: 84px 1fr; }
+
+  /* 输入控件 ≥16px 防 iOS 聚焦放大，命中区 ≥40px */
+  .field input, .field select, .field textarea, .toolbar input, .toolbar select { font-size: 16px; min-height: 40px; }
+  .btn { min-height: 40px; padding: 8px 14px; }
+  .btn-sm { min-height: 34px; }
+  .btn:active { opacity: .85; }
+  /* 工具栏控件每行一个 */
+  .toolbar { padding: 10px 12px; gap: 8px; }
+  .toolbar input, .toolbar select { flex: 1 1 100%; }
+  /* 分页居中 */
+  .pager { justify-content: center; flex-wrap: wrap; }
+
+  /* 弹窗全屏 */
+  .modal-mask { padding: 0; align-items: stretch; }
+  .modal-box { max-width: none !important; width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .modal-body { padding: 14px; }
+  .modal-foot .btn { flex: 1; }
+
+  /* 表格卡片模式：行转卡片，列名靠 data-label */
+  .table-wrap.card-wrap { border: none; background: transparent; overflow-x: visible; }
+  .data-table.card-mode thead { display: none; }
+  .data-table.card-mode, .data-table.card-mode tbody { display: block; width: 100%; }
+  .data-table.card-mode tbody tr { display: block; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 1px 3px rgba(15,23,42,.06); margin-bottom: 10px; padding: 4px 12px; }
+  .data-table.card-mode td { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-bottom: 1px dashed var(--border); padding: 9px 0; white-space: normal; word-break: break-all; font-size: 13px; }
+  .data-table.card-mode td::before { content: attr(data-label); color: var(--muted); font-weight: 600; flex-shrink: 0; }
+  .data-table.card-mode td:last-child { border-bottom: none; }
+  .data-table.card-mode td.wrap { max-width: none; }
+
+  /* 登录页：窄屏卡片 + AI 生成背景图 */
+  .login-card { width: min(380px, 92vw); padding: 28px 22px; }
+  .login-page { background: linear-gradient(135deg, rgba(30,41,59,.82), rgba(15,23,42,.88)), url('/login-mobile-bg.png') center/cover no-repeat; }
+
+  /* KPI 统计卡 2×2 网格（07/08/11 文档） */
+  .card-grid.kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card-grid.kpi-grid .card h3 { font-size: 12px; margin-bottom: 6px; }
+
+  /* 清理报告趋势柱：超宽时横向滚动、每柱最小宽（11 文档） */
+  .trend-chart { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .trend-bar { flex: 1 0 18px !important; }
+  /* 对话详情弹窗 6 个字段 Tab 转 3 列网格（07 文档） */
+  .detail-tabs { display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+
+  /* 爬虫数据源：操作列 4 按钮 2×2；爬取弹窗 textarea 压低、日志框自适应（10 文档） */
+  .data-table.card-mode td .op-btns { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+  .crawl-prompt { min-height: 0 !important; height: 110px; }
+  .modal-body:has(.crawl-log) { display: flex; flex-direction: column; }
+  .crawl-log { max-height: none; flex: 1; min-height: 160px; }
+
+  /* 日志/代码框 */
+  .log-box { font-size: 11px; max-height: 55vh; }
+  .md-body pre { font-size: 12px; }
+
+  /* iOS 安全区 */
+  .layout-header { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+}
+
+/* 尊重系统减弱动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
 }

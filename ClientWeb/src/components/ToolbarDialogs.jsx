@@ -420,16 +420,26 @@ const DIALOGS = {
   buildlog: { label: '构建日志', Comp: BuildLogDialog },
 }
 
-// 顶部工具栏：一排小按钮 + 对应 Modal
+// 顶部工具栏：桌面端一排小按钮；≤860px 收进「⋯」下拉面板（见 00 文档 §3.1）
 export default function ToolbarDialogs() {
   const [open, setOpen] = useState(null)
+  const [menuOpen, setMenuOpen] = useState(false)
   const Current = open && DIALOGS[open] ? DIALOGS[open].Comp : null
+
+  // 打开弹窗或下拉变化时收起下拉
+  useEffect(() => { if (open) setMenuOpen(false) }, [open])
+
   return (
-    <div className="header-right" style={{ gap: 4 }}>
-      {Object.entries(DIALOGS).map(([key, d]) => (
-        <button key={key} className="btn btn-link btn-sm" style={{ color: '#d1d5db' }}
-                onClick={() => setOpen(key)}>{d.label}</button>
-      ))}
+    <div className="header-tools">
+      <button className="tools-more" title="更多工具" aria-label="更多工具"
+              onClick={() => setMenuOpen((v) => !v)}>⋯</button>
+      {menuOpen && <div className="tools-close-mask" onClick={() => setMenuOpen(false)} />}
+      <div className={'tools-list' + (menuOpen ? ' open' : '')}>
+        {Object.entries(DIALOGS).map(([key, d]) => (
+          <button key={key} className="btn btn-link btn-sm tool-btn"
+                  onClick={() => setOpen(key)}>{d.label}</button>
+        ))}
+      </div>
       {Current ? <Current onClose={() => setOpen(null)} /> : null}
     </div>
   )

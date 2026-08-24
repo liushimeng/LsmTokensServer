@@ -30,6 +30,13 @@ export default function Layout({ route, userInfo, children }) {
     setNavCollapsed((v) => { saveSidebarCollapsed(!v); return !v })
   }
 
+  // 移动端抽屉打开时锁定 body 滚动，关闭后恢复
+  useEffect(() => {
+    if (isMobile && menuOpen) document.body.style.overflow = 'hidden'
+    else document.body.style.overflow = ''
+    return () => { document.body.style.overflow = '' }
+  }, [isMobile, menuOpen])
+
   return (
     <div className="layout">
       <header className="layout-header">
