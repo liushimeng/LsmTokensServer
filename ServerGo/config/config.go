@@ -115,7 +115,6 @@ type LsmTokensServerConfig struct {
 	DBMysql                  DBMysqlConfig `json:"DBMysql"`
 	TableMaxRows             int64         `json:"tableMaxRows"`
 	DBMysqlSubTableNumber    int           `json:"DBMysqlSubTableNumber"`
-	BuildDateTimeLogURL      string        `json:"buildDateTimeLogURL"`
 	UserInfoLogURL           string        `json:"userInfoLogURL"`
 	EnableSpiderScheduler    bool          `json:"enableSpiderScheduler"`
 	SpiderCDPPort            int           `json:"spiderCDPPort"`
@@ -213,7 +212,6 @@ type rawLsmTokensServerConfig struct {
 	DBMysql                  DBMysqlConfig `json:"DBMysql"`
 	TableMaxRows             int64         `json:"tableMaxRows"`
 	DBMysqlSubTableNumber    int           `json:"DBMysqlSubTableNumber"`
-	BuildDateTimeLogURL      string        `json:"buildDateTimeLogURL"`
 	UserInfoLogURL           string        `json:"userInfoLogURL"`
 	EnableSpiderScheduler    bool          `json:"enableSpiderScheduler"`
 	SpiderCDPPort            int           `json:"spiderCDPPort"`
@@ -307,7 +305,6 @@ func getDefaultConfig() *LsmTokensServerConfig {
 		},
 		TableMaxRows:             DEFAULT_TABLE_MAX_ROWS,
 		DBMysqlSubTableNumber:    DEFAULT_SUB_TABLE_NUM,
-		BuildDateTimeLogURL:      DEFAULT_BUILD_LOG_PATH,
 		UserInfoLogURL:           DEFAULT_USER_LOG_PATH,
 		EnableSpiderScheduler:    false,
 		SpiderCDPPort:            DEFAULT_SPIDER_CDP_PORT,
@@ -444,12 +441,6 @@ func validateAndFixConfig(cfg *LsmTokensServerConfig) bool {
 	if cfg.LogFileURL == "" {
 		fmt.Printf("[CONFIG] LogFileURL empty, using default %s\n", defaults.LogFileURL)
 		cfg.LogFileURL = defaults.LogFileURL
-		fixed = true
-	}
-
-	if cfg.BuildDateTimeLogURL == "" {
-		fmt.Printf("[CONFIG] BuildDateTimeLogURL empty, using default %s\n", defaults.BuildDateTimeLogURL)
-		cfg.BuildDateTimeLogURL = defaults.BuildDateTimeLogURL
 		fixed = true
 	}
 
@@ -792,7 +783,6 @@ func LoadConfig(path string) (*LsmTokensServerConfig, error) {
 		cfg.DBMysql = raw.DBMysql
 		cfg.TableMaxRows = raw.TableMaxRows
 		cfg.DBMysqlSubTableNumber = raw.DBMysqlSubTableNumber
-		cfg.BuildDateTimeLogURL = raw.BuildDateTimeLogURL
 		cfg.UserInfoLogURL = raw.UserInfoLogURL
 		cfg.EnableSpiderScheduler = raw.EnableSpiderScheduler
 		cfg.SpiderCDPPort = raw.SpiderCDPPort

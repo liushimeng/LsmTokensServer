@@ -13,36 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lishimeng/LsmTokensServer/config"
 	"github.com/lishimeng/LsmTokensServer/system"
 )
-
-// buildTimeLogInterfaceHandle 读取编译时间日志文件并返回 JSON
-func buildTimeLogInterfaceHandle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	logPath := config.G.BuildDateTimeLogURL
-	lines := []string{}
-
-	if data, err := os.ReadFile(logPath); err == nil {
-		allLines := strings.Split(strings.TrimSpace(string(data)), "\n")
-		for _, line := range allLines {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				lines = append(lines, line)
-			}
-		}
-	}
-
-	resp := struct {
-		Lines []string `json:"lines"`
-		Count int      `json:"count"`
-	}{
-		Lines: lines,
-		Count: len(lines),
-	}
-	json.NewEncoder(w).Encode(resp)
-}
 
 // safeProjectFilePath 项目内文件读取统一安全校验（阶段AA）：
 // 后缀必须是 ext；相对路径不得越出 projectDir（用 filepath.Rel 判定，彻底消除
@@ -134,58 +106,4 @@ func systemInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(info)
-}
-
-// sourceCodeInterfaceHandle 获取源码统计信息（action: list / get_content）
-func sourceCodeInterfaceHandle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var req struct {
-		Action   string `json:"action"`
-		FilePath string `json:"file_path"`
-	}
-	if r.Method == http.MethodPost {
-		json.NewDecoder(r.Body).Decode(&req)
-	}
-
-	if req.Action == "get_content" && req.FilePath != "" {
-		// 安全校验统一走 safeProjectFilePath（filepath.Rel 判定，防前缀碰撞越界）
-		absPath, err := safeProjectFilePath(system.GetProjectDir(), req.FilePath, ".go")
-		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
-			return
-		}
-		content, err := os.ReadFile(absPath)
-		if err != nil {
-			json.NewEncoder(w).Encode(map[string]interface{}{"error": "读取文件失败: " + err.Error()})
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"content": string(content)})
-		return
-	}
-
-	stats, err := system.GetSourceCodeStats()
-	if err != nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
-		return
-	}
-	json.NewEncoder(w).Encode(stats)
-}
-
-// readmeInterfaceHandle 读取 README.md 内容返回 JSON（前端自行渲染 Markdown）
-func readmeInterfaceHandle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	// 与旧工程一致：读取工程根目录 README.md。
-	// 二进制可能位于 ServerGo/ 子目录，故先取可执行文件目录，找不到再回退上一级（工程根）。
-	projectDir := system.GetProjectDir()
-	content, err := os.ReadFile(filepath.Join(projectDir, "README.md"))
-	if err != nil {
-		content, err = os.ReadFile(filepath.Join(filepath.Dir(projectDir), "README.md"))
-	}
-	if err != nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{"error": "读取 README.md 失败: " + err.Error()})
-		return
-	}
-	json.NewEncoder(w).Encode(map[string]interface{}{"content": string(content)})
 }

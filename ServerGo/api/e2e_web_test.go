@@ -27,8 +27,8 @@ var e2eManagerRoutes = []string{
 	// 首页
 	"/UserInfoInterface", "/UserModelListInterface",
 	// 系统信息
-	"/BuildTimeLogInterface", "/GitInfoInterface", "/SystemInfoInterface", "/SourceCodeInterface",
-	"/ReadmeInterface", "/WikiInterface", "/UserInfoLogInterface",
+	"/GitInfoInterface", "/SystemInfoInterface",
+	"/WikiInterface", "/UserInfoLogInterface",
 	// 对话
 	"/ChatDialogInterface",
 	// 爬虫
@@ -92,8 +92,8 @@ var e2eUserRoutes = []string{
 	"/ChatAnalysisDetailInterface", "/ChatAnalysisTotalInterface", "/ChatAnalysisTotalRangeInterface",
 	"/ChatAnalysisTotalWS", "/ChatAnalysisSessionInterface", "/ChatAnalysisTaskInterface",
 	"/UserAIRouteInterface", "/DstEndPointManageInterface", "/ModelInfoInterface", "/AgentInfoInterface",
-	"/BuildTimeLogInterface", "/GitInfoInterface", "/SystemInfoInterface", "/SourceCodeInterface",
-	"/ReadmeInterface", "/ChatDialogInterface",
+	"/GitInfoInterface", "/SystemInfoInterface",
+	"/ChatDialogInterface",
 	"/SpiderDataSourceInterface", "/SpiderDailyInfoInterface", "/SpiderDataSourceCrawl",
 	"/CleanupReportInterface",
 	"/ProtocolConvertAnalyzerStatus", "/ProtocolConvertAnalyzerTest", "/ProtocolConvertAnalyzerRecords",

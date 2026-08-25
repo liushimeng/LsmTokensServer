@@ -192,7 +192,6 @@ func loadConfigSafe() *config.LsmTokensServerConfig {
 	}
 	for ptr := range map[*string]string{
 		&cfg.LogFileURL:          cfg.LogFileURL,
-		&cfg.BuildDateTimeLogURL: cfg.BuildDateTimeLogURL,
 		&cfg.UserInfoLogURL:      cfg.UserInfoLogURL,
 	} {
 		if p, err := config.ResolvePath(*ptr); err == nil {

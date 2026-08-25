@@ -4,7 +4,7 @@ import Modal from './Modal'
 import DataTable from './DataTable'
 
 // 顶部工具栏弹窗组（迁移自旧 server_web_common_dialog_*.go / server_web_common_wiki.go）：
-// 用户日志 / Wiki / 证书 / Git 信息 / 系统信息 / README / 构建日志
+// 用户日志 / Wiki / 证书 / Git 信息 / 系统信息
 
 // HTML 转义
 function esc(s) {
@@ -707,115 +707,13 @@ function SysDialog({ onClose }) {
   )
 }
 
-// ===== README 弹窗（Markdown 渲染）=====
-function ReadmeDialog({ onClose }) {
-  const [content, setContent] = useState(null)
-  const [err, setErr] = useState('')
-
-  useEffect(() => {
-    get('ReadmeInterface').then((d) => {
-      if (d.error) { setErr(d.error); return }
-      setContent(d.content || '')
-    }).catch((e) => setErr(e.message || '加载失败'))
-  }, [])
-
-  return (
-    <Modal title="README" onClose={onClose} width={860}>
-      {err ? <div className="alert alert-error">{err}</div> : null}
-      {content === null && !err ? <div className="table-loading">加载中…</div> : <MarkdownView md={content} />}
-    </Modal>
-  )
-}
-
-// ===== 构建日志弹窗 =====
-function BuildLogDialog({ onClose }) {
-  const [data, setData] = useState(null)
-  const [err, setErr] = useState('')
-
-  useEffect(() => {
-    get('BuildTimeLogInterface').then(setData).catch((e) => setErr(e.message || '加载失败'))
-  }, [])
-
-  return (
-    <Modal title="构建日志" onClose={onClose} width={760}>
-      {err ? <div className="alert alert-error">{err}</div> : null}
-      {data && data.lines && data.lines.length
-        ? <div className="log-box">{data.lines.join('\n')}</div>
-        : !err && <div className="table-empty">暂无构建日志</div>}
-    </Modal>
-  )
-}
-
-// ===== 源码统计弹窗（迁移自旧 server_web_common_dialog_sourcecode.go）=====
-function SourceCodeDialog({ onClose }) {
-  const [stats, setStats] = useState(null)
-  const [file, setFile] = useState(null) // {name, content}
-  const [err, setErr] = useState('')
-  const [filter, setFilter] = useState('') // 文件名过滤（对齐旧程序过滤输入框）
-
-  useEffect(() => {
-    post('SourceCodeInterface', {}).then((d) => {
-      if (d.error) { setErr(d.error); return }
-      setStats(d)
-    }).catch((e) => setErr(e.message || '加载失败'))
-  }, [])
-
-  const filtered = stats && filter
-    ? (stats.files || []).filter((f) => (f.name || '').toLowerCase().includes(filter.toLowerCase()))
-    : (stats ? stats.files || [] : [])
-
-  const openFile = async (f) => {
-    setErr('')
-    setFile({ name: f.name, content: '加载中…' })
-    try {
-      const d = await post('SourceCodeInterface', { action: 'get_content', file_path: f.name })
-      if (d.error) { setErr(d.error); setFile(null); return }
-      setFile({ name: f.name, content: d.content || '' })
-    } catch (e) { setErr(e.message || '读取失败'); setFile(null) }
-  }
-
-  return (
-    <Modal title={file ? `源码 — ${file.name}` : '源码统计'} onClose={file ? () => setFile(null) : onClose} width={860}
-           footer={file ? <button className="btn" onClick={() => setFile(null)}>返回列表</button> : null}>
-      {err ? <div className="alert alert-error">{err}</div> : null}
-      {!file && stats && (
-        <>
-          <p style={{ fontSize: 13 }}>共 <strong>{stats.total_files}</strong> 个 .go 文件，
-            <strong>{stats.total_lines}</strong> 行，总大小 {stats.size_human || '-'}</p>
-          <div className="toolbar" style={{ marginBottom: 8 }}>
-            <input style={{ flex: 1 }} value={filter} placeholder="文件名过滤…"
-                   onChange={(e) => setFilter(e.target.value)} />
-            {filter ? <span style={{ fontSize: 12, color: 'var(--muted)' }}>{filtered.length} / {stats.total_files}</span> : null}
-          </div>
-          <div className="table-wrap"><table className="data-table">
-            <thead><tr><th>文件</th><th style={{ width: 100 }}>行数</th><th style={{ width: 100 }}>大小</th><th style={{ width: 80 }}>操作</th></tr></thead>
-            <tbody>{filtered.map((f) => (
-              <tr key={f.name}>
-                <td className="wrap"><code>{f.name}</code></td>
-                <td>{f.lines}</td>
-                <td>{f.size_human}</td>
-                <td><button className="btn btn-sm" onClick={() => openFile(f)}>查看</button></td>
-              </tr>
-            ))}</tbody>
-          </table></div>
-        </>
-      )}
-      {file && <div className="log-box">{file.content}</div>}
-      {!stats && !file && !err ? <div className="table-loading">加载中…</div> : null}
-    </Modal>
-  )
-}
-
 // 工具按钮注册表
 const DIALOGS = {
   userlog: { label: '用户日志', Comp: UserLogDialog },
   wiki: { label: 'Wiki', Comp: WikiDialog },
   cert: { label: '证书', Comp: CertDialog },
   git: { label: 'Git', Comp: GitDialog },
-  sourcecode: { label: '源码', Comp: SourceCodeDialog },
   sysinfo: { label: '系统信息', Comp: SysDialog },
-  readme: { label: 'README', Comp: ReadmeDialog },
-  buildlog: { label: '构建日志', Comp: BuildLogDialog },
 }
 
 // 顶部工具栏：桌面端一排小按钮；≤860px 收进「⋯」下拉面板（见 00 文档 §3.1）

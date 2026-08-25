@@ -47,11 +47,8 @@ func RegisterManagerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/UserModelListInterface", managerModelListInterfaceHandle)
 
 	// 系统信息
-	mux.HandleFunc("/BuildTimeLogInterface", buildTimeLogInterfaceHandle)
 	mux.HandleFunc("/GitInfoInterface", gitInfoInterfaceHandle)
 	mux.HandleFunc("/SystemInfoInterface", systemInfoInterfaceHandle)
-	mux.HandleFunc("/SourceCodeInterface", sourceCodeInterfaceHandle)
-	mux.HandleFunc("/ReadmeInterface", readmeInterfaceHandle)
 
 	// 对话页面数据接口
 	mux.HandleFunc("/ChatDialogInterface", chatDialogInterfaceHandle)
@@ -122,11 +119,8 @@ func RegisterUserAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/AgentInfoInterface", userAgentInfoInterfaceHandle)
 
 	// 系统信息
-	mux.HandleFunc("/BuildTimeLogInterface", buildTimeLogInterfaceHandle)
 	mux.HandleFunc("/GitInfoInterface", gitInfoInterfaceHandle)
 	mux.HandleFunc("/SystemInfoInterface", systemInfoInterfaceHandle)
-	mux.HandleFunc("/SourceCodeInterface", sourceCodeInterfaceHandle)
-	mux.HandleFunc("/ReadmeInterface", readmeInterfaceHandle)
 
 	// 对话页面数据接口
 	mux.HandleFunc("/ChatDialogInterface", userChatDialogInterfaceHandle)

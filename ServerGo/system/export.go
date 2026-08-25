@@ -21,11 +21,6 @@ func GetSystemInfo() (*SystemInfo, error) {
 	return getSystemInfo()
 }
 
-// GetSourceCodeStats 获取源码统计信息
-func GetSourceCodeStats() (*SourceCodeStats, error) {
-	return getSourceCodeStats()
-}
-
 // GetProjectDir 获取项目目录（可执行文件所在目录）
 func GetProjectDir() string {
 	return getProjectDir()
