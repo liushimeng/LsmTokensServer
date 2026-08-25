@@ -351,24 +351,61 @@ func forwardWithRetry(
 		}
 	}()
 
+	// triedEndpoints 记录本次请求内已触发故障转移的源站（v2.0.74）。
+	// 经济型 session 粘性命中后无条件返回同一源站；若不排除已失败源站，
+	// 重试循环会反复打在同一源站上（如 402 余额不足时永远切不走）。
+	triedEndpoints := make(map[uint64]bool)
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		// 选择目标源站
+		// 选择目标源站（排除本次请求内已失败的源站）
 		var selectedID uint64
 		var ok bool
 		switch {
 		case isEconomic && economicSessionID != "":
-			// 有 session：走 session 粘性分配（livePool 消费语义）
+			// 有 session：走 session 粘性分配（livePool 消费语义）。
+			// 若映射的源站本轮已失败，先清掉映射让下一次分配落到其它源站。
 			selectedID, ok = economicSelector.SelectForSession(cachedRoute, economicSessionID)
+			if ok && triedEndpoints[selectedID] {
+				economicSelector.InvalidateSessionMapping(cachedRoute.ID, economicSessionID)
+				selectedID, ok = economicSelector.SelectForSession(cachedRoute, economicSessionID)
+			}
 		case isEconomic && economicKBRequest:
 			// v2.0.17：知识问答分支，从 DstEndPointIDs 随机挑可用源站，不消费 livePool
 			selectedID, ok = economicSelector.SelectForKBRequest(cachedRoute)
+			if ok && triedEndpoints[selectedID] {
+				// 随机可能重复命中已失败源站，最多重选 maxRetries 次
+				for i := 0; i < maxRetries && triedEndpoints[selectedID]; i++ {
+					selectedID, ok = economicSelector.SelectForKBRequest(cachedRoute)
+					if !ok {
+						break
+					}
+				}
+			}
 		default:
-			// 兜底：稳定型 / 指定型 / 无 session 的经济型走原逻辑
+			// 兜底：稳定型 / 指定型 / 无 session 的经济型走原逻辑。
+			// 队首已失败时（稳定型达阈值滚动前）向后找第一个未试过的可用源站。
 			selectedID, ok = selector.Select(cachedRoute)
+			if ok && triedEndpoints[selectedID] {
+				selectedID, ok = 0, false
+				for i, id := range cachedRoute.DstEndPointIDs {
+					if triedEndpoints[id] {
+						continue
+					}
+					status := 1
+					if i < len(cachedRoute.DstEndPointIDStatuses) {
+						status = cachedRoute.DstEndPointIDStatuses[i]
+					}
+					if status == 1 || i >= len(cachedRoute.DstEndPointIDStatuses) {
+						selectedID, ok = id, true
+						break
+					}
+				}
+			}
 		}
 		if !ok {
 			return nil, fmt.Errorf("failed to select endpoint")
 		}
+		triedEndpoints[selectedID] = true
 
 		// 查询目标源站：代理热路径只允许读取内存缓存，禁止回退 database.DB。
 		dstEndpoint, ok := modelsdb.GetCachedDstEndPointByID(selectedID)

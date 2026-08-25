@@ -324,6 +324,30 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 	return endpointID, true
 }
 
+// InvalidateSessionMapping 清除指定 session 的粘性映射（v2.0.74）。
+// 用于 forwardWithRetry 在同一请求内重试换源：某源站触发故障转移后，
+// 清掉 session→endpoint 映射，下一轮 SelectForSession 从 livePool 重新分配，
+// 避免重试循环反复打在同一源站。
+// 不动 livePool / 失败计数，不影响其它请求与其它 session 的粘性。
+func (s *EconomicAlgorithmSelector) InvalidateSessionMapping(routeID uint64, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if _, ok := state.sessionIndex[sessionID]; !ok {
+		return
+	}
+	delete(state.sessionIndex, sessionID)
+	for i, e := range state.sessionQueue {
+		if e.SessionID == sessionID {
+			state.sessionQueue = append(state.sessionQueue[:i], state.sessionQueue[i+1:]...)
+			break
+		}
+	}
+}
+
 // OnRequestSuccess 请求成功：清零该路由的连续失败计数
 func (s *EconomicAlgorithmSelector) OnRequestSuccess(routeID uint64) {
 	state := getEconomicState(routeID)
