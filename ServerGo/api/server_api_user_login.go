@@ -558,6 +558,11 @@ func checkUserAndModelStatus(claims *UserTokenClaims) (bool, bool) {
 // userAuthMiddleware 用户认证中间件
 func userAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 尾斜杠归一化（仅判定用，不得改写 r.URL.Path——会传导给后续 handler 触发 301 循环）
+		path := r.URL.Path
+		if n := strings.TrimSuffix(path, "/"); n != "" {
+			path = n
+		}
 		// 公开路由放行
 		publicPaths := map[string]bool{
 			"/UserLogin":          true,
@@ -565,22 +570,22 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 			"/UserLoginInterface": true,
 		}
 		// 放行静态资源（旧版 /static/ + Vite 构建产物 /assets/ + 根目录静态文件）
-		if len(r.URL.Path) > 8 && (r.URL.Path[:8] == "/static/" || r.URL.Path[:8] == "/assets/") {
+		if len(path) > 8 && (path[:8] == "/static/" || path[:8] == "/assets/") {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if isStaticFile(r.URL.Path) {
+		if isStaticFile(path) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if publicPaths[r.URL.Path] {
+		if publicPaths[path] {
 			next.ServeHTTP(w, r)
 			return
 		}
 		// Anthropic/OpenAI 代理路径放行（自带 API Key 认证，无需 JWT）
 		anthropicPrefix := "/" + config.G.AgentAnthropicListenURL + "/"
 		openaiPrefix := "/" + config.G.AgentOpenAIListenURL + "/"
-		if strings.HasPrefix(r.URL.Path, anthropicPrefix) || strings.HasPrefix(r.URL.Path, openaiPrefix) {
+		if strings.HasPrefix(path, anthropicPrefix) || strings.HasPrefix(path, openaiPrefix) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -588,7 +593,7 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 		// 验证 Token
 		claims := getUserToken(r)
 		if claims.UserID == 0 {
-			http.Redirect(w, r, "/UserLogin", http.StatusFound)
+			http.Redirect(w, r, "UserLogin", http.StatusFound) // 相对 Location（网关子路径代理兼容）
 			return
 		}
 
@@ -597,7 +602,7 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 		if !isValid {
 			clearUserLoginCookie(w)
 			if shouldRedirect {
-				http.Redirect(w, r, "/UserLogin", http.StatusFound)
+				http.Redirect(w, r, "UserLogin", http.StatusFound) // 相对 Location
 			} else {
 				w.WriteHeader(http.StatusUnauthorized)
 			}

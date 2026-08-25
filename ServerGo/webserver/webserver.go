@@ -108,7 +108,9 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 //   - /pfx/XxxInterface       → /XxxInterface       （API）
 //   - /pfx1/pfx2/AnyPage      → 剥到空仍回落 SPA    （页面路由）
 // 剥离只发生在未匹配时，不影响根级真实路由（本工程无多段注册路由）。
-func prefixStripMiddleware(mux *http.ServeMux, staticRoot string) http.Handler {
+// 注意：本中间件必须置于鉴权中间件【外层】——鉴权按剥离后的有效路径判定公开路由，
+// 否则子路径下的 /pfx/CaptchaGenerate 等公开接口会被误判为未授权（登录死循环）。
+func prefixStripMiddleware(next http.Handler, mux *http.ServeMux, staticRoot string) http.Handler {
 	matchRoute := func(p string) (http.Handler, bool) {
 		h, pattern := mux.Handler(&http.Request{Method: http.MethodGet, URL: &url.URL{Path: p}})
 		if pattern != "/" {
@@ -127,29 +129,26 @@ func prefixStripMiddleware(mux *http.ServeMux, staticRoot string) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" || r.URL.Path == "" {
-			h, _ := mux.Handler(r)
-			h.ServeHTTP(w, r)
+			next.ServeHTTP(w, r)
 			return
 		}
 		if _, ok := matchRoute(r.URL.Path); ok {
-			h, _ := mux.Handler(r)
-			h.ServeHTTP(w, r)
+			next.ServeHTTP(w, r)
 			return
 		}
 		// 未命中注册路由/静态文件：逐级剥离首段重试
 		segments := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		for i := 1; i < len(segments) && i <= 5; i++ {
 			stripped := "/" + strings.Join(segments[i:], "/")
-			if h, ok := matchRoute(stripped); ok {
+			if _, ok := matchRoute(stripped); ok {
 				r2 := r.Clone(r.Context())
 				r2.URL.Path = stripped
-				h.ServeHTTP(w, r2)
+				next.ServeHTTP(w, r2)
 				return
 			}
 		}
-		// 全部未命中：按原路径走 SPA 回落
-		h, _ := mux.Handler(r)
-		h.ServeHTTP(w, r)
+		// 全部未命中：按原路径交给 next（SPA 回落）
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -176,32 +175,35 @@ func mountSPA(mux *http.ServeMux, cfg *config.LsmTokensServerConfig, role string
 
 // buildManagerMux 构造管理端 mux：登录路由 + 管理 API + SPA
 // （v2.0.56 安全加固：鉴权中间件在 Start 时套上，见 ManagerAuthMiddleware）
-// v2.0.58 网关代理支持：prefixStripMiddleware 兜底子路径前缀（/pfx/assets/...、/pfx/XxxInterface）
-func buildManagerMux(cfg *config.LsmTokensServerConfig) http.Handler {
+// v2.0.58 网关代理支持：装配顺序 prefixStrip(鉴权(mux))——前缀剥离在最外层，
+// 鉴权按剥离后的有效路径判定公开路由（子路径 /pfx/CaptchaGenerate 不再被误拦）
+func buildManagerMux(cfg *config.LsmTokensServerConfig) (*http.ServeMux, string) {
 	mux := http.NewServeMux()
 	RegisterAPIRoutes(mux)
 	api.RegisterManagerLoginRoutes(mux)
 	api.RegisterManagerAPIRoutes(mux)
 	managerDist := mountSPA(mux, cfg, "manager")
-	return prefixStripMiddleware(mux, managerDist)
+	return mux, managerDist
 }
 
 // buildUserMux 构造用户端 mux：用户 API（含登录）+ SPA（鉴权中间件在 Start 时套上）
-func buildUserMux(cfg *config.LsmTokensServerConfig) http.Handler {
+// v2.0.58 网关代理支持：装配顺序 prefixStrip(鉴权(mux))，同管理端
+func buildUserMux(cfg *config.LsmTokensServerConfig) (*http.ServeMux, string) {
 	mux := http.NewServeMux()
 	RegisterAPIRoutes(mux)
 	api.RegisterUserAPIRoutes(mux)
 	userDist := mountSPA(mux, cfg, "user")
-	return prefixStripMiddleware(mux, userDist)
+	return mux, userDist
 }
 
 // StartManagerWebServer 启动管理员 Web 服务（管理后台，默认 49101）
 func StartManagerWebServer(cfg *config.LsmTokensServerConfig) {
-	mux := buildManagerMux(cfg)
+	mux, managerDist := buildManagerMux(cfg)
+	handler := prefixStripMiddleware(api.ManagerAuthMiddleware(mux), mux, managerDist)
 	addr := fmt.Sprintf(":%d", cfg.ManagerWebListenPort)
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      ManagerSecurityChain(api.ManagerAuthMiddleware(mux)),
+		Handler:      ManagerSecurityChain(handler),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -215,8 +217,8 @@ func StartManagerWebServer(cfg *config.LsmTokensServerConfig) {
 // StartUserWebServer 启动用户 Web 服务（用户门户，默认 42901，支持 HTTPS）
 // 与旧版一致：UserSecurityChain(userAuthMiddleware(mux))
 func StartUserWebServer(cfg *config.LsmTokensServerConfig) {
-	mux := buildUserMux(cfg)
-	handler := UserSecurityChain(api.UserAuthMiddleware(mux))
+	mux, userDist := buildUserMux(cfg)
+	handler := UserSecurityChain(prefixStripMiddleware(api.UserAuthMiddleware(mux), mux, userDist))
 	addr := fmt.Sprintf(":%d", cfg.UserWebListenPort)
 	if cfg.UserWebUseHTTPS {
 		certFile := cfg.UserWebCertFile

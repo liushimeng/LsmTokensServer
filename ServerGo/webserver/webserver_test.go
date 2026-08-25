@@ -97,7 +97,22 @@ func TestPrefixStripMiddleware(t *testing.T) {
 		fmt.Fprint(w, `{"success":true}`)
 	})
 	managerDist := mountSPA(mux, cfg, "manager")
-	handler := prefixStripMiddleware(mux, managerDist)
+	authNext := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 模拟鉴权中间件：公开路由/静态资源放行至 mux，其余 302 登录页
+		// （验证剥离后的有效路径对鉴权层可见，子路径公开接口不被误拦）
+		p := r.URL.Path
+		if n := strings.TrimSuffix(p, "/"); n != "" {
+			p = n
+		}
+		if p == "/UserLogin" || p == "/" || strings.HasPrefix(r.URL.Path, "/assets/") || strings.HasPrefix(r.URL.Path, "/static/") ||
+			r.URL.Path == "/UserManageInterface" || r.URL.Path == "/healthz" ||
+			r.URL.Path == "/UserLogin" || r.URL.Path == "/" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		http.Redirect(w, r, "UserLogin", http.StatusFound)
+	})
+	handler := prefixStripMiddleware(authNext, mux, managerDist)
 	// ① 子路径静态资源：剥前缀命中真实 JS（而非 SPA 回落的 HTML）
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/ChatAnalysis/assets/app.js", nil))
@@ -126,18 +141,18 @@ func TestPrefixStripMiddleware(t *testing.T) {
 		t.Fatalf("根级静态资源应命中: %d", rec.Code)
 	}
 
-	// ⑤ 页面导航无尾斜杠：301 补斜杠（相对资源以目录为基准）
+	// ⑤ 公开页面导航无尾斜杠：301 补斜杠（相对资源以目录为基准）
 	rec = httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/ChatAnalysis", nil)
+	req := httptest.NewRequest("GET", "/UserLogin", nil)
 	req.Header.Set("Accept", "text/html")
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/ChatAnalysis/" {
+	if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/UserLogin/" {
 		t.Fatalf("无尾斜杠页面应 301 补斜杠: code=%d loc=%s", rec.Code, rec.Header().Get("Location"))
 	}
 
-	// ⑥ 尾斜杠页面路由：SPA 回落 index.html
+	// ⑥ 尾斜杠页面路由：鉴权归一化后放行，SPA 回落 index.html
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest("GET", "/ChatAnalysis/", nil)
+	req = httptest.NewRequest("GET", "/UserLogin/", nil)
 	req.Header.Set("Accept", "text/html")
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "idx") {
@@ -146,7 +161,7 @@ func TestPrefixStripMiddleware(t *testing.T) {
 
 	// ⑦ 非页面请求（无 Accept text/html）不 301，直接 SPA 回落
 	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/ChatAnalysis", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/UserLogin", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "idx") {
 		t.Fatalf("非页面请求应回落 index.html 而非 301: code=%d", rec.Code)
 	}
