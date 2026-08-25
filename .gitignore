@@ -39,3 +39,5 @@ ClientWeb/node_modules/
 # ===== 本地子模块/工具（不上传开源仓库）=====
 go-web-debug-tool/
 python-generate-image-tool/
+ClientWeb/dist-manager/
+ClientWeb/dist-user/
