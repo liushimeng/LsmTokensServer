@@ -69,6 +69,14 @@ func managerLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// v2.0.74 阶段AL：超级管理员已被禁用（数据库已有业务用户，main 自动回写 conf 为 disable）。
+	// 区别于"未配置"，给用户更精确的提示——只有编辑 conf 重置 managerUserName/managerPassword 才能重新启用。
+	if config.G.Security.IsManagerDisabled() {
+		logger.Printf("[SECURITY] 拒绝管理端登录：超级管理员已被禁用（检测到数据库已有业务用户）")
+		json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: "管理端超级管理员已被禁用，请使用数据库中的业务用户账号登录管理端（如需重新启用请编辑 LsmTokensServer.conf 的 security.managerUserName/managerPassword）"})
+		return
+	}
+
 	if req.CaptchaID == "" || req.CaptchaCode == "" || !captcha.VerifyString(req.CaptchaID, req.CaptchaCode) {
 		recordLoginFailure("manager:" + clientIP)
 		json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: "验证码错误或已过期"})
@@ -191,6 +199,17 @@ func ManagerAuthMiddleware(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// v2.0.74 阶段AL：超级管理员禁用态 → 数据接口直接 503。
+		// 公开路由（登录页/验证码/登出/SPA 静态资源）放行，让前端能渲染"已禁用"提示。
+		if config.G != nil && config.G.Security.IsManagerDisabled() {
+			if isManagerAPIPath(r.URL.Path) && r.URL.Path != "/ManagerLoginInterface" &&
+				r.URL.Path != "/ManagerLogoutInterface" && r.URL.Path != "/CaptchaGenerate" && r.URL.Path != "/CaptchaAudio" {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: "管理端超级管理员已被禁用"})
+				return
+			}
+		}
 		// 公开路由放行
 		publicPaths := map[string]bool{
 			"/ManagerLoginInterface":  true,

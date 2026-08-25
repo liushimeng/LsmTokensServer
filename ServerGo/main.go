@@ -201,6 +201,21 @@ func loadConfigSafe() *config.LsmTokensServerConfig {
 	return cfg
 }
 
+// printFirstRunSummary 首次启动摘要：把随机生成的管理员用户名 / 密码打印到 stdout（**仅一次**）。
+// 警告：密码打印到 stdout 会进入父进程的 stdout 缓冲；这是有意的——首次部署必须让运维
+// 看到并立即修改。注意不写入任何 *.example 文件，避免把密码副本泄露到 git 跟踪范围。
+func printFirstRunSummary(cfg *config.LsmTokensServerConfig) {
+	fmt.Println("================================================================================")
+	fmt.Println("  [FIRST-RUN] 检测到首次启动，已自动生成 LsmTokensServer.conf")
+	fmt.Printf("  [FIRST-RUN] 配置文件: %s\n", configFile)
+	fmt.Printf("  [FIRST-RUN] JWT 密钥长度: %d 字节（base64 编码后）\n", len(cfg.Security.JWTSecret))
+	fmt.Printf("  [FIRST-RUN] 管理员用户名: %s\n", cfg.Security.ManagerUserName)
+	fmt.Printf("  [FIRST-RUN] 管理员密码  : %s\n", cfg.Security.ManagerPassword)
+	fmt.Println("  [FIRST-RUN] 请立即登录管理端 (http://<host>:9101/ManagerLogin) 并修改默认密码！")
+	fmt.Println("  [FIRST-RUN] 凭据仅在本次启动的 stdout 中显示一次，请妥善保存。")
+	fmt.Println("================================================================================")
+}
+
 func main() {
 	flag.Parse()
 
@@ -224,7 +239,24 @@ func main() {
 	}
 
 	// ===== 1. 配置 + 日志 =====
-	cfg := loadConfigSafe()
+	// v2.0.74 阶段AL：若 LsmTokensServer.conf 不存在，自动生成含随机 JWT 密钥 / 管理员账号的默认配置。
+	var cfg *config.LsmTokensServerConfig
+	firstRun := false
+	if _, statErr := os.Stat(configFile); os.IsNotExist(statErr) {
+		log.Printf("[INIT] 检测到首次启动（无 %s），自动生成默认配置...", configFile)
+		resolved, perr := config.ResolvePath(configFile)
+		if perr != nil {
+			resolved = configFile
+		}
+		generated, isFirst, gerr := config.EnsureDefaultConfig(resolved)
+		if gerr != nil {
+			log.Fatalf("首次启动自动生成配置失败: %v", gerr)
+		}
+		cfg = generated
+		firstRun = isFirst
+	} else {
+		cfg = loadConfigSafe()
+	}
 	config.G = cfg
 	if err := logger.InitLogger(cfg.LogFileURL, cfg.LogMaxSizeMB); err != nil {
 		log.Fatalf("Failed to initialize logger: %v", err)
@@ -242,6 +274,12 @@ func main() {
 	}
 	logger.Printf("[INIT] MySQL: %s@%s/%s", cfg.DBMysql.User, cfg.DBMysql.Url, cfg.DBMysql.DataBase)
 	logger.Printf("[INIT] Manager Web: %d, User Web: %d, MCP: %d", cfg.ManagerWebListenPort, cfg.UserWebListenPort, cfg.McpWebListenPort)
+
+	// v2.0.74 阶段AL：首次启动摘要（仅打印一次，绝不写入 *.example）。
+	if firstRun {
+		printFirstRunSummary(cfg)
+		logger.Printf("[INIT] [FIRST-RUN] 已自动生成 %s（管理员密码已打印到 stdout，请登录后立即修改）", configFile)
+	}
 
 	// ===== 2. MySQL（可选；失败不影响 AI 代理）=====
 	if cfg.DBMysql.Url == "" || cfg.DBMysql.User == "" || cfg.DBMysql.Pwd == "" {
@@ -296,6 +334,25 @@ func main() {
 		}
 		modelsdb.InitStatsCache()
 		logger.Printf("[INIT] Stats cache initialized")
+
+		// v2.0.74 阶段AL：探测数据库是否有业务用户，若有则禁用超级管理员并回写 conf。
+		// 触发条件：TAgentHttpUserInfo 非软删除记录数 ≥ 1；
+		// 单向操作：禁用后不会因为用户清空而自动恢复，需要运维手动编辑 conf。
+		count, cerr := modelsdb.CountActiveUsers()
+		if cerr != nil {
+			logger.Printf("[WARNING] 探测业务用户数量失败: %v（管理端超级管理员保持当前配置）", cerr)
+		} else if count >= 1 && !cfg.Security.IsManagerDisabled() {
+			if config.DisableSuperAdmin(cfg) {
+				resolved, _ := config.ResolvePath(configFile)
+				if werr := config.WriteConfig(resolved, cfg); werr != nil {
+					logger.Printf("[WARNING] 回写禁用配置失败: %v", werr)
+				} else {
+					_ = os.Chmod(resolved, 0600)
+					logger.Printf("[INIT] 检测到业务用户 %d 条 → 已自动禁用管理端超级管理员（managerUserName=disable, managerWebAuthDisabled=true）", count)
+					logger.LogUserAction("DISABLE_SUPER_ADMIN", "system", fmt.Sprintf("active_users=%d", count))
+				}
+			}
+		}
 	}
 
 	// ===== 3. AI 代理服务（核心链路：29000 HTTP / 29003 HTTPS）=====

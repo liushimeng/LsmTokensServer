@@ -101,6 +101,40 @@ cd ClientWeb && npm install && cd ..
 # ユーザー Web http://127.0.0.1:29001
 ```
 
+### 🚀 初回起動セットアップ
+
+v2.0.74 から **初回起動ゼロコンフィグ** 対応：
+
+1. `./rebuild_restart_app.sh` を実行するだけでサービス起動。
+2. **`LsmTokensServer.conf` の手動コピー (`cp .conf.example`) は不要** —— ファイルがなければ自動生成されます。
+3. 起動ログと stdout に `[FIRST-RUN]` サマリーブロックが出力されます（以下の情報を含む）：
+   - 自動生成された `managerUserName`（例：`adm-7kq3m9xp`）
+   - 自動生成された `managerPassword`（base62 16 桁）
+   - 自動生成された `jwtSecret`（base64 32 バイト）
+4. ブラウザで `http://127.0.0.1:9101/ManagerLogin` を開き、上記の認証情報でログイン。
+5. **ログイン後、すぐにデフォルトパスワードを変更してください。**
+
+> ⚠️ パスワードは**今回起動の stdout に 1 回だけ**表示されます。`*.example` ファイルには絶対に書き込まれず、git にも入りません。紛失した場合は `LsmTokensServer.conf` の `security.managerUserName/managerPassword` を編集して再起動してください。
+
+### 🔒 スーパー管理者の自動無効化
+
+MySQL に**すでに業務ユーザーが存在**する場合（`TAgentHttpUserInfo` の `deleted_at IS NULL` 行数が 1 以上）、サービスは自動的に：
+
+- `security.managerUserName` / `managerPassword` を `disable` に書き換え；
+- `managerWebAuthDisabled = true` をセット；
+- すべての管理業務 API（`/UserManageInterface`、`/AIRouteInterface` など）を拒否；
+- `/ManagerLogin` 自体は到達可能ですが、ログイン要求は「管理端超級管理者が無効化されました」のメッセージで拒否されます。
+
+これは**一方向の操作**で、ユーザーテーブルを空にしても自動復元されません。再有効化するには `LsmTokensServer.conf` の `managerUserName/managerPassword` を `disable` 以外の値に書き戻してサービスを再起動してください。
+
+### ❓ よくある質問（FAQ）
+
+| 質問 | 回答 |
+|---|---|
+| **スーパー管理者のパスワードが見つからない** | 起動 stdout の `[FIRST-RUN]` ブロックに表示されます。紛失した場合は `LsmTokensServer.conf` の `security.managerPassword` を編集して再起動。 |
+| **管理画面に「無効化されました」と表示される** | データベースにすでに業務ユーザーがいるため自動無効化された状態です。再有効化するには conf の `managerUserName/managerPassword` を `disable` 以外の値に書き換えて再起動。 |
+| **MySQL の認証情報をカスタマイズしたい** | `LsmTokensServer.conf` の `DBMysql.User/Pwd` を編集して再起動。`validateAndFixConfig` が自動検証します。 |
+
 ### ポート構成
 
 | サービス | ポート |

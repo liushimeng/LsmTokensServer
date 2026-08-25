@@ -107,6 +107,42 @@ cd ClientWeb && npm install && cd ..
 # 用户 Web    http://127.0.0.1:29001
 ```
 
+### 🚀 首次启动（first-run-setup）
+
+v2.0.74 起，**首次启动零配置**：
+
+1. 直接执行 `./rebuild_restart_app.sh` 启动服务；
+2. **无需手动 `cp .conf.example`** —— 检测不到 `LsmTokensServer.conf` 时自动生成；
+3. 启动日志与 stdout 会打印一行 `[FIRST-RUN]` 摘要，包含：
+   - 自动生成的 `managerUserName`（形如 `adm-7kq3m9xp`）；
+   - 自动生成的 `managerPassword`（16 位 base62）；
+   - 自动生成的 `jwtSecret`（32 字节 base64）；
+4. 打开浏览器访问 `http://127.0.0.1:9101/ManagerLogin`，用上述账号登录；
+5. **登录后请立即在管理端修改默认密码**。
+
+> ⚠️ 密码仅在**本次启动**的 stdout 中显示一次，不会写入任何 `*.example` 文件，也不会入库。
+> 请妥善保存；如遗失可编辑 `LsmTokensServer.conf` 的 `security.managerUserName/managerPassword` 后重启。
+
+### 🔒 超级管理员自动禁用
+
+当服务检测到 MySQL 中**已存在业务用户**（`TAgentHttpUserInfo` 非软删除行数 ≥ 1），会自动：
+
+- 把 `security.managerUserName` / `managerPassword` 回写为 `disable`；
+- 把 `managerWebAuthDisabled` 置为 `true`；
+- 后续所有管理端业务接口（`/UserManageInterface`、`/AIRouteInterface` 等）拒绝访问；
+- 登录页（`/ManagerLogin`）仍可访问，但登录请求会被拒绝（提示"管理端超级管理员已被禁用"）。
+
+这是**单向操作**：禁用后不会因为数据库用户清空而自动恢复，需手动编辑 `LsmTokensServer.conf`
+把 `managerUserName/managerPassword` 重置为非 `disable` 值后重启服务。
+
+### ❓ 常见问题
+
+| 问题 | 解答 |
+|---|---|
+| **找不到超级管理员密码？** | 启动日志 stdout 中 `[FIRST-RUN]` 摘要已打印；如遗失可编辑 `LsmTokensServer.conf` 的 `security.managerPassword` 后重启。 |
+| **管理端登录提示"已被禁用"？** | 数据库已有业务用户 → 服务自动禁用超级管理员；如需重新启用，编辑 conf 把 `managerUserName/managerPassword` 重置为非 `disable` 值后重启。 |
+| **想自定义 MySQL 密码？** | 编辑 `LsmTokensServer.conf` 的 `DBMysql.User/Pwd` 后重启；脚本 `validateAndFixConfig` 会自动校验。 |
+
 ### 服务端口规范
 
 | 服务 | 端口 |

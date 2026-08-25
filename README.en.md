@@ -102,6 +102,40 @@ cd ClientWeb && npm install && cd ..
 # User Web     http://127.0.0.1:29001
 ```
 
+### 🚀 First-Run Setup
+
+Since v2.0.74, **zero-config first start**:
+
+1. Just run `./rebuild_restart_app.sh` to start the service.
+2. **No need to manually `cp .conf.example`** — when `LsmTokensServer.conf` is missing it is generated automatically.
+3. The startup log and stdout print a `[FIRST-RUN]` summary block, including:
+   - Auto-generated `managerUserName` (e.g. `adm-7kq3m9xp`);
+   - Auto-generated `managerPassword` (16-char base62);
+   - Auto-generated `jwtSecret` (32-byte base64).
+4. Open `http://127.0.0.1:9101/ManagerLogin` and log in with the credentials above.
+5. **Change the default password immediately after logging in.**
+
+> ⚠️ The password is printed to stdout **only once** during this startup. It is **never** written to any `*.example` file, and never committed to git. Save it carefully. If lost, edit `LsmTokensServer.conf` (`security.managerUserName/managerPassword`) and restart.
+
+### 🔒 Super-Admin Auto-Disable
+
+When the service detects that MySQL **already has business users** (`TAgentHttpUserInfo` with `deleted_at IS NULL` and `count >= 1`), it automatically:
+
+- Rewrites `security.managerUserName` / `managerPassword` to `disable`;
+- Sets `managerWebAuthDisabled = true`;
+- Rejects every manager-side business API (`/UserManageInterface`, `/AIRouteInterface`, …);
+- Keeps `/ManagerLogin` reachable, but the login request itself is rejected with the message "Manager super-admin has been disabled".
+
+This is **a one-way operation**: after being disabled it will not re-enable itself when the user table is later emptied. To re-enable, edit `LsmTokensServer.conf` to reset `managerUserName/managerPassword` to non-`disable` values and restart the service.
+
+### ❓ FAQ
+
+| Question | Answer |
+|---|---|
+| **Can't find the super-admin password?** | The startup stdout's `[FIRST-RUN]` block printed it. If lost, edit `LsmTokensServer.conf` → `security.managerPassword` and restart. |
+| **Manager login says "disabled"?** | Database already has business users → service auto-disabled super-admin. To re-enable, edit conf to set `managerUserName/managerPassword` to non-`disable` values and restart. |
+| **Want to customize MySQL credentials?** | Edit `LsmTokensServer.conf` → `DBMysql.User/Pwd` and restart; `validateAndFixConfig` validates automatically. |
+
 ### Ports
 
 | Service | Port |
