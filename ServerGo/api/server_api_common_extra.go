@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lishimeng/LsmTokensServer/config"
 	modelsdb "github.com/lishimeng/LsmTokensServer/models"
@@ -152,114 +153,298 @@ func certDownloadInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================================
-// Wiki 文档接口
+// Wiki 文档接口（阶段AG：树形目录 + 惰性分块读取）
 // ============================================================================
 
-// WikiFileInfo Wiki文件信息
-type WikiFileInfo struct {
-	Path string `json:"path"`
-	Name string `json:"name"`
+// WikiNode 树节点（文件 / 目录 / 其它）
+// 目录节点的 Children 非空；非 .md 文件（type=other）仍出现在目录里用于导航可见性，
+// 但 content 接口会拒绝对其调用。
+type WikiNode struct {
+	Name         string     `json:"name"`
+	Path         string     `json:"path"`
+	Type         string     `json:"type"` // "dir" / "file" / "other"
+	Size         int64      `json:"size"`
+	ModifiedTime string     `json:"modified_time,omitempty"`
+	ChildCount   int        `json:"child_count"`
+	Children     []WikiNode `json:"children,omitempty"`
 }
 
-// getWikiFiles 递归获取项目目录下所有 .md 文件
-// 排除 go-web-debug-tool 目录和隐藏目录（以 . 开头的目录）
-func getWikiFiles() ([]WikiFileInfo, error) {
-	var files []WikiFileInfo
-	projectDir := system.GetProjectDir()
+// wikiExcludedDirNames 阶段AG：项目根下需要整树跳过的目录
+// （保留与 getWikiFiles 阶段AA 行为一致）
+var wikiExcludedDirNames = map[string]bool{
+	"go-web-debug-tool":          true,
+	"python-generate-image-tool": true,
+}
 
-	err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // 跳过无法访问的文件
-		}
-		if info.IsDir() {
-			// 跳过隐藏目录（以 . 开头）
-			if strings.HasPrefix(info.Name(), ".") {
-				return filepath.SkipDir
-			}
-			// 跳过 go-web-debug-tool 目录
-			if info.Name() == "go-web-debug-tool" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		// 只收集 .md 文件
-		if !strings.HasSuffix(info.Name(), ".md") {
-			return nil
-		}
+// wikiShouldSkipDir 判定目录是否应跳过遍历
+func wikiShouldSkipDir(name string) bool {
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	return wikiExcludedDirNames[name]
+}
 
-		// 转换为相对路径
-		relPath, _ := filepath.Rel(projectDir, path)
-		if relPath == "" {
-			relPath = path
-		}
-		// 统一使用正斜杠
-		relPath = strings.ReplaceAll(relPath, string(filepath.Separator), "/")
-
-		files = append(files, WikiFileInfo{
-			Path: relPath,
-			Name: info.Name(),
-		})
-		return nil
-	})
+// buildWikiTreeNode 递归构建子树
+// 仅收集 .md 文件（type=file）；非 .md 文件以 type=other 出现但不展开内容接口。
+// 目录按字典序排序（目录在前，文件在后），便于前端稳定展示。
+func buildWikiTreeNode(projectDir, absDir, relDir string) (WikiNode, error) {
+	entries, err := os.ReadDir(absDir)
 	if err != nil {
-		return nil, err
+		return WikiNode{}, err
 	}
 
-	// 按路径排序
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].Path < files[j].Path
-	})
+	var dirs []os.DirEntry
+	var files []os.DirEntry
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs = append(dirs, e)
+		} else {
+			files = append(files, e)
+		}
+	}
 
-	return files, nil
+	sort.Slice(dirs, func(i, j int) bool { return strings.ToLower(dirs[i].Name()) < strings.ToLower(dirs[j].Name()) })
+	sort.Slice(files, func(i, j int) bool { return strings.ToLower(files[i].Name()) < strings.ToLower(files[j].Name()) })
+
+	node := WikiNode{
+		Type: "dir",
+		Name: filepath.Base(absDir),
+		Path: relDir,
+	}
+
+	var maxMod time.Time
+	for _, d := range dirs {
+		if wikiShouldSkipDir(d.Name()) {
+			continue
+		}
+		childAbs := filepath.Join(absDir, d.Name())
+		childRel := d.Name()
+		if relDir != "" {
+			childRel = relDir + "/" + d.Name()
+		}
+		child, err := buildWikiTreeNode(projectDir, childAbs, childRel)
+		if err != nil {
+			continue
+		}
+		node.Children = append(node.Children, child)
+		// 目录时间取子树内最大修改时间
+		if t, err := getWikiLatestModTime(childAbs); err == nil {
+			if maxMod.IsZero() || t.After(maxMod) {
+				maxMod = t
+			}
+		}
+	}
+
+	for _, f := range files {
+		info, err := f.Info()
+		if err != nil {
+			continue
+		}
+		rel := f.Name()
+		if relDir != "" {
+			rel = relDir + "/" + f.Name()
+		}
+		entry := WikiNode{
+			Path: rel,
+			Name: f.Name(),
+			Size: info.Size(),
+		}
+		// 仅 .md 视作可读取的"file"，其它以"other"出现但不可点
+		if strings.HasSuffix(strings.ToLower(f.Name()), ".md") {
+			entry.Type = "file"
+		} else {
+			entry.Type = "other"
+		}
+		entry.ModifiedTime = info.ModTime().UTC().Format(time.RFC3339)
+		if maxMod.IsZero() || info.ModTime().After(maxMod) {
+			maxMod = info.ModTime()
+		}
+		node.Children = append(node.Children, entry)
+	}
+
+	// 目录自身的 ModifiedTime 取子树最大 mtime；根目录的 Name 使用项目根 basename
+	if !maxMod.IsZero() {
+		node.ModifiedTime = maxMod.UTC().Format(time.RFC3339)
+	}
+	node.ChildCount = len(node.Children)
+	return node, nil
 }
 
-// wikiInterfaceHandle Wiki接口
-// 支持 action: list（列表）和 get_content（获取单个文件内容，Markdown 由前端渲染）
+// getWikiLatestModTime 取得目录内（含子目录）最大 mtime；不可访问时返回零值
+func getWikiLatestModTime(dir string) (time.Time, error) {
+	var latest time.Time
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		// 跳过被排除目录
+		if info.IsDir() {
+			if path != dir && wikiShouldSkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
+		}
+		if latest.IsZero() || info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+		return nil
+	})
+	return latest, err
+}
+
+// getWikiTreeWithDir 构建指定目录的 Wiki 树（可注入 projectDir 用于单测）
+func getWikiTreeWithDir(projectDir string) (WikiNode, int, int, error) {
+	absProject, err := filepath.Abs(projectDir)
+	if err != nil {
+		return WikiNode{}, 0, 0, err
+	}
+	rootName := filepath.Base(absProject)
+	tree, err := buildWikiTreeNode(absProject, absProject, "")
+	if err != nil {
+		return WikiNode{}, 0, 0, err
+	}
+	tree.Name = rootName
+	tree.Path = ""
+	files, dirs := countWikiTree(tree)
+	return tree, files, dirs, nil
+}
+
+// getWikiProjectRoot 返回 Wiki 扫描的根目录。
+// 二进制位于 ServerGo/，而 docs/ 位于其父目录（工程根），因此 Wiki 以工程根为扫描起点，
+// 确保 docs/ 子树可见；若父目录不可访问则回退到 system.GetProjectDir()。
+func getWikiProjectRoot() string {
+	binDir := system.GetProjectDir()
+	parent := filepath.Dir(binDir)
+	if parent == "" || parent == binDir {
+		return binDir
+	}
+	// 父目录需存在且包含 docs/ 子目录（避免误用不相关的上级目录）
+	if info, err := os.Stat(filepath.Join(parent, "docs")); err == nil && info.IsDir() {
+		return parent
+	}
+	return binDir
+}
+
+// getWikiTree 构建项目根目录的 Wiki 树
+func getWikiTree() (WikiNode, int, int, error) {
+	return getWikiTreeWithDir(getWikiProjectRoot())
+}
+
+func countWikiTree(n WikiNode) (files, dirs int) {
+	for _, c := range n.Children {
+		switch c.Type {
+		case "file":
+			files++
+		case "dir":
+			dirs++
+			f, d := countWikiTree(c)
+			files += f
+			dirs += d
+		}
+	}
+	return
+}
+
+// wikiContentDefaultLimit 单次默认返回行数；前端按此值追加加载
+const wikiContentDefaultLimit = 400
+
+// wikiContentMaxLimit 单次最大行数（防 DoS，约 64KB UTF-8 文本）
+const wikiContentMaxLimit = 4000
+
+// wikiInterfaceHandle Wiki接口（阶段AG 重构）
+//   - 无 action / action=list: 返回项目根目录的 Markdown 文件树（含目录/文件元信息）
+//   - action=get_content: 读取单个 .md 文件内容，支持 offset/limit 按行分块
 func wikiInterfaceHandle(w http.ResponseWriter, r *http.Request) {
+	wikiInterfaceHandleWithDir(w, r, getWikiProjectRoot())
+}
+
+// wikiInterfaceHandleWithDir 允许注入 projectDir，便于单测
+func wikiInterfaceHandleWithDir(w http.ResponseWriter, r *http.Request, projectDir string) {
 	w.Header().Set("Content-Type", "application/json")
 	setNoCacheHeaders(w)
 
 	var req struct {
 		Action   string `json:"action"`
 		FilePath string `json:"file_path"`
+		Offset   int    `json:"offset"`
+		Limit    int    `json:"limit"`
 	}
 	if r.Method == http.MethodPost {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
+	// 分支 1：读取文件内容
 	if req.Action == "get_content" && req.FilePath != "" {
-		// 安全校验统一走 safeProjectFilePath（filepath.Rel 判定，防前缀碰撞越界）
-		absPath, err := safeProjectFilePath(system.GetProjectDir(), req.FilePath, ".md")
+		absPath, err := safeProjectFilePath(projectDir, req.FilePath, ".md")
 		if err != nil {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 			return
 		}
 
-		content, err := os.ReadFile(absPath)
+		data, err := os.ReadFile(absPath)
 		if err != nil {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "读取文件失败: " + err.Error()})
 			return
 		}
 
+		// 文本按 \n 切行；容忍 \r\n（Windows 文本）
+		normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
+		allLines := strings.Split(normalized, "\n")
+		totalLines := len(allLines)
+
+		// offset/limit 边界
+		offset := req.Offset
+		if offset < 0 {
+			offset = 0
+		}
+		if offset > totalLines {
+			offset = totalLines
+		}
+		limit := req.Limit
+		switch {
+		case limit <= 0:
+			limit = wikiContentDefaultLimit
+		case limit > wikiContentMaxLimit:
+			limit = wikiContentMaxLimit
+		}
+		end := offset + limit
+		if end > totalLines {
+			end = totalLines
+		}
+
+		chunk := strings.Join(allLines[offset:end], "\n")
+		hasMore := end < totalLines
+
+		info, _ := os.Stat(absPath)
+		var modTime string
+		if info != nil {
+			modTime = info.ModTime().UTC().Format(time.RFC3339)
+		}
+
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"path":    req.FilePath,
-			"content": string(content),
+			"path":          req.FilePath,
+			"name":          filepath.Base(req.FilePath),
+			"size":          len(data),
+			"total_lines":   totalLines,
+			"offset":        offset,
+			"limit":         end - offset,
+			"has_more":      hasMore,
+			"modified_time": modTime,
+			"content":       chunk,
 		})
 		return
 	}
 
-	// 默认返回文件列表
-	files, err := getWikiFiles()
+	// 分支 2：返回树
+	tree, totalFiles, totalDirs, err := getWikiTreeWithDir(projectDir)
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"error": err.Error(),
-		})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 		return
 	}
-
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"files": files,
-		"count": len(files),
+		"tree":        tree,
+		"total_files": totalFiles,
+		"total_dirs":  totalDirs,
+		"scanned_at":  time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

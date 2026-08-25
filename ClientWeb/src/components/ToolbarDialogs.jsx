@@ -159,47 +159,278 @@ function UserLogDialog({ onClose }) {
   )
 }
 
-// ===== Wiki 弹窗（列表 + Markdown 内容查看）=====
-function WikiDialog({ onClose }) {
-  const [files, setFiles] = useState(null)
-  const [file, setFile] = useState(null) // 当前查看的文件 {path, content}
-  const [err, setErr] = useState('')
+// ===== Wiki 弹窗（阶段AG：树形目录 + 搜索 + 惰性分块加载文件内容）=====
+const WIKI_CHUNK_LINES = 400 // 与后端 wikiContentDefaultLimit 对齐
 
-  useEffect(() => {
-    post('WikiInterface', {})
-      .then((d) => setFiles(d.files || []))
-      .catch((e) => setErr(e.message || '加载失败'))
-  }, [])
+// 友好大小：1024 进位，保留 1 位小数
+function formatWikiSize(bytes) {
+  if (!bytes || bytes < 0) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
 
-  const openFile = async (f) => {
-    setErr('')
-    setFile({ path: f.path, content: '加载中…' })
-    try {
-      const d = await post('WikiInterface', { action: 'get_content', file_path: f.path })
-      if (d.error) { setErr(d.error); setFile(null); return }
-      setFile({ path: d.path, content: d.content || '' })
-    } catch (e) { setErr(e.message || '读取失败'); setFile(null) }
+// 友好时间：YYYY-MM-DD HH:mm
+function formatWikiTime(iso) {
+  if (!iso) return '-'
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return '-'
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  } catch { return '-' }
+}
+
+// 命中节点及其所有祖先路径（用于搜索时自动展开）
+function collectMatchedPaths(node, keyword) {
+  if (!keyword || !node) return null
+  const lc = keyword.toLowerCase()
+  const matched = new Set()
+  const walk = (n, ancestors) => {
+    const selfMatch = (n.name || '').toLowerCase().includes(lc) || (n.path || '').toLowerCase().includes(lc)
+    let childMatch = false
+    if (n.children) {
+      for (const c of n.children) {
+        if (walk(c, [...ancestors, n.path])) childMatch = true
+      }
+    }
+    if (selfMatch || childMatch) {
+      matched.add(n.path)
+      ancestors.forEach((a) => matched.add(a))
+    }
+    return selfMatch || childMatch
+  }
+  walk(node, [])
+  return matched
+}
+
+// 树节点组件
+function WikiTreeNode({ node, depth, expanded, selectedPath, matchedPaths, onToggle, onSelect }) {
+  const isDir = node.type === 'dir'
+  const isOpen = expanded.has(node.path)
+  const isSelected = selectedPath === node.path
+  const isMatched = matchedPaths && matchedPaths.has(node.path)
+  // 搜索时未命中且无子项命中的非目录节点隐藏
+  if (matchedPaths && !isMatched && !isDir) return null
+  if (matchedPaths && !isMatched && isDir && !isOpen) {
+    const hasMatchInSubtree = (n) => {
+      if (matchedPaths.has(n.path)) return true
+      return (n.children || []).some(hasMatchInSubtree)
+    }
+    if (!hasMatchInSubtree(node)) return null
   }
 
+  const indent = { paddingLeft: 8 + depth * 16 }
+  const label = isDir ? (isOpen ? '📂' : '📁') : (node.type === 'other' ? '📄' : '📑')
+  const sizeStr = isDir ? `${node.child_count} 项` : formatWikiSize(node.size)
+  const isLarge = !isDir && node.size > 50 * 1024 // 50KB
+
   return (
-    <Modal title={file ? `Wiki — ${file.path}` : 'Wiki 文档'} onClose={file ? () => setFile(null) : onClose} width={860}
-           footer={file ? <button className="btn" onClick={() => setFile(null)}>返回列表</button> : null}>
-      {err ? <div className="alert alert-error">{err}</div> : null}
-      {!file && (
-        files === null && !err ? <div className="table-loading">加载中…</div> :
-        !files.length ? <div className="table-empty">暂无文档</div> :
-        <div className="table-wrap"><table className="data-table">
-          <thead><tr><th>路径</th><th>文件名</th><th style={{ width: 80 }}>操作</th></tr></thead>
-          <tbody>{files.map((f) => (
-            <tr key={f.path}>
-              <td className="wrap"><code>{f.path}</code></td>
-              <td>{f.name}</td>
-              <td><button className="btn btn-sm" onClick={() => openFile(f)}>查看</button></td>
-            </tr>
-          ))}</tbody>
-        </table></div>
-      )}
-      {file && <MarkdownView md={file.content} />}
+    <>
+      <div
+        className={'wiki-node' + (isSelected ? ' wiki-node-selected' : '') + (isMatched ? ' wiki-node-match' : '')}
+        style={indent}
+        onClick={() => (isDir ? onToggle(node.path) : onSelect(node))}
+        title={node.path}
+      >
+        {isDir ? <span className="wiki-caret">{isOpen ? '▾' : '▸'}</span> : <span className="wiki-caret wiki-caret-empty">·</span>}
+        <span className="wiki-icon">{label}</span>
+        <span className="wiki-name">{node.name}</span>
+        <span className="wiki-meta">
+          {!isDir && isLarge ? <span className="wiki-chip wiki-chip-warn">大文件（{formatWikiSize(node.size)}）</span> : null}
+          <span className="wiki-size">{sizeStr}</span>
+          {node.modified_time ? <span className="wiki-time">{formatWikiTime(node.modified_time)}</span> : null}
+        </span>
+      </div>
+      {isDir && isOpen && node.children && node.children.map((c) => (
+        <WikiTreeNode
+          key={c.path}
+          node={c}
+          depth={depth + 1}
+          expanded={expanded}
+          selectedPath={selectedPath}
+          matchedPaths={matchedPaths}
+          onToggle={onToggle}
+          onSelect={onSelect}
+        />
+      ))}
+    </>
+  )
+}
+
+function WikiDialog({ onClose }) {
+  const [tree, setTree] = useState(null)
+  const [treeErr, setTreeErr] = useState('')
+  const [expanded, setExpanded] = useState(new Set()) // 已展开目录 path 集合
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState(null) // 当前选中文件节点
+  const [content, setContent] = useState('')       // 已加载文本（拼接）
+  const [loadedLines, setLoadedLines] = useState(0) // 已加载行数
+  const [totalLines, setTotalLines] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [fileErr, setFileErr] = useState('')
+  const [fileMeta, setFileMeta] = useState(null) // {size, modified_time}
+
+  // 初始加载树
+  useEffect(() => {
+    post('WikiInterface', {})
+      .then((d) => {
+        if (d.error) { setTreeErr(d.error); return }
+        setTree(d.tree)
+        // 默认展开根与所有顶层目录
+        const init = new Set([''])
+        if (d.tree && d.tree.children) {
+          for (const c of d.tree.children) {
+            if (c.type === 'dir') init.add(c.path)
+          }
+        }
+        setExpanded(init)
+      })
+      .catch((e) => setTreeErr(e.message || '加载失败'))
+  }, [])
+
+  // 展开/折叠
+  const toggle = (path) => setExpanded((prev) => {
+    const next = new Set(prev)
+    if (next.has(path)) next.delete(path); else next.add(path)
+    return next
+  })
+  const expandAll = () => {
+    if (!tree) return
+    const all = new Set()
+    const walk = (n) => { all.add(n.path); (n.children || []).forEach(walk) }
+    walk(tree)
+    setExpanded(all)
+  }
+  const collapseAll = () => setExpanded(new Set(['']))
+
+  // 搜索
+  const matchedPaths = search ? collectMatchedPaths(tree, search) : null
+  // 搜索时：自动把所有命中的祖先目录加入 expanded
+  useEffect(() => {
+    if (!matchedPaths) return
+    setExpanded((prev) => {
+      let changed = false
+      const next = new Set(prev)
+      for (const p of matchedPaths) {
+        if (!next.has(p)) { next.add(p); changed = true }
+      }
+      return changed ? next : prev
+    })
+  }, [search]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 选中文件
+  const selectFile = async (node) => {
+    if (node.type === 'other') return // 非 .md 不可查看
+    setSelected(node)
+    setContent('')
+    setLoadedLines(0)
+    setTotalLines(0)
+    setHasMore(false)
+    setFileErr('')
+    setFileMeta(null)
+    setLoading(true)
+    try {
+      const d = await post('WikiInterface', { action: 'get_content', file_path: node.path, offset: 0, limit: WIKI_CHUNK_LINES })
+      if (d.error) { setFileErr(d.error); setLoading(false); return }
+      setContent(d.content || '')
+      setLoadedLines((d.offset || 0) + (d.limit || 0))
+      setTotalLines(d.total_lines || 0)
+      setHasMore(!!d.has_more)
+      setFileMeta({ size: d.size, modified_time: d.modified_time })
+    } catch (e) { setFileErr(e.message || '读取失败') }
+    setLoading(false)
+  }
+
+  // 加载更多
+  const loadMore = async () => {
+    if (!selected || loading || !hasMore) return
+    setLoading(true)
+    setFileErr('')
+    try {
+      const d = await post('WikiInterface', { action: 'get_content', file_path: selected.path, offset: loadedLines, limit: WIKI_CHUNK_LINES })
+      if (d.error) { setFileErr(d.error); setLoading(false); return }
+      setContent((prev) => prev + '\n' + (d.content || ''))
+      setLoadedLines((d.offset || 0) + (d.limit || 0))
+      setHasMore(!!d.has_more)
+    } catch (e) { setFileErr(e.message || '加载更多失败') }
+    setLoading(false)
+  }
+
+  // 面包屑
+  const crumbs = selected ? selected.path.split('/').filter(Boolean) : []
+  const totalFiles = tree ? (() => {
+    let n = 0
+    const walk = (x) => { if (x.type === 'file') n++; (x.children || []).forEach(walk) }
+    walk(tree)
+    return n
+  })() : 0
+
+  return (
+    <Modal title="Wiki 知识库" onClose={onClose} width={1000}>
+      <div className="wiki-toolbar">
+        <input
+          className="wiki-search"
+          placeholder="搜索文件名或路径…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <button className="btn btn-sm" onClick={expandAll}>展开全部</button>
+        <button className="btn btn-sm" onClick={collapseAll}>折叠全部</button>
+        <span className="wiki-stats">共 {totalFiles} 个 .md 文件</span>
+      </div>
+      {treeErr ? <div className="alert alert-error">{treeErr}</div> : null}
+      {fileErr ? <div className="alert alert-error">{fileErr}</div> : null}
+      <div className="wiki-layout">
+        <div className="wiki-tree-pane">
+          {!tree && !treeErr ? <div className="table-loading">加载中…</div> :
+            tree ? (
+              <div className="wiki-tree">
+                <WikiTreeNode
+                  node={tree}
+                  depth={0}
+                  expanded={expanded}
+                  selectedPath={selected ? selected.path : null}
+                  matchedPaths={matchedPaths}
+                  onToggle={toggle}
+                  onSelect={selectFile}
+                />
+              </div>
+            ) : null
+          }
+        </div>
+        <div className="wiki-content-pane">
+          {selected ? (
+            <>
+              <div className="wiki-breadcrumb">
+                {crumbs.map((seg, i) => (
+                  <span key={i}>
+                    {i > 0 ? <span className="wiki-crumb-sep">/</span> : null}
+                    <span className="wiki-crumb">{seg}</span>
+                  </span>
+                ))}
+                {fileMeta ? <span className="wiki-content-meta"> · {formatWikiSize(fileMeta.size)} · {formatWikiTime(fileMeta.modified_time)}</span> : null}
+              </div>
+              <div className="wiki-content">
+                <MarkdownView md={content} />
+                {hasMore ? (
+                  <div className="wiki-loadmore">
+                    <button className="btn" onClick={loadMore} disabled={loading}>
+                      {loading ? '加载中…' : `加载更多（已加载 ${loadedLines} / ${totalLines} 行）`}
+                    </button>
+                  </div>
+                ) : loadedLines > 0 ? <div className="wiki-content-end">— 已加载全部 {loadedLines} 行 —</div> : null}
+              </div>
+            </>
+          ) : (
+            <div className="wiki-welcome">
+              <p>👈 请从左侧树选择一个 Markdown 文件查看内容</p>
+              <p className="wiki-welcome-hint">支持全局搜索（按文件名/路径），目录可展开/折叠。</p>
+            </div>
+          )}
+        </div>
+      </div>
     </Modal>
   )
 }
