@@ -6,6 +6,16 @@ func GetGitRepoInfo(maxCommits int) (*GitRepoInfo, error) {
 	return getGitRepoInfo(maxCommits)
 }
 
+// GetGitRepoInfoLight 轻量获取仓库信息（提交列表 + 总数，不查文件变更，消除 N+1 git show）
+func GetGitRepoInfoLight(maxCommits int) (*GitRepoInfo, error) {
+	return getGitRepoInfoLight(maxCommits)
+}
+
+// GetGitCommitChanges 获取单次提交的文件变更列表（带 A/M/D/R 状态，前端展开时惰性调用）
+func GetGitCommitChanges(hash string) ([]GitFileChange, error) {
+	return getCommitFileChanges(hash)
+}
+
 // GetSystemInfo 获取系统运行信息
 func GetSystemInfo() (*SystemInfo, error) {
 	return getSystemInfo()

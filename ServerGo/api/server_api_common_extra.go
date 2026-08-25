@@ -231,24 +231,10 @@ func wikiInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Action == "get_content" && req.FilePath != "" {
-		// 安全检查：只允许读取项目目录下的 .md 文件
-		if !strings.HasSuffix(req.FilePath, ".md") {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"error": "只允许读取 .md 文件",
-			})
-			return
-		}
-
-		projectDir := system.GetProjectDir()
-		// 将相对路径转换为绝对路径
-		absPath, err := filepath.Abs(filepath.Join(projectDir, req.FilePath))
+		// 安全校验统一走 safeProjectFilePath（filepath.Rel 判定，防前缀碰撞越界）
+		absPath, err := safeProjectFilePath(system.GetProjectDir(), req.FilePath, ".md")
 		if err != nil {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "无效的文件路径"})
-			return
-		}
-		absProjectDir, _ := filepath.Abs(projectDir)
-		if !strings.HasPrefix(absPath, absProjectDir) {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": "路径超出项目范围"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
 			return
 		}
 

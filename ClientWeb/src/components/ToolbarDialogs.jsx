@@ -146,9 +146,24 @@ function WikiDialog({ onClose }) {
 }
 
 // ===== 证书下载弹窗 =====
+// 复制到剪贴板（clipboard API 优先，降级 execCommand）
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true }
+  } catch { /* 降级 */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.select()
+    document.execCommand('copy'); document.body.removeChild(ta)
+    return true
+  } catch { return false }
+}
+
 function CertDialog({ onClose }) {
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
+  const [copied, setCopied] = useState('')
 
   useEffect(() => {
     get('CertDownloadInfoInterface').then((d) => {
@@ -157,11 +172,37 @@ function CertDialog({ onClose }) {
     }).catch((e) => setErr(e.message || '加载失败'))
   }, [])
 
+  const doCopy = async (key, text) => {
+    if (await copyText(text)) {
+      setCopied(key)
+      setTimeout(() => setCopied(''), 1500)
+    }
+  }
+
+  // 完整 HTTPS 接入地址（对齐旧程序：Anthropic / OpenAI 完整 URL + 复制按钮）
+  const base = info && info.https_enabled
+    ? `https://${info.agent_host}${info.https_port ? `:${info.https_port}` : ''}` : ''
+  const urls = [
+    { key: 'anthropic', label: 'Anthropic 接入地址', url: base ? `${base}/${String(info.anthropic_path || 'Anthropic').replace(/^\/+/, '')}` : '' },
+    { key: 'openai', label: 'OpenAI 接入地址', url: base ? `${base}/${String(info.openai_path || 'OpenAI').replace(/^\/+/, '')}` : '' },
+  ]
+
   return (
     <Modal title="HTTPS 证书下载" onClose={onClose} width={620}>
       {err ? <div className="alert alert-error">{err}</div> : null}
       {info && (
         <>
+          {urls.map((u) => (
+            <div key={u.key} className="toolbar" style={{ marginBottom: 6 }}>
+              <span style={{ fontSize: 13, width: 130, flexShrink: 0 }}>{u.label}</span>
+              <input readOnly value={u.url || 'HTTPS 未启用'} style={{ flex: 1 }}
+                     disabled={!u.url} onFocus={(e) => e.target.select()} />
+              <button className="btn btn-sm" disabled={!u.url}
+                      onClick={() => doCopy(u.key, u.url)}>
+                {copied === u.key ? '已复制' : '复制'}
+              </button>
+            </div>
+          ))}
           <dl className="kv">
             <dt>代理地址</dt><dd>{info.agent_host}{info.https_port ? `:${info.https_port}` : ''}</dd>
             <dt>Anthropic 路径</dt><dd>{info.anthropic_path || '-'}</dd>
@@ -214,32 +255,57 @@ function CertDialog({ onClose }) {
   )
 }
 
-// ===== Git 信息弹窗 =====
+// ===== Git 信息弹窗（阶段AA：客户端分页 + 展开时惰性拉取文件变更，弹窗打开零 git show 子进程）=====
+const GIT_PAGE_SIZE = 20
 function GitDialog({ onClose }) {
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
-  const [openHash, setOpenHash] = useState(null) // 展开文件变更的 commit hash（迁移自旧 toggleCommitFiles）
+  const [page, setPage] = useState(1)
+  const [openHash, setOpenHash] = useState(null) // 展开文件变更的 commit hash
+  const [changes, setChanges] = useState({})     // hash → 变更列表缓存
 
   useEffect(() => {
-    get('GitInfoInterface').then((d) => {
+    get('GitInfoInterface?limit=200').then((d) => {
       if (d.error) { setErr(d.error); return }
       setInfo(d)
     }).catch((e) => setErr(e.message || '加载失败'))
   }, [])
 
+  // 惰性拉取单提交文件变更（带本地缓存）
+  const toggleCommit = async (hash) => {
+    if (openHash === hash) { setOpenHash(null); return }
+    setOpenHash(hash)
+    if (!changes[hash]) {
+      try {
+        const d = await get(`GitInfoInterface?action=get_changes&hash=${hash}`)
+        setChanges((prev) => ({ ...prev, [hash]: d.changes || [] }))
+      } catch { /* 拉取失败保持“无文件变更信息”展示 */ }
+    }
+  }
+
+  const commits = info ? (info.commits || []) : []
+  const totalPages = Math.max(1, Math.ceil(commits.length / GIT_PAGE_SIZE))
+  const cur = Math.min(page, totalPages)
+  const pageCommits = commits.slice((cur - 1) * GIT_PAGE_SIZE, cur * GIT_PAGE_SIZE)
+
   return (
-    <Modal title="Git 信息" onClose={onClose} width={760}>
+    <Modal title="Git 信息" onClose={onClose} width={760}
+           footer={<>
+             <button className="btn btn-sm" disabled={cur <= 1} onClick={() => setPage(cur - 1)}>上一页</button>
+             <span style={{ fontSize: 12 }}>第 {cur} / {totalPages} 页</span>
+             <button className="btn btn-sm" disabled={cur >= totalPages} onClick={() => setPage(cur + 1)}>下一页</button>
+           </>}>
       {err ? <div className="alert alert-error">{err}</div> : null}
       {info && (
         <>
           <p style={{ fontSize: 13 }}>分支：<strong>{info.branch || '-'}</strong>
             {info.remote ? <span style={{ color: 'var(--muted)' }}>（{info.remote}）</span> : null}
-            ，共 {info.count || 0} 次提交<span style={{ color: 'var(--muted)' }}>（点击行展开文件变更）</span></p>
+            ，共 {info.count || 0} 次提交，展示最近 {commits.length} 条<span style={{ color: 'var(--muted)' }}>（点击行展开文件变更）</span></p>
           <div className="table-wrap"><table className="data-table">
             <thead><tr><th>Hash</th><th>作者</th><th>日期</th><th>说明</th></tr></thead>
-            <tbody>{(info.commits || []).map((c) => (
+            <tbody>{pageCommits.map((c) => (
               <Fragment key={c.hash}>
-                <tr className="row-click" onClick={() => setOpenHash(openHash === c.hash ? null : c.hash)}
+                <tr className="row-click" onClick={() => toggleCommit(c.hash)}
                     style={openHash === c.hash ? { background: '#eef4ff' } : undefined}>
                   <td><code>{String(c.hash || '').slice(0, 7)}</code></td>
                   <td>{c.author}</td>
@@ -249,9 +315,13 @@ function GitDialog({ onClose }) {
                 {openHash === c.hash && (
                   <tr><td colSpan={4}>
                     <div className="commit-files">
-                      {c.changes && c.changes.length ? c.changes.map((f, i) => (
-                        <div key={i}><span className={`chg chg-${f.status}`}>{f.status}</span><code>{f.path}</code></div>
-                      )) : '无文件变更信息'}
+                      {changes[c.hash]
+                        ? (changes[c.hash].length
+                            ? changes[c.hash].map((f, i) => (
+                                <div key={i}><span className={`chg chg-${f.status}`}>{f.status}</span><code>{f.path}</code></div>
+                              ))
+                            : '无文件变更信息')
+                        : '加载变更中…'}
                     </div>
                   </td></tr>
                 )}
@@ -312,6 +382,34 @@ function SysDialog({ onClose }) {
               磁盘 {d.mounted_on}：{d.used_human || '-'} / {d.size_human || '-'}（{d.usage_pct}%）
             </p>
           ))}
+          {info.disk_io && (
+            <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+              磁盘 IO：读 {info.disk_io.read_mbps_human || '-'} / 写 {info.disk_io.write_mbps_human || '-'}，
+              IOPS 读 {info.disk_io.read_ops_sec_human || '-'} / 写 {info.disk_io.write_ops_sec_human || '-'}，
+              iowait {info.disk_io.io_wait_pct || 0}%
+            </p>
+          )}
+          {info.process && (
+            <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+              本进程：PID {info.process.pid}，线程 {info.process.num_threads}，FD {info.process.num_fd}，RSS {info.process.rss_human || '-'}
+            </p>
+          )}
+          {info.network && (
+            <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+              网络：TCP 连接 {info.network.connections || 0}，监听端口 {(info.network.listen_ports || []).slice(0, 8).join('、') || '-'}
+            </p>
+          )}
+          {info.process_tops && (info.process_tops.cpu || []).length > 0 && (
+            <>
+              <p style={{ fontSize: 13, fontWeight: 600, margin: '10px 0 6px' }}>CPU Top 进程</p>
+              <div className="table-wrap"><table className="data-table">
+                <thead><tr><th style={{ width: 70 }}>PID</th><th>名称</th><th style={{ width: 100 }}>CPU</th></tr></thead>
+                <tbody>{(info.process_tops.cpu || []).slice(0, 8).map((p, i) => (
+                  <tr key={i}><td>{p.pid}</td><td>{p.name}</td><td>{p.usage_pct}%</td></tr>
+                ))}</tbody>
+              </table></div>
+            </>
+          )}
         </>
       )}
       {!info && !err && <div className="table-loading">加载中…</div>}
@@ -363,6 +461,7 @@ function SourceCodeDialog({ onClose }) {
   const [stats, setStats] = useState(null)
   const [file, setFile] = useState(null) // {name, content}
   const [err, setErr] = useState('')
+  const [filter, setFilter] = useState('') // 文件名过滤（对齐旧程序过滤输入框）
 
   useEffect(() => {
     post('SourceCodeInterface', {}).then((d) => {
@@ -370,6 +469,10 @@ function SourceCodeDialog({ onClose }) {
       setStats(d)
     }).catch((e) => setErr(e.message || '加载失败'))
   }, [])
+
+  const filtered = stats && filter
+    ? (stats.files || []).filter((f) => (f.name || '').toLowerCase().includes(filter.toLowerCase()))
+    : (stats ? stats.files || [] : [])
 
   const openFile = async (f) => {
     setErr('')
@@ -389,9 +492,14 @@ function SourceCodeDialog({ onClose }) {
         <>
           <p style={{ fontSize: 13 }}>共 <strong>{stats.total_files}</strong> 个 .go 文件，
             <strong>{stats.total_lines}</strong> 行，总大小 {stats.size_human || '-'}</p>
+          <div className="toolbar" style={{ marginBottom: 8 }}>
+            <input style={{ flex: 1 }} value={filter} placeholder="文件名过滤…"
+                   onChange={(e) => setFilter(e.target.value)} />
+            {filter ? <span style={{ fontSize: 12, color: 'var(--muted)' }}>{filtered.length} / {stats.total_files}</span> : null}
+          </div>
           <div className="table-wrap"><table className="data-table">
             <thead><tr><th>文件</th><th style={{ width: 100 }}>行数</th><th style={{ width: 100 }}>大小</th><th style={{ width: 80 }}>操作</th></tr></thead>
-            <tbody>{(stats.files || []).map((f) => (
+            <tbody>{filtered.map((f) => (
               <tr key={f.name}>
                 <td className="wrap"><code>{f.name}</code></td>
                 <td>{f.lines}</td>

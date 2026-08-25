@@ -3,6 +3,7 @@ package system
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -88,6 +89,61 @@ func getGitRepoInfo(maxCommits int) (*GitRepoInfo, error) {
 		Remote:  remote,
 		Commits: commits,
 		Count:   len(commits),
+	}, nil
+}
+
+// getGitRepoInfoLight 轻量获取仓库信息（阶段AA）：
+// 单次 git log 拿提交列表（不带文件变更），总数用 git rev-list --count 单次查询，
+// 不执行任何 git show —— 消除旧实现“每个提交 fork 一次 git show”的 N+1 子进程问题。
+// maxCommits <= 0 时取默认 100。
+func getGitRepoInfoLight(maxCommits int) (*GitRepoInfo, error) {
+	if maxCommits <= 0 {
+		maxCommits = 100
+	}
+	projectDir := getProjectDir()
+
+	// 当前分支
+	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = projectDir
+	branchBytes, err := branchCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("get branch failed: %w", err)
+	}
+	branch := strings.TrimSpace(string(branchBytes))
+
+	// 远程地址（无远程时忽略错误）
+	remoteCmd := exec.Command("git", "remote", "get-url", "origin")
+	remoteCmd.Dir = projectDir
+	remoteBytes, remoteErr := remoteCmd.Output()
+	remote := ""
+	if remoteErr == nil {
+		remote = strings.TrimSpace(string(remoteBytes))
+	}
+
+	// 提交列表（限条数，不含文件变更）
+	logCmd := exec.Command("git", "log", fmt.Sprintf("-%d", maxCommits), "--pretty=format:%H|%an|%ci|%s")
+	logCmd.Dir = projectDir
+	logBytes, err := logCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("get log failed: %w", err)
+	}
+	commits := parseGitLog(string(logBytes))
+
+	// 总提交数（失败时回退为当前列表长度）
+	total := len(commits)
+	countCmd := exec.Command("git", "rev-list", "--count", "HEAD")
+	countCmd.Dir = projectDir
+	if countBytes, err := countCmd.Output(); err == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(string(countBytes))); err == nil {
+			total = n
+		}
+	}
+
+	return &GitRepoInfo{
+		Branch:  branch,
+		Remote:  remote,
+		Commits: commits,
+		Count:   total,
 	}, nil
 }
 
