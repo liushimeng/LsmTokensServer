@@ -435,7 +435,7 @@ function WikiDialog({ onClose }) {
   )
 }
 
-// ===== 证书下载弹窗 =====
+// ===== 证书安装指南弹窗（阶段AI：完整接入地址 + 证书元信息 + 跨平台安装指引）=====
 // 复制到剪贴板（clipboard API 优先，降级 execCommand）
 async function copyText(text) {
   try {
@@ -450,6 +450,212 @@ async function copyText(text) {
   } catch { return false }
 }
 
+// 跨平台安装指引（每段 4 步：下载 → 安装 → 验证 → 客户端配置）
+const CERT_INSTALL_GUIDES = [
+  {
+    icon: '🍎', os: 'macOS',
+    steps: [
+      {
+        title: '下载证书',
+        body: () => <>点击上方「下载证书」按钮，保存到 <code>~/Downloads/LsmTokensServer.crt</code>。</>,
+      },
+      {
+        title: '导入到钥匙串',
+        body: () => (
+          <>
+            <p style={{ margin: '4px 0' }}>双击下载的 <code>.crt</code> 文件，默认会导入到「登录」钥匙串。</p>
+            <p style={{ margin: '4px 0', color: 'var(--muted)', fontSize: 12 }}>命令行等价步骤（需管理员权限）：</p>
+            <pre className="cert-code-block" data-copy="mac-import"><code>{`open ~/Downloads/LsmTokensServer.crt\n# 或：钥匙串访问 → 系统 → 文件 → 导入项目`}</code></pre>
+          </>
+        ),
+      },
+      {
+        title: '设为始终信任',
+        body: () => (
+          <>
+            <p style={{ margin: '4px 0' }}>在「钥匙串访问」中找到该证书 → 双击 → 展开「信任」→ 「安全套接字层」设为「始终信任」。</p>
+            <pre className="cert-code-block" data-copy="mac-trust"><code>{`sudo security add-trusted-cert -d -r trustRoot \\\n  -k /Library/Keychains/System.keychain \\\n  ~/Downloads/LsmTokensServer.crt`}</code></pre>
+          </>
+        ),
+      },
+      {
+        title: '验证 & 客户端配置',
+        body: (info) => (
+          <>
+            <pre className="cert-code-block" data-copy="mac-verify"><code>{`curl -vI ${info?.public_anthropic_url || 'https://your-host:29003/Anthropic'}\n# 应输出：SSL certificate verify ok`}</code></pre>
+            <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--muted)' }}>
+              客户端（Claude Desktop / Cursor / Continue 等）把 HTTPS 接入地址填入 <code>base_url</code> 字段即可。
+            </p>
+          </>
+        ),
+      },
+    ],
+  },
+  {
+    icon: '🪟', os: 'Windows',
+    steps: [
+      { title: '下载证书', body: () => <>点击上方「下载证书」按钮，保存为 <code>LsmTokensServer.crt</code>。</> },
+      {
+        title: '导入到受信任的根证书颁发机构',
+        body: () => (
+          <>
+            <p style={{ margin: '4px 0' }}>GUI：双击 <code>.crt</code> → 「安装证书」→ 存储区域选「本地计算机」→ 「将所有的证书都放入下列存储」→ 「受信任的根证书颁发机构」。</p>
+            <p style={{ margin: '4px 0', color: 'var(--muted)', fontSize: 12 }}>PowerShell（管理员）一行命令等价：</p>
+            <pre className="cert-code-block" data-copy="win-import"><code>{`Import-Certificate -FilePath "$env:USERPROFILE\\Downloads\\LsmTokensServer.crt" \\\n  -CertStoreLocation Cert:\\LocalMachine\\Root`}</code></pre>
+          </>
+        ),
+      },
+      {
+        title: '验证',
+        body: () => (
+          <pre className="cert-code-block" data-copy="win-verify"><code>{`certutil -store Root | findstr /I "LsmTokensServer"\n# 出现指纹行即表示已安装`}</code></pre>
+        ),
+      },
+      {
+        title: '客户端配置',
+        body: () => <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--muted)' }}>把 HTTPS 接入地址填入客户端 <code>base_url</code> 字段（Claude Desktop / Cursor / Continue 等）。</p>,
+      },
+    ],
+  },
+  {
+    icon: '🐧', os: 'Ubuntu / Debian',
+    steps: [
+      { title: '下载证书', body: () => <>点击上方「下载证书」按钮，保存到 <code>~/Downloads/LsmTokensServer.crt</code>。</> },
+      {
+        title: '安装到系统信任池',
+        body: () => (
+          <pre className="cert-code-block" data-copy="ubuntu-install"><code>{`sudo cp ~/Downloads/LsmTokensServer.crt /usr/local/share/ca-certificates/\nsudo update-ca-certificates\n# 末尾输出：1 added, 0 removed; done.`}</code></pre>
+        ),
+      },
+      {
+        title: '验证',
+        body: () => (
+          <pre className="cert-code-block" data-copy="ubuntu-verify"><code>{`awk '/BEGIN/,/END/' /etc/ssl/certs/ca-certificates.crt | grep -c "BEGIN"\n# 比更新前 +1 表示新证书已并入系统信任池`}</code></pre>
+        ),
+      },
+      { title: '客户端配置', body: () => <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--muted)' }}>curl / wget / git / Python requests / Node.js 18+ 都会跟随系统 CA；客户端 <code>base_url</code> 直接使用 HTTPS 接入地址。</p> },
+    ],
+  },
+  {
+    icon: '🎩', os: 'CentOS / RHEL / Rocky / Alma',
+    steps: [
+      { title: '下载证书', body: () => <>点击上方「下载证书」按钮，假设保存到 <code>~/LsmTokensServer.crt</code>。</> },
+      {
+        title: '安装到系统信任池',
+        body: () => (
+          <pre className="cert-code-block" data-copy="centos-install"><code>{`sudo cp ~/LsmTokensServer.crt /etc/pki/ca-trust/source/anchors/\nsudo update-ca-trust`}</code></pre>
+        ),
+      },
+      {
+        title: '验证',
+        body: () => (
+          <>
+            <pre className="cert-code-block" data-copy="centos-verify"><code>{`trust list | grep -i LsmTokensServer\n# CentOS 7：update-ca-certificates --fresh`}</code></pre>
+            <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--muted)' }}>CentOS 8+ / RHEL 8+ / Rocky / Alma 用 <code>update-ca-trust</code>；CentOS 7 用 <code>update-ca-certificates --fresh</code>。</p>
+          </>
+        ),
+      },
+      { title: '客户端配置', body: () => <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--muted)' }}>把 HTTPS 接入地址填入客户端 <code>base_url</code> 字段。</p> },
+    ],
+  },
+  {
+    icon: '🌿', os: 'Fedora',
+    steps: [
+      { title: '下载证书', body: () => <>点击上方「下载证书」按钮，假设保存到 <code>~/LsmTokensServer.crt</code>。</> },
+      {
+        title: '安装到系统信任池',
+        body: () => (
+          <pre className="cert-code-block" data-copy="fedora-install"><code>{`sudo cp ~/LsmTokensServer.crt /etc/pki/ca-trust/source/anchors/\nsudo update-ca-trust extract`}</code></pre>
+        ),
+      },
+      {
+        title: '验证',
+        body: () => <pre className="cert-code-block" data-copy="fedora-verify"><code>{`trust list | grep -i LsmTokensServer`}</code></pre>,
+      },
+      { title: '客户端配置', body: () => <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--muted)' }}>把 HTTPS 接入地址填入客户端 <code>base_url</code> 字段。</p> },
+    ],
+  },
+  {
+    icon: '🏛️', os: 'Arch / Manjaro',
+    steps: [
+      { title: '下载证书', body: () => <>点击上方「下载证书」按钮，假设保存到 <code>~/LsmTokensServer.crt</code>。</> },
+      {
+        title: '使用 trust 工具',
+        body: () => (
+          <pre className="cert-code-block" data-copy="arch-install"><code>{`sudo trust anchor --store ~/LsmTokensServer.crt`}</code></pre>
+        ),
+      },
+      {
+        title: '验证',
+        body: () => <pre className="cert-code-block" data-copy="arch-verify"><code>{`trust list | grep -i LsmTokensServer`}</code></pre>,
+      },
+      { title: '客户端配置', body: () => <p style={{ margin: '4px 0', fontSize: 12, color: 'var(--muted)' }}>把 HTTPS 接入地址填入客户端 <code>base_url</code> 字段。</p> },
+    ],
+  },
+  {
+    icon: '🐧', os: '通用 Linux（snap / flatpak / Docker）',
+    steps: [
+      {
+        title: '系统层证书',
+        body: () => (
+          <p style={{ margin: '4px 0' }}>
+            系统层证书已通过上述任一发行版命令安装。但 <code>snap</code> / <code>flatpak</code> / Docker 容器通常自带独立证书栈：
+          </p>
+        ),
+      },
+      {
+        title: '常见客户端',
+        body: () => (
+          <ul style={{ margin: '4px 0', paddingLeft: 20, fontSize: 12.5 }}>
+            <li><strong>curl / wget / git</strong>：跟随系统 <code>/etc/ssl/certs</code>，无需额外操作</li>
+            <li><strong>Python requests</strong>：跟随系统；如使用 <code>certifi</code> 自带证书库，需手工合并</li>
+            <li><strong>Node.js 18+</strong>：使用内置 CA，跟随系统</li>
+            <li><strong>Docker</strong>：构建镜像时 <code>COPY LsmTokensServer.crt /usr/local/share/ca-certificates/ &amp;&amp; update-ca-certificates</code></li>
+            <li><strong>snap 应用</strong>：snap 不读取系统 CA，需在 snap 应用内单独配置</li>
+          </ul>
+        ),
+      },
+    ],
+  },
+]
+
+// 单条接入地址行（含复制按钮）
+function CertUrlRow({ label, url, copiedKey, onCopy }) {
+  const enabled = !!url
+  return (
+    <div className="toolbar cert-url-row" style={{ marginBottom: 6 }}>
+      <span style={{ fontSize: 13, width: 130, flexShrink: 0 }}>{label}</span>
+      <input readOnly value={url || (enabled ? '-' : '未启用')} style={{ flex: 1 }}
+             disabled={!enabled} onFocus={(e) => e.target.select()} />
+      <button className="btn btn-sm" disabled={!enabled} onClick={() => onCopy(url)}>
+        {copiedKey === label ? '已复制' : '复制'}
+      </button>
+    </div>
+  )
+}
+
+// 命令代码块（含右上角复制按钮）
+function CertCodeBlock({ children, dataCopy }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    // 从 <code> 文本提取纯文本
+    const text = String(children).replace(/\s+/g, ' ').trim()
+    if (await copyText(text)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+  }
+  return (
+    <div style={{ position: 'relative' }}>
+      <pre className="cert-code-block" data-copy={dataCopy}>
+        <button className="btn btn-sm cert-code-copy" onClick={handleCopy}
+                title="复制全部命令">{copied ? '已复制' : '📋 复制'}</button>
+        <code>{children}</code>
+      </pre>
+    </div>
+  )
+}
+
 function CertDialog({ onClose }) {
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
@@ -462,87 +668,157 @@ function CertDialog({ onClose }) {
     }).catch((e) => setErr(e.message || '加载失败'))
   }, [])
 
-  const doCopy = async (key, text) => {
+  const doCopy = async (label, text) => {
     if (await copyText(text)) {
-      setCopied(key)
+      setCopied(label)
       setTimeout(() => setCopied(''), 1500)
     }
   }
 
-  // 完整 HTTPS 接入地址（对齐旧程序：Anthropic / OpenAI 完整 URL + 复制按钮）
-  const base = info && info.https_enabled
-    ? `https://${info.agent_host}${info.https_port ? `:${info.https_port}` : ''}` : ''
-  const urls = [
-    { key: 'anthropic', label: 'Anthropic 接入地址', url: base ? `${base}/${String(info.anthropic_path || 'Anthropic').replace(/^\/+/, '')}` : '' },
-    { key: 'openai', label: 'OpenAI 接入地址', url: base ? `${base}/${String(info.openai_path || 'OpenAI').replace(/^\/+/, '')}` : '' },
-  ]
+  // 构造接入地址（优先使用后端新字段 public_*_url / http_*_url；旧字段缺失时前端兜底拼装）
+  const httpsUrls = info ? [
+    { key: 'https-anthropic', label: 'Anthropic', url: info.public_anthropic_url || (info.https_enabled && info.agent_host ? `${info.https_port ? 'https' : 'https'}://${info.agent_host}${info.https_port ? `:${info.https_port}` : ''}/${(info.anthropic_path || 'Anthropic').replace(/^\/+/, '')}` : '') },
+    { key: 'https-openai', label: 'OpenAI', url: info.public_openai_url || (info.https_enabled && info.agent_host ? `${info.https_port ? 'https' : 'https'}://${info.agent_host}${info.https_port ? `:${info.https_port}` : ''}/${(info.openai_path || 'OpenAI').replace(/^\/+/, '')}` : '') },
+  ].map((u) => ({ ...u, url: u.url || '' })) : []
+
+  const httpUrls = info ? [
+    { key: 'http-anthropic', label: 'Anthropic', url: info.http_anthropic_url || (info.http_port > 0 && info.public_host ? `http://${info.public_host}:${info.http_port}/${(info.anthropic_path || 'Anthropic').replace(/^\/+/, '')}` : '') },
+    { key: 'http-openai', label: 'OpenAI', url: info.http_openai_url || (info.http_port > 0 && info.public_host ? `http://${info.public_host}:${info.http_port}/${(info.openai_path || 'OpenAI').replace(/^\/+/, '')}` : '') },
+  ].map((u) => ({ ...u, url: u.url || '' })) : []
+
+  const httpEnabled = !!info && info.http_port > 0 && !!info.public_host && (httpUrls.some((u) => u.url))
 
   return (
-    <Modal title="HTTPS 证书下载" onClose={onClose} width={620}>
+    <Modal title="证书安装指南" onClose={onClose} width={760}>
       {err ? <div className="alert alert-error">{err}</div> : null}
       {info && (
         <>
-          {urls.map((u) => (
-            <div key={u.key} className="toolbar" style={{ marginBottom: 6 }}>
-              <span style={{ fontSize: 13, width: 130, flexShrink: 0 }}>{u.label}</span>
-              <input readOnly value={u.url || 'HTTPS 未启用'} style={{ flex: 1 }}
-                     disabled={!u.url} onFocus={(e) => e.target.select()} />
-              <button className="btn btn-sm" disabled={!u.url}
-                      onClick={() => doCopy(u.key, u.url)}>
-                {copied === u.key ? '已复制' : '复制'}
-              </button>
+          {/* ① HTTPS 接入地址 */}
+          <section className="cert-section">
+            <h3 className="cert-section-title">🔒 HTTPS 接入地址（推荐）</h3>
+            <p className="cert-msg">
+              客户端（Claude Desktop / Cursor / Continue 等）应优先使用 HTTPS 接入地址，
+              在系统信任自签证书后即消除「不安全」告警。
+            </p>
+            {httpsUrls.map((u) => (
+              <CertUrlRow key={u.key} label={u.label} url={u.url}
+                          copiedKey={copied} onCopy={() => doCopy(u.label, u.url)} />
+            ))}
+            {!info.https_enabled && (
+              <p className="cert-msg" style={{ color: 'var(--danger)' }}>
+                ⚠ 当前未启用 HTTPS 代理（agentHttpsListenPort = 0），请先在 <code>LsmTokensServer.conf</code> 启用。
+              </p>
+            )}
+          </section>
+
+          {/* ② HTTP 接入地址 */}
+          {httpEnabled && (
+            <section className="cert-section">
+              <h3 className="cert-section-title">🌐 HTTP 接入地址（明文，仅供内网或调试）</h3>
+              <p className="cert-msg">
+                明文传输，仅在受信任的内网或调试时使用；公网部署请使用 HTTPS。
+              </p>
+              {httpUrls.map((u) => (
+                <CertUrlRow key={u.key} label={u.label} url={u.url}
+                            copiedKey={copied} onCopy={() => doCopy('HTTP-' + u.label, u.url)} />
+              ))}
+            </section>
+          )}
+
+          {/* ③ 证书元信息 */}
+          <section className="cert-section">
+            <h3 className="cert-section-title">📄 证书信息</h3>
+            <dl className="kv">
+              <dt>文件路径</dt><dd>{info.cert_file || '-'}</dd>
+              <dt>大小</dt>
+              <dd>{info.cert_exists ? `${info.cert_size} 字节` : <span style={{ color: 'var(--danger)' }}>不存在</span>}</dd>
+              <dt>主题 (Subject)</dt><dd>{info.cert_subject || '-'}</dd>
+              <dt>颁发者 (Issuer)</dt><dd>{info.cert_issuer || '-'}</dd>
+              <dt>有效期</dt>
+              <dd>
+                {info.cert_not_before || '-'} ~ {info.cert_not_after || '-'}
+                {info.cert_not_after && (
+                  <span style={{ marginLeft: 8 }}>
+                    {info.cert_expired
+                      ? <><span className="status-dot status-off" /><span style={{ color: 'var(--danger)' }}>已过期</span></>
+                      : <><span className="status-dot status-on" /><span style={{ color: 'var(--ok)' }}>有效</span></>}
+                  </span>
+                )}
+              </dd>
+              <dt>SHA-256 指纹</dt>
+              <dd>
+                {info.cert_sha256
+                  ? (
+                    <>
+                      <code className="cert-fingerprint">{info.cert_sha256}</code>
+                      <button className="btn btn-sm" style={{ marginLeft: 6 }}
+                              onClick={() => doCopy('sha256', info.cert_sha256)}>
+                        {copied === 'sha256' ? '已复制' : '复制'}
+                      </button>
+                    </>
+                  )
+                  : <span style={{ color: 'var(--muted)' }}>无法解析（文件非 PEM 或已损坏）</span>}
+              </dd>
+              <dt>序列号</dt>
+              <dd><code>{info.cert_serial || '-'}</code></dd>
+              <dt>HTTPS 代理</dt><dd>{info.https_enabled ? `已启用 :${info.https_port}` : '未启用'}</dd>
+              <dt>Web HTTPS</dt><dd>{info.user_web_https_enabled ? '已启用' : '未启用'}</dd>
+            </dl>
+
+            <button className="btn btn-primary cert-download-btn" disabled={!info.cert_exists}
+                    onClick={() => download('CertDownloadInterface')}>
+              ⬇ 下载证书（{info.cert_file || 'server.crt'}）
+            </button>
+          </section>
+
+          {/* ④ 跨平台安装指引 */}
+          <section className="cert-section">
+            <h3 className="cert-section-title">📚 跨平台安装指引</h3>
+            <p className="cert-msg">
+              下载证书后，按系统选择以下步骤。安装完成后浏览器 / curl 调用 HTTPS 接入地址将不再提示「不安全」。
+            </p>
+            <div className="cert-guide-list">
+              {CERT_INSTALL_GUIDES.map((g, gi) => (
+                <details key={gi} open={gi === 0 /* macOS 默认展开 */}>
+                  <summary>
+                    <span className="cert-sys-icon">{g.icon}</span>
+                    {g.os}
+                  </summary>
+                  <div style={{ marginTop: 8 }}>
+                    {g.steps.map((step, si) => (
+                      <div key={si} className="cert-step">
+                        <span className="cert-step-num">{si + 1}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="cert-step-title">{step.title}</div>
+                          <div className="cert-step-body">
+                            <StepBody step={step} info={info} />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ))}
             </div>
-          ))}
-          <dl className="kv">
-            <dt>代理地址</dt><dd>{info.agent_host}{info.https_port ? `:${info.https_port}` : ''}</dd>
-            <dt>Anthropic 路径</dt><dd>{info.anthropic_path || '-'}</dd>
-            <dt>OpenAI 路径</dt><dd>{info.openai_path || '-'}</dd>
-            <dt>证书文件</dt><dd>{info.cert_file || '-'}</dd>
-            <dt>证书状态</dt><dd>{info.cert_exists ? `存在（${info.cert_size} 字节）` : '不存在'}</dd>
-            <dt>HTTPS 代理</dt><dd>{info.https_enabled ? '已启用' : '未启用'}</dd>
-            <dt>Web HTTPS</dt><dd>{info.user_web_https_enabled ? '已启用' : '未启用'}</dd>
-          </dl>
-          <button className="btn btn-primary" disabled={!info.cert_exists}
-                  onClick={() => download('CertDownloadInterface')}>下载证书</button>
-          <div className="guide" style={{ marginTop: 14 }}>
-            <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 8px' }}>证书安装指引（跨平台）</p>
-            <details>
-              <summary>Windows</summary>
-              <ol style={{ fontSize: 13, paddingLeft: 18 }}>
-                <li>下载证书文件 <code>LsmTokensServer.crt</code></li>
-                <li>双击 → 「安装证书」→ 存储区域选「本地计算机」</li>
-                <li>选择「将所有的证书都放入下列存储」→ 浏览 → 「受信任的根证书颁发机构」→ 完成</li>
-                <li>打开 <code>cmd</code> 执行 <code>certutil -store Root</code> 确认已安装</li>
-              </ol>
-            </details>
-            <details>
-              <summary>macOS</summary>
-              <ol style={{ fontSize: 13, paddingLeft: 18 }}>
-                <li>下载证书文件后双击，加入「钥匙串访问」</li>
-                <li>找到该证书 → 双击 → 「信任」→ 安全套接字层设为「始终信任」</li>
-                <li>或命令行：<code>sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain LsmTokensServer.crt</code></li>
-              </ol>
-            </details>
-            <details>
-              <summary>Ubuntu / Debian</summary>
-              <ol style={{ fontSize: 13, paddingLeft: 18 }}>
-                <li><code>sudo cp LsmTokensServer.crt /usr/local/share/ca-certificates/</code></li>
-                <li><code>sudo update-ca-certificates</code></li>
-              </ol>
-            </details>
-            <details>
-              <summary>CentOS / RHEL</summary>
-              <ol style={{ fontSize: 13, paddingLeft: 18 }}>
-                <li><code>sudo cp LsmTokensServer.crt /etc/pki/ca-trust/source/anchors/</code></li>
-                <li><code>sudo update-ca-trust</code></li>
-              </ol>
-            </details>
-          </div>
+          </section>
         </>
       )}
       {!info && !err && <div className="table-loading">加载中…</div>}
     </Modal>
   )
+}
+
+// StepBody 渲染步骤正文（识别 body 为函数并传入 info；其余按字符串/<> 原样输出）
+function StepBody({ step, info }) {
+  if (typeof step.body === 'function') {
+    const node = step.body(info)
+    // 函数返回值如果是数组，包装一层；否则直接返回
+    if (Array.isArray(node)) {
+      return <>{node.map((n, i) => <span key={i}>{n}</span>)}</>
+    }
+    return node
+  }
+  return step.body
 }
 
 // ===== Git 信息弹窗（阶段AA：客户端分页 + 展开时惰性拉取文件变更，弹窗打开零 git show 子进程）=====

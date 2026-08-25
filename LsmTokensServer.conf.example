@@ -10,6 +10,7 @@
   "agentListenPort": 29000,
   "agentHttpsListenPort": 29003,
   "agentProductListenAddr": "0.0.0.0",
+  "agentPublicHost": "8.130.85.252",
   "agentAnthropicListenURL": "Anthropic",
   "agentOpenAIListenURL": "OpenAI",
   "logFileURL": "LsmTokensServer.log",

@@ -139,6 +139,39 @@ a { color: var(--primary); text-decoration: none; }
 .guide summary { cursor: pointer; font-weight: 600; font-size: 13px; }
 .guide code { background: #f0f3f7; border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
 
+/* ===== 证书安装指南弹窗（阶段AI） ===== */
+.cert-section { background: #fafbfc; border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin-bottom: 14px; }
+.cert-section-title { margin: 0 0 10px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.cert-msg { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; line-height: 1.6; }
+.cert-msg code { background: #f0f3f7; border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
+.cert-fingerprint { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; background: #f0f3f7; padding: 2px 6px; border-radius: 4px; word-break: break-all; line-height: 1.5; }
+.cert-url-row { margin-bottom: 6px; }
+.cert-download-btn { margin-top: 4px; }
+
+/* 跨平台指引 */
+.cert-guide-list { display: flex; flex-direction: column; gap: 8px; }
+.cert-guide-list details { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; background: var(--panel); transition: background 0.15s; }
+.cert-guide-list details[open] { background: #fafbfc; }
+.cert-guide-list summary { cursor: pointer; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.cert-guide-list summary:hover { color: var(--primary); }
+.cert-sys-icon { display: inline-block; width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 4px; background: #eef2ff; color: #3730a3; font-size: 13px; flex-shrink: 0; }
+
+/* 步骤（4 步式） */
+.cert-step { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 4px; font-size: 13px; }
+.cert-step-num { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--primary); color: #fff; text-align: center; line-height: 22px; font-size: 12px; font-weight: 600; margin-top: 2px; }
+.cert-step-title { font-weight: 600; margin-bottom: 6px; font-size: 13.5px; }
+.cert-step-body { font-size: 12.5px; color: var(--text); line-height: 1.65; }
+.cert-step-body code { background: #f0f3f7; border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
+.cert-step-body p { margin: 4px 0; }
+.cert-step-body ul { margin: 6px 0; padding-left: 20px; }
+.cert-step-body li { margin: 2px 0; }
+
+/* 命令代码块（与 .md-body pre 风格一致） */
+.cert-code-block { background: #0f172a; color: #d1e7ff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border-radius: 6px; padding: 12px 14px; margin: 6px 0 4px; position: relative; white-space: pre-wrap; word-break: break-all; line-height: 1.55; }
+.cert-code-block code { background: none; padding: 0; font-size: 12px; color: inherit; }
+.cert-code-copy { position: absolute; top: 6px; right: 6px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: #d1e7ff; padding: 2px 8px; font-size: 11px; }
+.cert-code-copy:hover { background: rgba(255,255,255,0.2); }
+
 /* 提示 */
 .alert { border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
 .alert-error { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; }
@@ -296,6 +329,16 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
   /* 日志/代码框 */
   .log-box { font-size: 11px; max-height: 55vh; }
   .md-body pre { font-size: 12px; }
+
+  /* 证书安装指南弹窗：移动端 URL 行纵向堆叠，命令块右侧复制按钮移到下方 */
+  .cert-section { padding: 12px 14px; }
+  .cert-section-title { font-size: 13.5px; }
+  .cert-url-row { flex-wrap: wrap; }
+  .cert-url-row > span:first-child { width: 100% !important; flex-shrink: 1; }
+  .cert-url-row input { width: 100%; }
+  .cert-code-block { padding: 26px 10px 10px; }
+  .cert-code-copy { top: 4px; right: 4px; font-size: 10px; padding: 2px 6px; }
+  .cert-fingerprint { font-size: 10.5px; }
 
   /* iOS 安全区 */
   .layout-header { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }

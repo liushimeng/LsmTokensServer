@@ -8,7 +8,11 @@ package api
 // 前端弹窗（HTML/CSS/JS）由 ClientWeb SPA 实现。
 
 import (
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,7 +31,10 @@ import (
 // ============================================================================
 
 // CertDownloadInfoResponse 公钥下载信息 JSON 响应
+// v2.0.63：补 PublicHost / HttpPort / 完整 URL 字段（避免前端字符串拼装错漏），
+// 以及证书元信息（Subject/Issuer/有效期/SHA-256/序列号）。
 type CertDownloadInfoResponse struct {
+	// 旧字段（保持兼容）
 	AgentHost      string `json:"agent_host"`
 	HttpsPort      int    `json:"https_port"`
 	AnthropicPath  string `json:"anthropic_path"`
@@ -37,6 +44,96 @@ type CertDownloadInfoResponse struct {
 	CertSize       int64  `json:"cert_size"`
 	HTTPSEnabled   bool   `json:"https_enabled"`
 	UserWebEnabled bool   `json:"user_web_https_enabled"`
+
+	// v2.0.63 新增
+	PublicHost        string `json:"public_host"`          // 客户端接入主机（agentPublicHost 优先，旧字段兜底）
+	HttpPort          int    `json:"http_port"`            // 29000
+	PublicAnthropicURL string `json:"public_anthropic_url"` // https://{public_host}:{https_port}/Anthropic
+	PublicOpenAIURL    string `json:"public_openai_url"`    // https://{public_host}:{https_port}/OpenAI
+	HttpAnthropicURL   string `json:"http_anthropic_url"`   // http://{public_host}:{http_port}/Anthropic
+	HttpOpenAIURL      string `json:"http_openai_url"`      // http://{public_host}:{http_port}/OpenAI
+	CertSubject        string `json:"cert_subject"`         // Subject（CN=...,O=...）
+	CertIssuer         string `json:"cert_issuer"`          // Issuer
+	CertNotBefore      string `json:"cert_not_before"`      // RFC3339 UTC
+	CertNotAfter       string `json:"cert_not_after"`       // RFC3339 UTC
+	CertSHA256         string `json:"cert_sha256"`          // 冒号分隔的大写十六进制（与 openssl x509 -fingerprint -sha256 一致）
+	CertSerial         string `json:"cert_serial"`          // 大写十六进制
+	CertExpired        bool   `json:"cert_expired"`         // true = 已过期或未生效
+}
+
+// resolveAccessHost 解析客户端接入主机（v2.0.63）：
+// 优先使用 agentPublicHost，否则回退 agentProductListenAddr，仍空则 127.0.0.1。
+func resolveAccessHost() string {
+	if h := strings.TrimSpace(config.G.AgentPublicHost); h != "" {
+		return h
+	}
+	if h := strings.TrimSpace(config.G.AgentProductListenAddr); h != "" {
+		return h
+	}
+	return "127.0.0.1"
+}
+
+// buildAccessURL 拼装接入地址（端口为 0 时返回空字符串）
+// defaultPort == 80/443 时省略端口号
+func buildAccessURL(scheme, host string, port int, pathSeg string) string {
+	if host == "" || port <= 0 {
+		return ""
+	}
+	pathSeg = strings.TrimLeft(pathSeg, "/")
+	portPart := ""
+	if (scheme == "http" && port != 80) || (scheme == "https" && port != 443) {
+		portPart = ":" + strconv.Itoa(port)
+	}
+	if pathSeg == "" {
+		return scheme + "://" + host + portPart
+	}
+	return scheme + "://" + host + portPart + "/" + pathSeg
+}
+
+// parseCertMeta 解析证书 PEM 文件，返回 Subject/Issuer/有效期/SHA-256/Serial/是否过期。
+// 解析失败时所有字符串字段返回空，certExpired 返回 false（前端展示 -）。
+func parseCertMeta(certPath string) (subject, issuer, notBefore, notAfter, sha256fp, serial string, expired bool) {
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return
+	}
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return
+	}
+	subject = cert.Subject.String()
+	issuer = cert.Issuer.String()
+	notBefore = cert.NotBefore.UTC().Format(time.RFC3339)
+	notAfter = cert.NotAfter.UTC().Format(time.RFC3339)
+
+	// SHA-256 指纹（按 OpenSSL 风格冒号分隔的大写十六进制）
+	sum := sha256.Sum256(cert.Raw)
+	hexSum := strings.ToUpper(hex.EncodeToString(sum[:]))
+	var groups []string
+	for i := 0; i < len(hexSum); i += 2 {
+		end := i + 2
+		if end > len(hexSum) {
+			end = len(hexSum)
+		}
+		groups = append(groups, hexSum[i:end])
+	}
+	sha256fp = strings.Join(groups, ":")
+
+	// 序列号（去除前导 0 的大写十六进制，与 openssl x509 -serial -noout 一致）
+	if cert.SerialNumber != nil {
+		serialBytes := cert.SerialNumber.Bytes()
+		if len(serialBytes) > 0 {
+			serial = strings.ToUpper(hex.EncodeToString(serialBytes))
+		}
+	}
+
+	now := time.Now()
+	expired = now.After(cert.NotAfter) || now.Before(cert.NotBefore)
+	return
 }
 
 // resolveCertAbsolutePath 解析证书绝对路径（相对路径基于可执行文件目录）
@@ -73,28 +170,57 @@ func certDownloadInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	certPath, certOriginal := resolveCertAbsolutePath(config.G.UserWebCertFile)
 	var certExists bool
 	var certSize int64
+	var certSubject, certIssuer, certNotBefore, certNotAfter, certSHA256, certSerial string
+	var certExpired bool
 	if certPath != "" {
 		if info, err := os.Stat(certPath); err == nil && !info.IsDir() {
 			certExists = true
 			certSize = info.Size()
+			// 解析证书元信息（解析失败不影响主流程，字段留空即可）
+			certSubject, certIssuer, certNotBefore, certNotAfter, certSHA256, certSerial, certExpired = parseCertMeta(certPath)
 		}
 	}
 
-	host := strings.TrimSpace(config.G.AgentProductListenAddr)
-	if host == "" {
-		host = "127.0.0.1"
+	listenHost := strings.TrimSpace(config.G.AgentProductListenAddr)
+	if listenHost == "" {
+		listenHost = "127.0.0.1"
+	}
+	publicHost := resolveAccessHost()
+
+	anthropicPath := config.G.AgentAnthropicListenURL
+	if anthropicPath == "" {
+		anthropicPath = "Anthropic"
+	}
+	openaiPath := config.G.AgentOpenAIListenURL
+	if openaiPath == "" {
+		openaiPath = "OpenAI"
 	}
 
 	resp := CertDownloadInfoResponse{
-		AgentHost:      host,
+		// 旧字段
+		AgentHost:      listenHost,
 		HttpsPort:      config.G.AgentHttpsListenPort,
-		AnthropicPath:  config.G.AgentAnthropicListenURL,
-		OpenAIPath:     config.G.AgentOpenAIListenURL,
+		AnthropicPath:  anthropicPath,
+		OpenAIPath:     openaiPath,
 		CertFile:       certOriginal,
 		CertExists:     certExists,
 		CertSize:       certSize,
 		HTTPSEnabled:   config.G.AgentHttpsListenPort > 0,
 		UserWebEnabled: config.G.UserWebUseHTTPS,
+		// 新字段
+		PublicHost:         publicHost,
+		HttpPort:           config.G.AgentListenPort,
+		PublicAnthropicURL: buildAccessURL("https", publicHost, config.G.AgentHttpsListenPort, anthropicPath),
+		PublicOpenAIURL:    buildAccessURL("https", publicHost, config.G.AgentHttpsListenPort, openaiPath),
+		HttpAnthropicURL:   buildAccessURL("http", publicHost, config.G.AgentListenPort, anthropicPath),
+		HttpOpenAIURL:      buildAccessURL("http", publicHost, config.G.AgentListenPort, openaiPath),
+		CertSubject:        certSubject,
+		CertIssuer:         certIssuer,
+		CertNotBefore:      certNotBefore,
+		CertNotAfter:       certNotAfter,
+		CertSHA256:         certSHA256,
+		CertSerial:         certSerial,
+		CertExpired:        certExpired,
 	}
 	_ = json.NewEncoder(w).Encode(resp)
 }

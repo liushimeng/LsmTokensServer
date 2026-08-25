@@ -34,6 +34,9 @@ const (
 	DEFAULT_AGENT_PRODUCT_ADDR       = "127.0.0.1" // v2.0.56：默认本地地址，生产 IP 仅写入私有 conf
 	DEFAULT_AGENT_ANTHROPIC_URL      = "Anthropic"
 	DEFAULT_AGENT_OPENAI_URL         = "OpenAI"
+	// v2.0.63: AgentPublicHost 客户端接入主机（公网/内网 IP 或域名），与监听地址 AgentProductListenAddr 解耦
+	// 留空时运行期回退 AgentProductListenAddr，仍空则 127.0.0.1
+	DEFAULT_AGENT_PUBLIC_HOST = ""
 	DEFAULT_SPIDER_CDP_PORT          = 9222
 	DEFAULT_SPIDER_CHROME_PATH       = "google-chrome-stable"
 	DEFAULT_SPIDER_CHROME_DATA       = "/tmp/lsm-spider-chrome"
@@ -108,6 +111,7 @@ type LsmTokensServerConfig struct {
 	AgentListenPort          int           `json:"agentListenPort"`
 	AgentHttpsListenPort     int           `json:"agentHttpsListenPort"`
 	AgentProductListenAddr   string        `json:"agentProductListenAddr"`
+	AgentPublicHost          string        `json:"agentPublicHost,omitempty"`
 	AgentAnthropicListenURL  string        `json:"agentAnthropicListenURL"`
 	AgentOpenAIListenURL     string        `json:"agentOpenAIListenURL"`
 	LogFileURL               string        `json:"logFileURL"`
@@ -205,6 +209,7 @@ type rawLsmTokensServerConfig struct {
 	AgentListenPort          int           `json:"agentListenPort"`
 	AgentHttpsListenPort     int           `json:"agentHttpsListenPort"`
 	AgentProductListenAddr   string        `json:"agentProductListenAddr"`
+	AgentPublicHost          string        `json:"agentPublicHost,omitempty"`
 	AgentAnthropicListenURL  string        `json:"agentAnthropicListenURL"`
 	AgentOpenAIListenURL     string        `json:"agentOpenAIListenURL"`
 	LogFileURL               string        `json:"logFileURL"`
@@ -289,6 +294,7 @@ func getDefaultConfig() *LsmTokensServerConfig {
 		AgentListenPort:         DEFAULT_AGENT_LISTEN_PORT,
 		AgentHttpsListenPort:    DEFAULT_AGENT_HTTPS_LISTEN_PORT,
 		AgentProductListenAddr:  DEFAULT_AGENT_PRODUCT_ADDR,
+		AgentPublicHost:         DEFAULT_AGENT_PUBLIC_HOST,
 		AgentAnthropicListenURL: DEFAULT_AGENT_ANTHROPIC_URL,
 		AgentOpenAIListenURL:    DEFAULT_AGENT_OPENAI_URL,
 		LogFileURL:              DEFAULT_LOG_PATH,
@@ -776,6 +782,7 @@ func LoadConfig(path string) (*LsmTokensServerConfig, error) {
 		cfg.AgentListenPort = raw.AgentListenPort
 		cfg.AgentHttpsListenPort = raw.AgentHttpsListenPort
 		cfg.AgentProductListenAddr = raw.AgentProductListenAddr
+		cfg.AgentPublicHost = raw.AgentPublicHost
 		cfg.AgentAnthropicListenURL = raw.AgentAnthropicListenURL
 		cfg.AgentOpenAIListenURL = raw.AgentOpenAIListenURL
 		cfg.LogFileURL = raw.LogFileURL
