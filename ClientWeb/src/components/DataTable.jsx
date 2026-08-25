@@ -1,8 +1,9 @@
-// 通用数据表格：columns = [{key,title,render?,width?,sortable?,sortValue?}]
+// 通用数据表格：columns = [{key,title,render?,width?,sortable?,sortValue?,nowrap?}]
 // cardMode（默认 true）：≤600px 时行转卡片，依赖 td 的 data-label 显示列名；
 // 传 false 退回横向滚动（docs/Web页面手机端UI设计以及美化方案/00 §3.5）
 // sortable: true 时表头可点击排序（升序→降序→取消 三态循环，纯前端实现）；
-// sortValue(row) 可选，提供排序取值（默认取 row[key]）；rowClass(row) 用于状态行高亮。
+// sortValue(row) 可选，提供排序取值（默认取 row[key]）；nowrap: true 时该列单元格不换行（cell-nowrap）；
+// rowClass(row) 用于状态行高亮。td 默认可换行（长内容多行展示、无横向滚动）。
 import { useMemo, useState } from 'react'
 
 // 数值优先数值比较，其余中文 localeCompare；null/undefined 恒排末尾
@@ -53,7 +54,7 @@ export default function DataTable({ columns, rows, loading, empty = '暂无数�
           {sorted.map((r, i) => (
             <tr key={keyOf(r, i)} className={rowClass ? rowClass(r) : undefined}>
               {columns.map((c) => (
-                <td key={c.key} data-label={typeof c.title === 'string' ? c.title : undefined}>
+                <td key={c.key} className={c.nowrap ? 'cell-nowrap' : undefined} data-label={typeof c.title === 'string' ? c.title : undefined}>
                   {c.render ? c.render(r[c.key], r) : (r[c.key] ?? '')}
                 </td>
               ))}

@@ -57,7 +57,8 @@ a { color: var(--primary); text-decoration: none; }
 .layout-main { flex: 1; padding: 20px; min-width: 0; }
 
 /* 页面与卡片 */
-.page { max-width: 1280px; margin: 0 auto; }
+/* 内容区满宽自适应：不限最大宽度，宽屏不留白（docs/项目迁移解决方案/Web数据列表自适应宽度与布局优化方案_20260825.md） */
+.page { width: 100%; min-width: 0; max-width: none; }
 .page-title { margin: 0 0 16px; font-size: 20px; }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
 .card h3 { margin: 0 0 12px; font-size: 15px; }
@@ -91,8 +92,20 @@ a { color: var(--primary); text-decoration: none; }
 /* 表格 */
 .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.data-table th, .data-table td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-.data-table td.wrap { white-space: normal; word-break: break-all; max-width: 420px; }
+.data-table th, .data-table td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+/* 表头不折行；单元格默认可换行（长内容多行展示，消除横向滚动），超长词元按词断行 */
+.data-table th { white-space: nowrap; }
+.data-table td { white-space: normal; vertical-align: top; overflow-wrap: break-word; }
+/* 列级 nowrap 声明（DataTable 列定义 nowrap: true），用于操作按钮等需保持单行的列 */
+.data-table td.cell-nowrap { white-space: nowrap; }
+.data-table td.wrap { white-space: normal; word-break: break-all; max-width: none; }
+/* chip 列表：目标源站等标签序列，flex 换行完整展示 */
+.chip-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.ep-chip { display: inline-block; padding: 2px 6px; border: 1px solid #dbe3ee; border-radius: 4px; font-size: 12px; background: #f0f7ff; color: #333; }
+.ep-chip.ep-chip-off { background: #f5f5f5; border-color: #e5e5e5; color: #bbb; text-decoration: line-through; }
+/* 操作列按钮组：inline-flex 换行，按钮整体不断散 */
+.op-btns { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.op-btns .btn { margin: 0; }
 .data-table th { background: #fafbfc; color: var(--muted); font-weight: 600; position: sticky; top: 0; }
 .data-table tr:hover td { background: #f6f8fa; }
 /* 状态行高亮：禁用行淡红 + 左侧红条，启用行淡绿（hover 仍回常规 hover 色） */

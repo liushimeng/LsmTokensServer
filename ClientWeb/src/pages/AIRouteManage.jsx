@@ -282,13 +282,13 @@ export default function AIRouteManage() {
     const list = route.endpoint_list || []
     if (!list.length) return `${route.platform_name || ''} / ${route.endpoint_model_name || ''}`
     return (
-      <span>
+      <div className="chip-list">
         {list.map((ep, i) => (
-          <span key={ep.id + '-' + i} style={{ display: 'inline-block', margin: 2, padding: '2px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, background: ep.in_route_status === 0 ? '#f5f5f5' : '#f0f7ff', color: ep.in_route_status === 0 ? '#bbb' : '#333', textDecoration: ep.in_route_status === 0 ? 'line-through' : 'none' }}>
+          <span key={ep.id + '-' + i} className={'ep-chip' + (ep.in_route_status === 0 ? ' ep-chip-off' : '')}>
             {i + 1}. {ep.platform_name} / {ep.model_name}{ep.algorithm_name ? ' · ' + ep.algorithm_name : ''}
           </span>
         ))}
-      </span>
+      </div>
     )
   }
 
@@ -353,11 +353,11 @@ export default function AIRouteManage() {
     {
       key: 'actions', title: '操作',
       render: (_, r) => (
-        <span>
-          <button className="btn btn-sm btn-primary" onClick={() => openEdit(r)}>编辑</button>{' '}
-          <a className="btn btn-link" href={`#/ChatDialog?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>对话</a>{' '}
-          <a className="btn btn-link" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>对话明细分析</a>{' '}
-          <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days >= 0 ? '&days=' + days : ''}`}>汇总统计</a>{' '}
+        <span className="op-btns">
+          <button className="btn btn-sm btn-primary" onClick={() => openEdit(r)}>编辑</button>
+          <a className="btn btn-link" href={`#/ChatDialog?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>对话</a>
+          <a className="btn btn-link" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>对话明细分析</a>
+          <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days >= 0 ? '&days=' + days : ''}`}>汇总统计</a>
           {isAdmin ? <button className="btn btn-sm btn-danger" onClick={() => deleteItem(r)}>删除</button> : null}
         </span>
       ),
