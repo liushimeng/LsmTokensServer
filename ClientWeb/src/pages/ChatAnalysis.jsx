@@ -4,10 +4,16 @@ import { isAdminRole } from '../shared/auth'
 import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import SseEventList from '../components/SseEventList'
+import AggregateView from '../components/AggregateView'
+import JsonTree from '../components/JsonTree'
 import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/format'
+import { parseSSEEvents, aggregateSSE, aggregateToText, sseEventsToText } from '../shared/sse'
+import { prettyJSON } from '../shared/json'
 
 // 对话明细查询页（管理端 /ChatAnalysisInterface）
 // 支持多条件筛选 + 分页 + 单条详情（按需拉取大字段）+ 批量删除
+// v2.0.7x 阶段AM：新增「转发类型」徽标与筛选；详情 Modal 重构支持 JSON/SSE/聚合多视图。
 const DAYS_OPTIONS = [
   { v: 0, t: '全部时间' }, { v: -1, t: '最近1小时' }, { v: -2, t: '最近2小时' },
   { v: -4, t: '最近4小时' }, { v: -6, t: '最近6小时' }, { v: -12, t: '最近12小时' },
@@ -16,7 +22,7 @@ const DAYS_OPTIONS = [
   { v: 60, t: '最近60天' }, { v: 90, t: '最近90天' },
 ]
 const PAGE_SIZES = [3, 5, 10, 15, 20, 50, 100]
-// 详情字段白名单（服务端 chatAnalysisDetailFieldColumns 一致）
+// 详情字段白名单（与服务端 chatAnalysisDetailFieldColumns 对齐）
 const DETAIL_FIELDS = [
   { key: 'request_body', title: '请求体（转发）' },
   { key: 'response_body', title: '响应体（转发）' },
@@ -25,62 +31,40 @@ const DETAIL_FIELDS = [
   { key: 'request_headers', title: '请求头（转发）' },
   { key: 'response_headers', title: '响应头（转发）' },
 ]
-// SSE 事件解析（对齐旧版 lsmParseSSEEvent 契约）：逐行拆 event:/data:，data 尝试 JSON 解析
-function parseSSEEvents(text) {
-  if (!text) return []
-  const events = []
-  let cur = null
-  for (const line of text.split(/\r?\n/)) {
-    if (line.startsWith('event:')) {
-      if (cur) events.push(cur)
-      cur = { event: line.slice(6).trim(), data: [] }
-    } else if (line.startsWith('data:')) {
-      if (!cur) cur = { event: '', data: [] }
-      cur.data.push(line.slice(5).trim())
-    } else if (line === '' && cur) {
-      events.push(cur); cur = null
-    }
-  }
-  if (cur) events.push(cur)
-  return events.map((e) => {
-    const raw = e.data.join('\n')
-    let parsed = null
-    try { parsed = JSON.parse(raw) } catch { /* 非 JSON data */ }
-    return { event: e.event, raw, parsed }
-  })
+
+// v2.0.7x 阶段AM：转发类型徽标工具。
+// 与后端常量 DstEndPointAlgorithmType_Direct / DstEndPointAlgorithmType_ProtocolConverter 对齐。
+const ALGO_TYPE_DIRECT = 1
+const ALGO_TYPE_CONVERTER = 2
+function protocolBadgeClass(v) {
+  if (v === ALGO_TYPE_DIRECT) return 'protocol-badge direct'
+  if (v === ALGO_TYPE_CONVERTER) return 'protocol-badge converter'
+  return 'protocol-badge unknown'
 }
-// SSE 聚合解析（对齐旧版 lsmAggregateSSE 契约）：合并文本增量 + 累加 usage
-function aggregateSSE(text) {
-  const events = parseSSEEvents(text)
-  const out = { textParts: [], usage: null, toolCalls: [], eventTypes: {} }
-  events.forEach((e) => {
-    if (e.event) out.eventTypes[e.event] = (out.eventTypes[e.event] || 0) + 1
-    const p = e.parsed
-    if (!p) return
-    if (p.type === 'content_block_delta' && p.delta) {
-      if (p.delta.text) out.textParts.push(p.delta.text)
-      if (p.delta.partial_json) out.textParts.push(p.delta.partial_json)
-    } else if (p.choices && p.choices[0] && p.choices[0].delta) {
-      const t = p.choices[0].delta.content || p.choices[0].delta.reasoning_content
-      if (t) out.textParts.push(t)
-    } else if (p.type === 'content_block_start' && p.content_block && p.content_block.type === 'tool_use') {
-      out.toolCalls.push(p.content_block.name || '')
-    }
-    const u = p.usage || (p.message && p.message.usage)
-    if (u) {
-      out.usage = out.usage || {}
-      out.usage.input_tokens = (out.usage.input_tokens || 0) + (u.input_tokens || 0)
-      out.usage.output_tokens = (out.usage.output_tokens || 0) + (u.output_tokens || 0)
-      if (u.input_tokens !== undefined) out.usage.input_tokens_final = u.input_tokens
-      if (u.output_tokens !== undefined) out.usage.output_tokens_final = u.output_tokens
-    }
-  })
-  return out
+function protocolBadgeText(v) {
+  if (v === ALGO_TYPE_DIRECT) return '🔗 直连'
+  if (v === ALGO_TYPE_CONVERTER) return '🔄 转换'
+  return '未知'
 }
-function prettyJSON(s) {
-  if (!s) return ''
-  try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
+function protocolBadgeTitle(v) {
+  if (v === ALGO_TYPE_DIRECT) return '协议直连：转发协议 = 客户端协议（Anthropic↔Anthropic 或 OpenAI↔OpenAI）'
+  if (v === ALGO_TYPE_CONVERTER) return '协议转换：转发协议 ≠ 客户端协议（Anthropic↔OpenAI 互转）'
+  return '未知转发类型（数据异常或旧版本）'
 }
+function protocolBadge(v) {
+  return (
+    <span className={protocolBadgeClass(v)} title={protocolBadgeTitle(v)}>
+      {protocolBadgeText(v)}
+    </span>
+  )
+}
+
+// 详情视图类型
+const VIEW_RAW = 'raw'
+const VIEW_JSON = 'json'
+const VIEW_SSE = 'sse'
+const VIEW_AGG = 'agg'
+const VIEW_LABELS = { [VIEW_RAW]: '原文', [VIEW_JSON]: 'JSON 美化', [VIEW_SSE]: 'SSE 解析', [VIEW_AGG]: '聚合解析' }
 
 export default function ChatAnalysis({ route }) {
   const init = pickRouteQuery(route && route.query)
@@ -96,6 +80,7 @@ export default function ChatAnalysis({ route }) {
   const [filterStatus, setFilterStatus] = useState('')
   const [filterStatusNot, setFilterStatusNot] = useState(false)
   const [filterProtocolType, setFilterProtocolType] = useState(0)
+  const [filterAlgorithmType, setFilterAlgorithmType] = useState(0) // 0=全部, 1=直连, 2=转换
   const [filterDstModel, setFilterDstModel] = useState('')
   const [filterTools, setFilterTools] = useState('')
   const [filterAgentTool, setFilterAgentTool] = useState('')
@@ -118,7 +103,7 @@ export default function ChatAnalysis({ route }) {
   const [detailValue, setDetailValue] = useState('')
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailCache, setDetailCache] = useState({})
-  const [detailView, setDetailView] = useState('raw') // raw / json / sse / agg
+  const [detailView, setDetailView] = useState(VIEW_RAW) // raw / json / sse / agg
   const [copyOk, setCopyOk] = useState(false)
   const [deleting, setDeleting] = useState(false)
   // 用户名/模型名级联下拉：管理端用 UserModelOptionsInterface（页面生命周期内缓存一次），用户端用本人模型列表
@@ -167,7 +152,8 @@ export default function ChatAnalysis({ route }) {
         page: p, page_size: pageSize, days,
         filter_url: filterUrl.trim(), filter_method: filterMethod.trim(),
         filter_status: filterStatus.trim(), filter_status_not: filterStatusNot,
-        filter_protocol_type: filterProtocolType, filter_dst_model_name: filterDstModel,
+        filter_protocol_type: filterProtocolType, filter_algorithm_type: filterAlgorithmType,
+        filter_dst_model_name: filterDstModel,
         filter_tools: filterTools.trim(), filter_agent_tool_name: filterAgentTool,
         filter_input_tokens_nonzero: filterInTok, filter_output_tokens_nonzero: filterOutTok,
       })
@@ -183,7 +169,7 @@ export default function ChatAnalysis({ route }) {
 
   // 打开详情弹窗：按需拉取当前 Tab 字段（服务端白名单字段）
   const openDetail = async (row, field = 'request_body') => {
-    setDetailRow(row); setDetailTab(field); setDetailView('raw'); setCopyOk(false)
+    setDetailRow(row); setDetailTab(field); setDetailView(VIEW_RAW); setCopyOk(false)
     setDetailValue(''); setDetailLoading(false)
     if (detailCache[`${row.id}:${field}`] !== undefined) {
       setDetailValue(detailCache[`${row.id}:${field}`]); return
@@ -225,6 +211,17 @@ export default function ChatAnalysis({ route }) {
     setSelected((s) => (checked ? [...s, id] : s.filter((x) => x !== id)))
   }
 
+  // 详情当前视图的"实际显示文本"（用于复制按钮 = "复制当前视图内容"，不再是原始 detailValue）
+  const getShownContent = () => {
+    const v = detailValue || ''
+    if (!detailTab.includes('body')) return v
+    if (detailView === VIEW_RAW) return v
+    if (detailView === VIEW_JSON) return prettyJSON(v)
+    if (detailView === VIEW_SSE) return sseEventsToText(parseSSEEvents(v))
+    if (detailView === VIEW_AGG) return aggregateToText(aggregateSSE(v))
+    return v
+  }
+
   const columns = [
     ...(isAdmin ? [{ key: 'check', title: <input type="checkbox" checked={rows.length > 0 && selected.length === rows.length} onChange={(e) => toggleAll(e.target.checked)} />, render: (_, r) => (
       <input type="checkbox" checked={selected.includes(r.id)} onChange={(e) => toggleOne(r.id, e.target.checked)} />
@@ -238,6 +235,11 @@ export default function ChatAnalysis({ route }) {
       return <span style={{ color: ok ? 'var(--ok)' : 'var(--danger)' }}>{v || '-'}</span>
     } },
     { key: 'dst_model_name', title: '目标模型' },
+    // v2.0.7x 阶段AM：转发类型徽标列
+    {
+      key: 'dst_endpoint_algorithm_type', title: '转发类型', width: 110,
+      render: (v) => protocolBadge(v),
+    },
     { key: 'tokens_input_size', title: '输入 Tokens', render: (v) => fmtNum(v) },
     { key: 'tokens_output_size', title: '输出 Tokens', render: (v) => fmtNum(v) },
     { key: 'elapsed_ms', title: '耗时', render: (v) => fmtMs(v) },
@@ -246,6 +248,72 @@ export default function ChatAnalysis({ route }) {
       <button className="btn btn-sm" onClick={() => openDetail(r)}>详情</button>
     ) },
   ]
+
+  // 详情头部元信息
+  const renderDetailHead = () => {
+    if (!detailRow) return null
+    return (
+      <header className="detail-head">
+        <div className="detail-head-row">
+          <div><span className="muted">时间</span><span>{fmtTime(detailRow.created_at)}</span></div>
+          <div><span className="muted">请求</span><span>{detailRow.request_method} {detailRow.request_url}</span></div>
+          <div><span className="muted">状态</span><span>{detailRow.response_status}（耗时 {fmtMs(detailRow.elapsed_ms)}）</span></div>
+          <div><span className="muted">Tokens</span><span>输入 {fmtNum(detailRow.tokens_input_size)} / 输出 {fmtNum(detailRow.tokens_output_size)}</span></div>
+          <div><span className="muted">大小</span><span>请求 {fmtBytes(detailRow.request_content_length)} / 响应 {fmtBytes(detailRow.response_content_length)}</span></div>
+        </div>
+        <div className="detail-head-row">
+          <div>
+            <span className="muted">源协议</span>
+            <span>{detailRow.protocol_type === 1 ? 'Anthropic' : detailRow.protocol_type === 2 ? 'OpenAI' : '-'}</span>
+          </div>
+          <div>
+            <span className="muted">转发类型</span>
+            <span>{protocolBadge(detailRow.dst_endpoint_algorithm_type)}</span>
+          </div>
+        </div>
+      </header>
+    )
+  }
+
+  // 详情主体渲染
+  const renderDetailBody = () => {
+    const isBody = detailTab.includes('body')
+    if (detailLoading) return <div className="table-loading">字段内容加载中…</div>
+    if (!isBody) return <pre className="log-box detail-content">{detailValue || '（空）'}</pre>
+    if (detailView === VIEW_RAW) return <pre className="log-box detail-content">{detailValue || '（空）'}</pre>
+    if (detailView === VIEW_JSON) return <div className="detail-content"><JsonTree value={detailValue} /></div>
+    if (detailView === VIEW_SSE) return <div className="detail-content"><SseEventList events={parseSSEEvents(detailValue)} /></div>
+    if (detailView === VIEW_AGG) return <div className="detail-content"><AggregateView result={aggregateSSE(detailValue)} /></div>
+    return <pre className="log-box detail-content">{detailValue || '（空）'}</pre>
+  }
+
+  // 详情底部状态栏
+  const renderDetailFoot = () => {
+    if (!detailRow) return null
+    const isBody = detailTab.includes('body')
+    const byteSize = fmtBytes((detailValue || '').length)
+    const lineCount = (detailValue || '').split('\n').length
+    const copy = () => {
+      navigator.clipboard.writeText(getShownContent() || '').then(() => {
+        setCopyOk(true); setTimeout(() => setCopyOk(false), 1500)
+      }).catch(() => {})
+    }
+    return (
+      <footer className="detail-foot">
+        <div className="detail-foot-meta">
+          <span className="muted">字段</span>
+          <span>{DETAIL_FIELDS.find((f) => f.key === detailTab)?.title}</span>
+          {isBody ? <span className="muted">视图</span> : null}
+          {isBody ? <span>{VIEW_LABELS[detailView]}</span> : null}
+          <span className="muted">大小</span><span>{byteSize}</span>
+          <span className="muted">行数</span><span>{lineCount}</span>
+        </div>
+        <div className="detail-foot-actions">
+          <button className="btn btn-sm" onClick={copy}>{copyOk ? '已复制 ✓' : '复制当前视图'}</button>
+        </div>
+      </footer>
+    )
+  }
 
   return (
     <div className="page">
@@ -279,6 +347,14 @@ export default function ChatAnalysis({ route }) {
             <option value={0}>全部</option>
             <option value={1}>Anthropic</option>
             <option value={2}>OpenAI</option>
+          </select>
+        </label>
+        {/* v2.0.7x 阶段AM：转发类型筛选 */}
+        <label>转发类型
+          <select value={filterAlgorithmType} onChange={(e) => setFilterAlgorithmType(Number(e.target.value))}>
+            <option value={0}>全部</option>
+            <option value={1}>🔗 协议直连</option>
+            <option value={2}>🔄 协议转换</option>
           </select>
         </label>
         <label>目标模型
@@ -331,66 +407,32 @@ export default function ChatAnalysis({ route }) {
       ) : null}
 
       {detailRow ? (
-        <Modal title={`对话详情 #${detailRow.id}`} width={860} onClose={() => setDetailRow(null)}>
-          <div className="toolbar detail-tabs" style={{ padding: '6px 10px' }}>
+        <Modal title={`对话详情 #${detailRow.id} · ${protocolBadgeText(detailRow.dst_endpoint_algorithm_type)}`} width={960} onClose={() => setDetailRow(null)}>
+          {renderDetailHead()}
+
+          {/* 主 Tab：6 个字段 */}
+          <nav className="detail-tabs">
             {DETAIL_FIELDS.map((f) => (
-              <button key={f.key} className={`btn btn-sm${detailTab === f.key ? ' btn-primary' : ''}`}
+              <button key={f.key} className={`btn btn-sm detail-tab${detailTab === f.key ? ' btn-primary' : ''}`}
                       onClick={() => openDetail(detailRow, f.key)}>{f.title}</button>
             ))}
-          </div>
-          <dl className="kv" style={{ marginBottom: 12 }}>
-            <dt>时间</dt><dd>{fmtTime(detailRow.created_at)}</dd>
-            <dt>请求</dt><dd>{detailRow.request_method} {detailRow.request_url}</dd>
-            <dt>状态</dt><dd>{detailRow.response_status}（耗时 {fmtMs(detailRow.elapsed_ms)}）</dd>
-            <dt>Tokens</dt><dd>输入 {fmtNum(detailRow.tokens_input_size)} / 输出 {fmtNum(detailRow.tokens_output_size)}</dd>
-            <dt>大小</dt><dd>请求 {fmtBytes(detailRow.request_content_length)} / 响应 {fmtBytes(detailRow.response_content_length)}</dd>
-          </dl>
-          {detailLoading ? <div className="table-loading">字段内容加载中…</div>
-            : (() => {
-              // 视图切换：raw 原文 / json 美化 / sse 事件解析 / agg 聚合解析（仅 body 类字段有意义）
-              const isBody = detailTab.includes('body')
-              let shown = detailValue || '（空）'
-              if (isBody && detailView === 'json') shown = prettyJSON(detailValue) || '（空）'
-              if (isBody && detailView === 'sse') {
-                const evs = parseSSEEvents(detailValue)
-                shown = evs.length
-                  ? evs.map((e, i) => `# ${i + 1} event: ${e.event || '(default)'}\n${e.parsed ? JSON.stringify(e.parsed, null, 2) : e.raw}`).join('\n\n')
-                  : '（未解析出 SSE 事件）'
-              }
-              if (isBody && detailView === 'agg') {
-                const agg = aggregateSSE(detailValue)
-                const usage = agg.usage || {}
-                shown = [
-                  `事件类型分布: ${Object.entries(agg.eventTypes).map(([k, v]) => `${k || '(default)'}×${v}`).join('、') || '无'}`,
-                  agg.toolCalls.length ? `工具调用: ${agg.toolCalls.join('、')}` : '',
-                  `usage: input=${usage.input_tokens_final ?? usage.input_tokens ?? 0} output=${usage.output_tokens_final ?? usage.output_tokens ?? 0}`,
-                  '---- 聚合文本 ----',
-                  agg.textParts.join('') || '（无文本增量）',
-                ].filter(Boolean).join('\n')
-              }
-              const copy = () => {
-                navigator.clipboard.writeText(detailValue || '').then(() => {
-                  setCopyOk(true); setTimeout(() => setCopyOk(false), 1500)
-                }).catch(() => {})
-              }
-              return (
-                <div>
-                  <div className="toolbar" style={{ padding: '4px 0' }}>
-                    {isBody ? (
-                      <span>
-                        {['raw', 'json', 'sse', 'agg'].map((v) => (
-                          <button key={v} className={`btn btn-sm${detailView === v ? ' btn-primary' : ''}`} onClick={() => setDetailView(v)}>
-                            {{ raw: '原文', json: 'JSON 美化', sse: 'SSE 解析', agg: '聚合解析' }[v]}
-                          </button>
-                        ))}
-                      </span>
-                    ) : null}
-                    <button className="btn btn-sm" onClick={copy}>{copyOk ? '已复制 ✓' : '复制'}</button>
-                  </div>
-                  <pre className="log-box">{shown}</pre>
-                </div>
-              )
-            })()}
+          </nav>
+
+          {/* 仅 body 类字段显示视图 Tab */}
+          {detailTab.includes('body') ? (
+            <nav className="detail-views">
+              {Object.entries(VIEW_LABELS).map(([v, label]) => (
+                <button key={v} className={`btn btn-sm detail-view${detailView === v ? ' btn-primary' : ''}`}
+                        onClick={() => setDetailView(v)}>{label}</button>
+              ))}
+            </nav>
+          ) : null}
+
+          <main className="detail-body">
+            {renderDetailBody()}
+          </main>
+
+          {renderDetailFoot()}
         </Modal>
       ) : null}
     </div>
