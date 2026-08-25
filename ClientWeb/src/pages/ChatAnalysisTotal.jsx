@@ -36,6 +36,111 @@ export default function ChatAnalysisTotal({ route }) {
   const wsRef = useRef(null)
   const reqIdRef = useRef('')
 
+  // ===== 区间报告（v2.0.46 对齐：POST ChatAnalysisTotalRangeInterface?stream=1 SSE）=====
+  const RANGE_STAGES = [
+    ['validate', '校验时间区间'], ['series', '拉取时序数据'], ['model_dist', '模型分布'],
+    ['latency_dist', '延迟分布'], ['agent_dist', 'Agent 工具分布'],
+  ]
+  const [rangeStart, setRangeStart] = useState('') // yyyy-mm-dd
+  const [rangeEnd, setRangeEnd] = useState('')
+  const [rangeGran, setRangeGran] = useState('') // '' = 自动推断
+  const [rangeSteps, setRangeSteps] = useState({}) // stage → {state,message}
+  const [rangePct, setRangePct] = useState(0)
+  const [rangePctText, setRangePctText] = useState('')
+  const [rangeRunning, setRangeRunning] = useState(false)
+  const [rangeError, setRangeError] = useState('')
+  const [rangeReport, setRangeReport] = useState(null) // {range_report, agent_dist}
+  const rangeDoneRef = useRef(false)
+
+  // 趋势数据到位后，默认区间取趋势首尾日期
+  useEffect(() => {
+    const t = stages.trend_chart || []
+    if (t.length && !rangeStart && !rangeEnd) {
+      setRangeStart((t[0].date || '').substring(0, 10))
+      setRangeEnd((t[t.length - 1].date || '').substring(0, 10))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [(stages.trend_chart || []).length])
+
+  const inferGranularity = (spanMs) => (spanMs <= 48 * 3600 * 1000 ? 'hour' : 'day')
+
+  const runRangeReport = async () => {
+    if (!rangeStart || !rangeEnd) { setRangeError('请填写起止日期'); return }
+    const startMs = new Date(rangeStart + 'T00:00:00').getTime()
+    const endMs = new Date(rangeEnd + 'T23:59:59.999').getTime()
+    if (!(startMs > 0 && endMs > startMs)) { setRangeError('无效的时间区间：结束须晚于开始'); return }
+    const spanMs = endMs - startMs
+    if (spanMs > 365 * 24 * 3600 * 1000) { setRangeError('时间区间过长：最大支持 365 天'); return }
+    const gran = rangeGran || inferGranularity(spanMs)
+    setRangeSteps({}); setRangePct(0); setRangePctText(''); setRangeError(''); setRangeReport(null)
+    rangeDoneRef.current = false
+    setRangeRunning(true)
+    const body = { model_name: modelName.trim(), start_ms: startMs, end_ms: endMs, granularity: gran }
+    if (userName.trim()) body.user_name = userName.trim()
+    const applyEvent = (ev, payload) => {
+      if (ev === 'progress' && payload) {
+        const stage = payload.stage || ''
+        setRangeSteps((s) => ({ ...s, [stage]: { state: 'running', message: payload.message || '' } }))
+        let text = payload.message || payload.title || stage
+        if (stage === 'series' && typeof payload.done === 'number' && typeof payload.total === 'number' && payload.total > 0) {
+          text = `已聚合 ${payload.done}/${payload.total} 桶`
+        }
+        setRangePct(typeof payload.percent === 'number' ? payload.percent : 0)
+        setRangePctText(text)
+      } else if (ev === 'done') {
+        rangeDoneRef.current = true
+        setRangeSteps(Object.fromEntries(RANGE_STAGES.map(([s]) => [s, { state: 'done' }])))
+        setRangePct(100); setRangePctText('完成')
+        setRangeReport(payload)
+        setRangeRunning(false)
+      } else if (ev === 'error') {
+        setRangeError((payload && (payload.message || payload.error)) || '未知错误')
+        setRangeSteps((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v.state === 'running' ? { state: 'failed' } : v])))
+        setRangeRunning(false)
+      }
+    }
+    // 解析单个 SSE 事件块（event:/data: 行），对齐旧版 lsmParseSSEEvent
+    const parseEvent = (raw) => {
+      let ev = 'message', data = ''
+      raw.split('\n').forEach((line) => {
+        if (!line) return
+        if (line.indexOf('event:') === 0) ev = line.substring(6).trim()
+        else if (line.indexOf('data:') === 0) data += (data ? '\n' : '') + line.substring(5).trim()
+      })
+      if (!data) return
+      try { applyEvent(ev, JSON.parse(data)) } catch { /* 忽略非 JSON 帧 */ }
+    }
+    try {
+      const resp = await fetch('ChatAnalysisTotalRangeInterface?stream=1', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      })
+      if (!resp.ok || !resp.body) {
+        applyEvent('error', { message: `HTTP ${resp.status}（无响应流）` }); return
+      }
+      setRangePct(5); setRangePctText('校验通过…')
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      for (;;) {
+        const result = await reader.read()
+        if (result.done) break
+        buffer += decoder.decode(result.value, { stream: true })
+        let idx
+        while ((idx = buffer.indexOf('\n\n')) >= 0) {
+          const raw = buffer.substring(0, idx)
+          buffer = buffer.substring(idx + 2)
+          parseEvent(raw)
+        }
+      }
+      if (buffer.length) parseEvent(buffer)
+      if (!rangeDoneRef.current) applyEvent('error', { message: '连接中断，未收到完成事件' })
+    } catch (e) {
+      applyEvent('error', { message: '请求失败: ' + e.message })
+    }
+  }
+  // ===== 区间报告结束 =====
+
   const applyStage = (stage, data) => setStages((s) => ({ ...s, [stage]: data }))
 
   // 停止当前查询：发 cancel 并关闭连接
@@ -254,6 +359,100 @@ export default function ChatAnalysisTotal({ route }) {
             { key: 'tokens_total', title: '总Tok', render: fmtNum },
           ]}
           rows={trend} empty="等待数据…" />
+      </div>
+
+      {/* 区间报告（v2.0.46：ChatAnalysisTotalRangeInterface?stream=1 SSE 流式） */}
+      <div className="card">
+        <h3>区间报告（tokens 时序 / 模型分布 / 延迟分布 / Agent 工具）</h3>
+        <div className="toolbar">
+          <label>开始日期 <input type="date" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} /></label>
+          <label>结束日期 <input type="date" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} /></label>
+          <label>颗粒度
+            <select value={rangeGran} onChange={(e) => setRangeGran(e.target.value)}>
+              <option value="">自动（≤48h→小时，否则→天）</option>
+              <option value="minute">分钟</option>
+              <option value="hour">小时</option>
+              <option value="day">天</option>
+            </select>
+          </label>
+          <button className="btn btn-primary" onClick={() => runRangeReport()} disabled={rangeRunning}>
+            {rangeRunning ? '生成中…' : '生成报告'}
+          </button>
+        </div>
+        {rangeError ? <div className="alert alert-error" style={{ marginTop: 8 }}>{rangeError}</div> : null}
+
+        {rangeRunning || Object.keys(rangeSteps).length ? (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 8 }}>
+              {RANGE_STAGES.map(([s, label]) => {
+                const st = rangeSteps[s]
+                const icon = !st || st.state === 'running' ? '⏳' : st.state === 'done' ? '✅' : '✗'
+                return (
+                  <span key={s} title={st && st.message} style={{ fontSize: 12, color: st && st.state === 'failed' ? 'var(--danger,#c0392b)' : 'var(--muted)' }}>
+                    {icon} {label}
+                  </span>
+                )
+              })}
+            </div>
+            <div style={{ background: 'var(--border,#eee)', borderRadius: 4, height: 14, overflow: 'hidden' }}>
+              <div style={{ width: `${Math.max(0, Math.min(100, rangePct))}%`, height: '100%', background: '#007aff', transition: 'width .3s' }} />
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+              {Math.round(rangePct)}%{rangePctText ? ` · ${rangePctText}` : ''}
+            </div>
+          </div>
+        ) : null}
+
+        {rangeReport ? (
+          <div style={{ marginTop: 12 }}>
+            {(() => {
+              const r = rangeReport.range_report || {}
+              const a = rangeReport.agent_dist
+              return (
+                <>
+                  <h4 style={{ margin: '10px 0 6px' }}>时序桶（{fmtNum(r.series ? r.series.length : 0)} 桶）</h4>
+                  <DataTable
+                    columns={[
+                      { key: 'date', title: '时间' },
+                      { key: 'count', title: '次数', render: fmtNum },
+                      { key: 'tokens_input', title: '输入Tok', render: fmtNum },
+                      { key: 'tokens_output', title: '输出Tok', render: fmtNum },
+                      { key: 'tokens_total', title: '总Tok', render: fmtNum },
+                    ]}
+                    rows={r.series || []} empty="暂无数据" />
+                  <h4 style={{ margin: '10px 0 6px' }}>模型分布</h4>
+                  <DataTable
+                    columns={[
+                      { key: 'model_name', title: '模型' },
+                      { key: 'call_count', title: '调用次数', render: fmtNum },
+                      { key: 'tokens_total', title: '总Tok', render: fmtNum },
+                    ]}
+                    rows={r.model_dist || []} empty="暂无数据" />
+                  <h4 style={{ margin: '10px 0 6px' }}>延迟分布</h4>
+                  <DataTable
+                    columns={[
+                      { key: 'range', title: '延迟区间' },
+                      { key: 'count', title: '次数', render: fmtNum },
+                      { key: 'percentage', title: '占比', render: (v) => (v != null ? (v * 100).toFixed(1) + '%' : '-') },
+                    ]}
+                    rows={r.latency_dist || []} empty="暂无数据" />
+                  {a ? (
+                    <>
+                      <h4 style={{ margin: '10px 0 6px' }}>Agent 工具（{fmtNum(a.unique_tools || 0)} 种 / {fmtNum(a.total_agent_count || 0)} 次）</h4>
+                      <DataTable
+                        columns={[
+                          { key: 'agent_tool_name', title: '工具名称' },
+                          { key: 'count', title: '调用次数', render: fmtNum },
+                          { key: 'percentage', title: '占比', render: (v) => (v != null ? (v * 100).toFixed(1) + '%' : '-') },
+                        ]}
+                        rows={a.tool_stats || []} empty="暂无数据" />
+                    </>
+                  ) : null}
+                </>
+              )
+            })()}
+          </div>
+        ) : null}
       </div>
 
       {/* 维度 6：协议分析 */}
