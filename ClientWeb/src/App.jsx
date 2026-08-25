@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { get, baseUrl } from './shared/api'
 import Layout from './components/Layout'
+import ErrorBoundary from './components/ErrorBoundary'
 
 // 阶段T 双构建隔离：页面改为懒加载器，管理员专属页仅在 manager 构建注册。
 // 注意：判断必须直接使用 __APP_ROLE__ 字面量（vite define 全局文本替换），
@@ -68,23 +69,27 @@ export default function App() {
       })
       .catch(() => {
         if (!alive) return
-        // 登录态失效：401 时 api.js 已按构建角色跳转，这里兜底处理其他失败
+        // 登录态失效：401 时 api.js 已按构建角色跳转，这里兜底处理其他失败（含网络超时）
         if (__APP_ROLE__ === 'manager') { window.location.href = baseUrl() + 'ManagerLogin'; return }
+        // 强制完整跳转 + reload，避免仅改 hash 导致页面残留破损状态
         window.location.hash = '#/Login'
+        window.location.reload()
       })
     return () => { alive = false }
   }, [route.path])
 
   const Page = PAGES[route.path] || PAGES.Home
   return (
-    <Suspense fallback={<div className="page-loading" style={{ padding: 24 }}>加载中…</div>}>
-      {route.path === 'Login' || (__APP_ROLE__ === 'manager' && route.path === 'ManagerLogin') ? (
-        <Page route={route} />
-      ) : (
-        <Layout route={route.path} userInfo={userInfo}>
+    <ErrorBoundary>
+      <Suspense fallback={<div className="page-loading" style={{ padding: 24 }}>加载中…</div>}>
+        {route.path === 'Login' || (__APP_ROLE__ === 'manager' && route.path === 'ManagerLogin') ? (
           <Page route={route} />
-        </Layout>
-      )}
-    </Suspense>
+        ) : (
+          <Layout route={route.path} userInfo={userInfo}>
+            <Page route={route} />
+          </Layout>
+        )}
+      </Suspense>
+    </ErrorBoundary>
   )
 }

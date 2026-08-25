@@ -6,6 +6,9 @@ export function baseUrl() {
   return p.substring(0, p.lastIndexOf('/') + 1)
 }
 
+// 请求超时上限（毫秒）：服务重启期间避免请求永久挂起
+const REQUEST_TIMEOUT_MS = 10000
+
 export async function request(path, options = {}) {
   const opts = { credentials: 'include', ...options }
   if (opts.body && typeof opts.body !== 'string' && !(opts.body instanceof FormData)) {
@@ -14,7 +17,21 @@ export async function request(path, options = {}) {
   } else {
     opts.headers = { ...(opts.headers || {}) }
   }
-  const res = await fetch(baseUrl() + path, opts)
+  // 超时控制：服务端重启/网络异常时避免请求永久挂起
+  const controller = new AbortController()
+  const tid = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  opts.signal = controller.signal
+  let res
+  try {
+    res = await fetch(baseUrl() + path, opts)
+  } catch (err) {
+    clearTimeout(tid)
+    if (err.name === 'AbortError') {
+      throw new Error('请求超时，服务可能正在重启，请刷新页面重试')
+    }
+    throw new Error('网络错误，请检查网络连接或刷新页面重试')
+  }
+  clearTimeout(tid)
   let data = null
   try { data = await res.json() } catch { /* 非 JSON（如文件下载） */ }
   if (!res.ok) {

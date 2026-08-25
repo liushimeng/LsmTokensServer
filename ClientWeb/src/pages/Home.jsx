@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { get, post } from '../shared/api'
 
 // 首页：登录用户信息 + 我的模型列表卡片（对齐旧版用户端首页）
@@ -12,14 +12,19 @@ export default function Home() {
   const [info, setInfo] = useState(null)
   const [models, setModels] = useState([])
   const [error, setError] = useState('')
+  const [infoLoaded, setInfoLoaded] = useState(false)
+  const aliveRef = useRef(true)
 
   useEffect(() => {
+    aliveRef.current = true
     get('UserInfoInterface')
-      .then((d) => setInfo((d && d.data) || d))
-      .catch((e) => setError(e.message))
+      .then((d) => { if (aliveRef.current) setInfo((d && d.data) || d) })
+      .catch((e) => { if (aliveRef.current) setError(e.message) })
+      .finally(() => { if (aliveRef.current) setInfoLoaded(true) })
     post('UserModelListInterface', {})
-      .then((d) => setModels((d && (d.data || d.models)) || []))
+      .then((d) => { if (aliveRef.current) setModels((d && (d.data || d.models)) || []) })
       .catch(() => {})
+    return () => { aliveRef.current = false }
   }, [])
 
   return (
@@ -35,7 +40,11 @@ export default function Home() {
               <dt>模型</dt><dd>{info.model_name || '-'}</dd>
               <dt>登录方式</dt><dd>{info.login_type || '-'}</dd>
             </dl>
-          ) : <div className="table-loading">加载中…</div>}
+          ) : infoLoaded ? (
+            <div className="table-empty">获取失败{error ? `：${error}` : ''}</div>
+          ) : (
+            <div className="table-loading">加载中…</div>
+          )}
         </div>
         <div className="card">
           <h3>我的模型（{models.length}）</h3>
