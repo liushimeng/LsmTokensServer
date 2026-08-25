@@ -5,6 +5,8 @@
   "userWebUseHTTPS": true,
   "userWebCertFile": "server.crt",
   "userWebKeyFile": "server.key",
+  "managerWebStaticDir": "",
+  "userWebStaticDir": "",
   "agentListenPort": 29000,
   "agentHttpsListenPort": 29003,
   "agentProductListenAddr": "0.0.0.0",

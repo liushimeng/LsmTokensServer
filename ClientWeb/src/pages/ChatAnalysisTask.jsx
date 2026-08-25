@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { post } from '../shared/api'
+import { isAdminRole, fetchMyModels } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/format'
@@ -11,7 +12,8 @@ const PAGE_SIZE = 20
 
 export default function ChatAnalysisTask({ route }) {
   const init = pickRouteQuery(route && route.query)
-  const [userName, setUserName] = useState(init.userName)
+  const isAdmin = isAdminRole() // 用户端：服务端强制 claims.UserName
+  const [userName, setUserName] = useState(isAdmin ? init.userName : '')
   const [modelName, setModelName] = useState(init.modelName)
   const [days, setDays] = useState(3)
   const [data, setData] = useState(null) // TaskAnalysisResult
@@ -20,14 +22,16 @@ export default function ChatAnalysisTask({ route }) {
   const [page, setPage] = useState(1)
   const [detail, setDetail] = useState(null) // 任务详情弹窗
 
-  const hasKey = userName.trim() !== '' && modelName.trim() !== ''
+  const hasKey = (isAdmin ? userName.trim() !== '' : true) && modelName.trim() !== ''
 
-  const doQuery = async () => {
-    if (!hasKey) { setError('请先填写用户名和模型名'); return }
+  const doQuery = async (modelOverride) => {
+    const mn = (modelOverride !== undefined ? modelOverride : modelName).trim()
+    if (isAdmin && userName.trim() === '') { setError('请先填写用户名'); return }
+    if (!mn) { setError('请先填写模型名'); return }
     setLoading(true); setError(''); setPage(1)
     try {
       const d = await post('ChatAnalysisTaskInterface', {
-        user_name: userName.trim(), model_name: modelName.trim(), days,
+        user_name: isAdmin ? userName.trim() : '', model_name: mn, days,
       })
       setData(d.data || {})
     } catch (e) {
@@ -36,7 +40,18 @@ export default function ChatAnalysisTask({ route }) {
   }
 
   useEffect(() => {
-    if (init.userName && init.modelName) doQuery()
+    if (init.userName && init.modelName) { doQuery(); return }
+    // 用户端进入页面：自动取本人第一个模型并查询（对齐旧版重定向逻辑）
+    if (!isAdmin) {
+      fetchMyModels()
+        .then((ms) => {
+          const first = ms && ms[0]
+          if (!first) return
+          setModelName(first.model_name || '')
+          doQuery(first.model_name || '')
+        })
+        .catch(() => {})
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -72,7 +87,7 @@ export default function ChatAnalysisTask({ route }) {
       <h2 className="page-title">任务 / 工具调用分析</h2>
 
       <div className="toolbar">
-        <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name" style={{ width: 140 }} /></label>
+        {isAdmin ? <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name" style={{ width: 140 }} /></label> : null}
         <label>模型名 <input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="model_name" style={{ width: 160 }} /></label>
         <label>时间跨度
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}>

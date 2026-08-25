@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { post } from '../shared/api'
+import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 
 // Agent 信息（统计页）：AgentInfoInterface（POST JSON {action:'stats', days}）
@@ -23,7 +24,9 @@ function normalizeDays(v) {
 
 export default function AgentInfo(props) {
   const q = props?.route?.query
-  const [days, setDays] = useState(() => normalizeDays(q?.get('days') || localStorage.getItem('lsm:agentInfo:days:v1:admin:__all__')))
+  const isAdmin = isAdminRole()
+  const storageKey = `lsm:agentInfo:days:v1:${isAdmin ? 'admin:__all__' : 'user'}`
+  const [days, setDays] = useState(() => normalizeDays(q?.get('days') || localStorage.getItem(storageKey)))
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -38,13 +41,13 @@ export default function AgentInfo(props) {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('lsm:agentInfo:days:v1:admin:__all__', String(days))
+    localStorage.setItem(storageKey, String(days))
     loadStats(days)
   }, [days, loadStats])
 
   const summary = (data && data.summary) || {}
   const agents = (data && data.agents) || []
-  const trend = (data && data.trend) || []
+  const trend = isAdmin ? ((data && data.trend) || []) : []
   const trendMax = Math.max(1, ...trend.map((s) => s.count || 0))
 
   const shareBars = (list, mode) => {
@@ -117,7 +120,7 @@ export default function AgentInfo(props) {
           </div>
 
           <div className="card">
-            <h3>Agent 统计明细（管理员全站视角）</h3>
+            <h3>Agent 统计明细（{isAdmin ? '管理员全站视角' : '我的 Agent 工具视角'}）</h3>
             <DataTable
               rowKey="agent_tool_name"
               rows={agents}
@@ -130,7 +133,7 @@ export default function AgentInfo(props) {
                 { key: 'tokens_output_size', title: '输出 Tokens', render: fmt },
                 { key: 'tokens_all_size', title: '总 Tokens', render: (v, a) => <b title={'占比 ' + pct(a.token_share)}>{fmt(v)}</b> },
                 { key: 'token_share', title: 'Token 占比', render: (v) => <b style={{ color: '#7c3aed' }}>{pct(v)}</b> },
-                { key: 'user_count', title: '活跃用户', render: fmt },
+                ...(isAdmin ? [{ key: 'user_count', title: '活跃用户', render: fmt }] : []),
               ]}
             />
           </div>

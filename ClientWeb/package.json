@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run build:manager && npm run build:user",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:manager": "vite build --mode manager",
+    "build:user": "vite build --mode user"
   },
   "dependencies": {
     "react": "^19.2.8",

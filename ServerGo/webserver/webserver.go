@@ -19,22 +19,43 @@ import (
 	"github.com/lishimeng/LsmTokensServer/logger"
 )
 
-// clientWebDist 定位前端构建产物目录（ServerGo/../ClientWeb/dist）
-func clientWebDist() (string, error) {
+// clientWebDist 定位前端构建产物目录（阶段T双构建隔离：ServerGo/../ClientWeb/dist-{role}）
+// role 取 "manager" / "user"；管理端与用户端产物完全隔离，禁止共享目录或跨目录回落。
+func clientWebDist(cfg *config.LsmTokensServerConfig, role string) (string, error) {
+	// 配置显式指定静态目录时优先（绝对/相对均可）
+	override := ""
+	switch role {
+	case "manager":
+		override = cfg.ManagerWebStaticDir
+	case "user":
+		override = cfg.UserWebStaticDir
+	}
+	if override != "" {
+		if filepath.IsAbs(override) {
+			return override, nil
+		}
+		execDir, err := config.GetExecutableDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(execDir, "..", override), nil
+	}
 	execDir, err := config.GetExecutableDir()
 	if err != nil {
 		return "", err
 	}
+	// 候选顺序：① 配置文件目录（工程根）② 可执行文件父目录 ③ 可执行文件目录
 	candidates := []string{
-		filepath.Join(execDir, "..", "ClientWeb", "dist"),
-		filepath.Join(execDir, "ClientWeb", "dist"),
+		filepath.Join(config.GetConfigDir(), "ClientWeb", "dist-"+role),
+		filepath.Join(execDir, "..", "ClientWeb", "dist-"+role),
+		filepath.Join(execDir, "ClientWeb", "dist-"+role),
 	}
 	for _, c := range candidates {
 		if info, err := os.Stat(c); err == nil && info.IsDir() {
 			return c, nil
 		}
 	}
-	return "", fmt.Errorf("ClientWeb/dist not found (candidates: %v)", candidates)
+	return "", fmt.Errorf("ClientWeb/dist-%s not found (candidates: %v)", role, candidates)
 }
 
 // spaFileServer SPA 静态文件服务：存在则返回文件，否则回落 index.html
@@ -79,40 +100,41 @@ func RegisterAPIRoutes(mux *http.ServeMux) {
 	})
 }
 
-// mountSPA 在 mux 上挂载前端静态资源（找不到 dist 时仅记日志，API 不受影响）
-func mountSPA(mux *http.ServeMux) {
-	dist, err := clientWebDist()
+// mountSPA 在 mux 上挂载前端静态资源（找不到角色 dist 时仅记日志，API 不受影响；
+// 阶段T：管理端/用户端各自绑定 dist-manager / dist-user，互不共享）
+func mountSPA(mux *http.ServeMux, cfg *config.LsmTokensServerConfig, role string) {
+	dist, err := clientWebDist(cfg, role)
 	if err != nil {
-		logger.Printf("[WEB] Warning: %v, Web UI unavailable (API only)", err)
+		logger.Printf("[WEB] Warning: %v, %s Web UI unavailable (API only)", err, role)
 		return
 	}
 	mux.Handle("/", &spaFileServer{root: http.Dir(dist)})
-	logger.Printf("[WEB] Serving ClientWeb dist: %s", dist)
+	logger.Printf("[WEB] Serving ClientWeb dist-%s: %s", role, dist)
 }
 
 // buildManagerMux 构造管理端 mux：登录路由 + 管理 API + SPA
 // （v2.0.56 安全加固：鉴权中间件在 Start 时套上，见 ManagerAuthMiddleware）
-func buildManagerMux() *http.ServeMux {
+func buildManagerMux(cfg *config.LsmTokensServerConfig) *http.ServeMux {
 	mux := http.NewServeMux()
 	RegisterAPIRoutes(mux)
 	api.RegisterManagerLoginRoutes(mux)
 	api.RegisterManagerAPIRoutes(mux)
-	mountSPA(mux)
+	mountSPA(mux, cfg, "manager")
 	return mux
 }
 
 // buildUserMux 构造用户端 mux：用户 API（含登录）+ SPA（鉴权中间件在 Start 时套上）
-func buildUserMux() *http.ServeMux {
+func buildUserMux(cfg *config.LsmTokensServerConfig) *http.ServeMux {
 	mux := http.NewServeMux()
 	RegisterAPIRoutes(mux)
 	api.RegisterUserAPIRoutes(mux)
-	mountSPA(mux)
+	mountSPA(mux, cfg, "user")
 	return mux
 }
 
 // StartManagerWebServer 启动管理员 Web 服务（管理后台，默认 49101）
 func StartManagerWebServer(cfg *config.LsmTokensServerConfig) {
-	mux := buildManagerMux()
+	mux := buildManagerMux(cfg)
 	addr := fmt.Sprintf(":%d", cfg.ManagerWebListenPort)
 	server := &http.Server{
 		Addr:         addr,
@@ -130,7 +152,7 @@ func StartManagerWebServer(cfg *config.LsmTokensServerConfig) {
 // StartUserWebServer 启动用户 Web 服务（用户门户，默认 42901，支持 HTTPS）
 // 与旧版一致：UserSecurityChain(userAuthMiddleware(mux))
 func StartUserWebServer(cfg *config.LsmTokensServerConfig) {
-	mux := buildUserMux()
+	mux := buildUserMux(cfg)
 	handler := UserSecurityChain(api.UserAuthMiddleware(mux))
 	addr := fmt.Sprintf(":%d", cfg.UserWebListenPort)
 	if cfg.UserWebUseHTTPS {

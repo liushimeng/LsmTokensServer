@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { post } from '../shared/api'
+import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 
-// 智能路由管理：AIRouteManageInterface（POST JSON {action:...}）
+// 智能路由管理（管理端）：AIRouteManageInterface（POST JSON {action:...}）
 // action: list / list_models / list_endpoints / add / update / delete / batch_delete / batch_update / batch_stats
+// 用户端（29001）：UserAIRouteInterface（action: list / list_endpoints / count_record_by_protocol / update），
+// 仅限本人路由的受限编辑，无新增/删除/批量。
 
 const ALGO_NAMES = { 1: '指定型', 2: '稳定型', 3: '经济型' }
 const ALGO_DESC = {
@@ -33,6 +36,7 @@ function emptyForm() {
 }
 
 export default function AIRouteManage() {
+  const isAdmin = __APP_ROLE__ === 'manager' ? isAdminRole() : false // 用户端走 UserAIRouteInterface（本人路由 + 受限编辑，构建期裁剪管理分支）
   const [routes, setRoutes] = useState([])
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -50,37 +54,54 @@ export default function AIRouteManage() {
   const loadRoutes = useCallback(() => {
     setLoading(true)
     setError('')
-    post('AIRouteManageInterface', { action: 'list' })
+    // 管理端：AIRouteManageInterface 全量；用户端：UserAIRouteInterface 本人路由
+    post(isAdmin ? 'AIRouteManageInterface' : 'UserAIRouteInterface', { action: 'list' })
       .then((d) => { setRoutes((d && d.data) || []) })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [isAdmin])
 
   useEffect(() => { loadRoutes() }, [loadRoutes])
 
-  // 用户下拉数据（UserManageInterface list，与旧版一致）
+  // 用户下拉数据（UserManageInterface list，仅管理端 mux 存在）
   useEffect(() => {
+    if (!isAdmin) return
     post('UserManageInterface', { action: 'list' })
       .then((d) => setUsers((d && d.data) || []))
       .catch(() => {})
-  }, [])
+  }, [isAdmin])
 
-  // 时间跨度统计（batch_stats 批量聚合，替代 N+1 次单条查询）
+  // 时间跨度统计：管理端 batch_stats 批量聚合；用户端 count_record_by_protocol 按模型逐条
   useEffect(() => {
     if (!routes.length) { setStats({}); return }
-    const items = routes
-      .filter((r) => r.user_name && r.model_name)
-      .map((r) => ({
-        route_id: r.id,
-        protocol_type: r.protocol_type || 0,
-        days,
-        key: { user_name: r.user_name, model_name: r.model_name, protocol_type: r.protocol_type || 0 },
-      }))
-    if (!items.length) return
-    post('AIRouteManageInterface', { action: 'batch_stats', batch_items: items })
-      .then((d) => setStats((d && d.data) || {}))
-      .catch(() => setStats({}))
-  }, [routes, days])
+    if (isAdmin) {
+      const items = routes
+        .filter((r) => r.user_name && r.model_name)
+        .map((r) => ({
+          route_id: r.id,
+          protocol_type: r.protocol_type || 0,
+          days,
+          key: { user_name: r.user_name, model_name: r.model_name, protocol_type: r.protocol_type || 0 },
+        }))
+      if (!items.length) return
+      post('AIRouteManageInterface', { action: 'batch_stats', batch_items: items })
+        .then((d) => setStats((d && d.data) || {}))
+        .catch(() => setStats({}))
+    } else {
+      // 用户端按 (model_name, days) 查询，同模型两条路由共享同一条统计
+      const seen = new Set()
+      routes.forEach((r) => {
+        if (!r.model_name || seen.has(r.model_name)) return
+        seen.add(r.model_name)
+        post('UserAIRouteInterface', { action: 'count_record_by_protocol', model_name: r.model_name, days })
+          .then((d) => {
+            const s = (d && d.data) || {}
+            setStats((prev) => ({ ...prev, [r.id]: { anthropic_count: s.anthropic || 0, openai_count: s.openai || 0 } }))
+          })
+          .catch(() => {})
+      })
+    }
+  }, [routes, days, isAdmin])
 
   // 选择用户后联动加载：模型列表 / 源站列表 / 该用户已有路由（用于协议占用判断）
   const onUserChange = async (userId) => {
@@ -123,7 +144,15 @@ export default function AIRouteManage() {
     const algos = (route.dst_endpoint_algorithm_type_list || '').split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => n === 1 || n === 2)
     const statusLookup = {}
     ;(route.endpoint_list || []).forEach((e) => { statusLookup[e.id] = e.in_route_status })
-    await onUserChange(route.user_id)
+    if (isAdmin) {
+      await onUserChange(route.user_id)
+    } else {
+      // 用户端：源站下拉走 UserAIRouteInterface list_endpoints（本人源站）
+      try {
+        const e = await post('UserAIRouteInterface', { action: 'list_endpoints' })
+        setFormEndpoints((e && e.data) || [])
+      } catch (err) { setError(err.message); return }
+    }
     setForm({
       id: route.id,
       user_id: route.user_id,
@@ -173,11 +202,27 @@ export default function AIRouteManage() {
     const userId = editing ? editing.user_id : parseInt(form.user_id, 10) || 0
     const modelId = editing ? editing.user_model_id : parseInt(form.user_model_id, 10) || 0
     const protocolType = editing ? editing.protocol_type : parseInt(form.protocol_type, 10) || 0
+    if (!isAdmin && (!editing || !editing.user_model_id || !editing.protocol_type)) { setFormError('路由信息不完整，请刷新后重试'); return }
     if (!userId || !modelId || !protocolType) { setFormError('请选择用户、模型和协议'); return }
     if (!form.endpoints.length) { setFormError('请至少选择一个目标源站'); return }
     setSaving(true)
     setFormError('')
     try {
+      if (!isAdmin) {
+        // 用户端受限更新：仅允许调整源站列表（顺序/直连转换/启用禁用）与算法策略
+        await post('UserAIRouteInterface', {
+          action: 'update',
+          id: form.id,
+          dst_endpoint_id: form.endpoints[0].id,
+          dst_endpoint_id_list: form.endpoints.map((x) => x.id).join(','),
+          dst_endpoint_id_status_list: form.endpoints.map((x) => x.in_route_status).join(','),
+          dst_endpoint_algorithm_type_list: form.endpoints.map((x) => x.algorithm_type).join(','),
+          algorithm_strategy_type: parseInt(form.algorithm_strategy_type, 10) || 1,
+        })
+        setForm(null)
+        loadRoutes()
+        return
+      }
       await post('AIRouteManageInterface', {
         action: form.id ? 'update' : 'add',
         id: form.id || 0,
@@ -265,16 +310,16 @@ export default function AIRouteManage() {
   }
 
   const columns = [
-    {
+    ...(isAdmin ? [{
       key: 'checkbox', title: (
         <input type="checkbox" title="全选"
           checked={routes.length > 0 && selected.size >= routes.length}
           onChange={(e) => setSelected(e.target.checked ? new Set(routes.map((r) => r.id)) : new Set())} />
       ), width: 36,
       render: (_, r) => <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSelect(r.id)} />,
-    },
+    }] : []),
     { key: 'id', title: 'ID', width: 60 },
-    { key: 'user_name', title: '用户' },
+    ...(isAdmin ? [{ key: 'user_name', title: '用户' }] : []),
     { key: 'model_name', title: '模型列表' },
     { key: 'endpoints', title: '目标源站列表', render: (_, r) => renderEpList(r) },
     { key: 'protocol_type', title: '协议', render: (v) => protocolName(v) },
@@ -313,7 +358,7 @@ export default function AIRouteManage() {
           <a className="btn btn-link" href={`#/ChatDialog?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>对话</a>{' '}
           <a className="btn btn-link" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>浏览记录</a>{' '}
           <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days >= 0 ? '&days=' + days : ''}`}>时间跨度统计</a>{' '}
-          <button className="btn btn-sm btn-danger" onClick={() => deleteItem(r)}>删除</button>
+          {isAdmin ? <button className="btn btn-sm btn-danger" onClick={() => deleteItem(r)}>删除</button> : null}
         </span>
       ),
     },
@@ -324,7 +369,8 @@ export default function AIRouteManage() {
       <h2 className="page-title">智能路由管理</h2>
       <div className="toolbar">
         <button className="btn" onClick={loadRoutes}>刷新</button>
-        <button className="btn btn-primary" onClick={openAdd}>+ 添加路由</button>
+        {isAdmin ? <button className="btn btn-primary" onClick={openAdd}>+ 添加路由</button> : null}
+        {!isAdmin ? <span style={{ color: '#888', fontSize: 13 }}>用户模式：仅显示并允许编辑本人模型的路由</span> : null}
         {selected.size > 0 ? (
           <>
             <span>已选择 {selected.size} 条</span>
@@ -352,6 +398,14 @@ export default function AIRouteManage() {
           }
         >
           {formError ? <div className="alert alert-error">{formError}</div> : null}
+          {!isAdmin ? (
+            <dl className="kv" style={{ marginBottom: 10 }}>
+              <dt>模型</dt><dd><b>{form.id ? (routes.find((r) => r.id === form.id) || {}).model_name : ''}</b></dd>
+              <dt>协议</dt><dd>{protocolName(form.id ? (routes.find((r) => r.id === form.id) || {}).protocol_type : 0)}</dd>
+            </dl>
+          ) : null}
+          {isAdmin ? (
+          <>
           <label className="field"><span>选择用户</span>
             <select value={form.user_id} disabled={!!form.id} onChange={(e) => onUserChange(e.target.value)}>
               <option value="">请选择用户</option>
@@ -376,6 +430,8 @@ export default function AIRouteManage() {
               {protocolOptions().map((p) => <option key={p} value={p}>{protocolName(p)}</option>)}
             </select>
           </label>
+          </>
+          ) : null}
           <div className="field"><span>目标源站</span>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <select style={{ flex: 1 }} value="" onChange={(e) => { if (e.target.value) addEndpoint(parseInt(e.target.value, 10)) }}>

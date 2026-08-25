@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { post, get } from '../shared/api'
+import { isAdminRole, fetchMyModels } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/format'
@@ -23,11 +24,68 @@ const DETAIL_FIELDS = [
   { key: 'request_headers', title: '请求头（转发）' },
   { key: 'response_headers', title: '响应头（转发）' },
 ]
+// SSE 事件解析（对齐旧版 lsmParseSSEEvent 契约）：逐行拆 event:/data:，data 尝试 JSON 解析
+function parseSSEEvents(text) {
+  if (!text) return []
+  const events = []
+  let cur = null
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('event:')) {
+      if (cur) events.push(cur)
+      cur = { event: line.slice(6).trim(), data: [] }
+    } else if (line.startsWith('data:')) {
+      if (!cur) cur = { event: '', data: [] }
+      cur.data.push(line.slice(5).trim())
+    } else if (line === '' && cur) {
+      events.push(cur); cur = null
+    }
+  }
+  if (cur) events.push(cur)
+  return events.map((e) => {
+    const raw = e.data.join('\n')
+    let parsed = null
+    try { parsed = JSON.parse(raw) } catch { /* 非 JSON data */ }
+    return { event: e.event, raw, parsed }
+  })
+}
+// SSE 聚合解析（对齐旧版 lsmAggregateSSE 契约）：合并文本增量 + 累加 usage
+function aggregateSSE(text) {
+  const events = parseSSEEvents(text)
+  const out = { textParts: [], usage: null, toolCalls: [], eventTypes: {} }
+  events.forEach((e) => {
+    if (e.event) out.eventTypes[e.event] = (out.eventTypes[e.event] || 0) + 1
+    const p = e.parsed
+    if (!p) return
+    if (p.type === 'content_block_delta' && p.delta) {
+      if (p.delta.text) out.textParts.push(p.delta.text)
+      if (p.delta.partial_json) out.textParts.push(p.delta.partial_json)
+    } else if (p.choices && p.choices[0] && p.choices[0].delta) {
+      const t = p.choices[0].delta.content || p.choices[0].delta.reasoning_content
+      if (t) out.textParts.push(t)
+    } else if (p.type === 'content_block_start' && p.content_block && p.content_block.type === 'tool_use') {
+      out.toolCalls.push(p.content_block.name || '')
+    }
+    const u = p.usage || (p.message && p.message.usage)
+    if (u) {
+      out.usage = out.usage || {}
+      out.usage.input_tokens = (out.usage.input_tokens || 0) + (u.input_tokens || 0)
+      out.usage.output_tokens = (out.usage.output_tokens || 0) + (u.output_tokens || 0)
+      if (u.input_tokens !== undefined) out.usage.input_tokens_final = u.input_tokens
+      if (u.output_tokens !== undefined) out.usage.output_tokens_final = u.output_tokens
+    }
+  })
+  return out
+}
+function prettyJSON(s) {
+  if (!s) return ''
+  try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
+}
 
 export default function ChatAnalysis({ route }) {
   const init = pickRouteQuery(route && route.query)
+  const isAdmin = isAdminRole() // 用户端：服务端强制 claims.UserName，隐藏用户名输入与批量删除
   // 筛选条件
-  const [userName, setUserName] = useState(init.userName)
+  const [userName, setUserName] = useState(isAdmin ? init.userName : '')
   const [modelName, setModelName] = useState(init.modelName)
   const [days, setDays] = useState(3)
   const [page, setPage] = useState(1)
@@ -59,31 +117,49 @@ export default function ChatAnalysis({ route }) {
   const [detailValue, setDetailValue] = useState('')
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailCache, setDetailCache] = useState({})
+  const [detailView, setDetailView] = useState('raw') // raw / json / sse / agg
+  const [copyOk, setCopyOk] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
-  const hasKey = userName.trim() !== '' && modelName.trim() !== ''
+  const hasKey = (isAdmin ? userName.trim() !== '' : true) && modelName.trim() !== ''
 
   // 拉取下拉选项：目标模型（依赖 user+model）+ Agent 工具（全站）
-  const loadOptions = async () => {
-    if (!hasKey) return
+  const loadOptions = async (modelOverride) => {
+    const mn = (modelOverride !== undefined ? modelOverride : modelName).trim()
+    if (!mn) return
     try {
-      const d = await post('ChatAnalysisDstModelsInterface', { user_name: userName.trim(), model_name: modelName.trim() })
+      const d = await post('ChatAnalysisDstModelsInterface', { user_name: isAdmin ? userName.trim() : '', model_name: mn })
       setDstModels(d.data || [])
     } catch { /* 静默失败，仅影响下拉选项 */ }
   }
   useEffect(() => {
     get('ChatAnalysisAgentToolsInterface').then((d) => setAgentTools(d.data || [])).catch(() => {})
-    if (hasKey) { loadOptions(); setPage(1); doQuery(1) }
+    if (hasKey) { loadOptions(); setPage(1); doQuery(1); return }
+    // 用户端进入页面未带模型：自动取本人第一个模型并查询（对齐旧版重定向逻辑）
+    if (!isAdmin) {
+      fetchMyModels()
+        .then((ms) => {
+          const first = ms && ms[0]
+          if (!first) return
+          setModelName(first.model_name || '')
+          setPage(1)
+          loadOptions(first.model_name || '')
+          doQuery(1, first.model_name || '')
+        })
+        .catch(() => {})
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 查询
-  const doQuery = async (p = page) => {
-    if (!hasKey) { setError('请先填写用户名和模型名'); return }
+  // 查询（modelOverride 用于自动查询时规避 setState 异步）
+  const doQuery = async (p = page, modelOverride) => {
+    const mn = (modelOverride !== undefined ? modelOverride : modelName).trim()
+    if (!isAdmin && !mn) { setError('请先填写模型名'); return }
+    if (isAdmin && (userName.trim() === '' || mn === '')) { setError('请先填写用户名和模型名'); return }
     setLoading(true); setError(''); setOkMsg(''); setSelected([])
     try {
       const d = await post('ChatAnalysisInterface', {
-        user_name: userName.trim(), model_name: modelName.trim(),
+        user_name: isAdmin ? userName.trim() : '', model_name: mn,
         page: p, page_size: pageSize, days,
         filter_url: filterUrl.trim(), filter_method: filterMethod.trim(),
         filter_status: filterStatus.trim(), filter_status_not: filterStatusNot,
@@ -103,7 +179,7 @@ export default function ChatAnalysis({ route }) {
 
   // 打开详情弹窗：按需拉取当前 Tab 字段（服务端白名单字段）
   const openDetail = async (row, field = 'request_body') => {
-    setDetailRow(row); setDetailTab(field)
+    setDetailRow(row); setDetailTab(field); setDetailView('raw'); setCopyOk(false)
     setDetailValue(''); setDetailLoading(false)
     if (detailCache[`${row.id}:${field}`] !== undefined) {
       setDetailValue(detailCache[`${row.id}:${field}`]); return
@@ -111,7 +187,7 @@ export default function ChatAnalysis({ route }) {
     setDetailLoading(true)
     try {
       const d = await post('ChatAnalysisDetailInterface', {
-        id: row.id, user_name: userName.trim(), model_name: modelName.trim(), field,
+        id: row.id, user_name: isAdmin ? userName.trim() : '', model_name: modelName.trim(), field,
       })
       const v = d.value || ''
       setDetailValue(v)
@@ -146,9 +222,9 @@ export default function ChatAnalysis({ route }) {
   }
 
   const columns = [
-    { key: 'check', title: <input type="checkbox" checked={rows.length > 0 && selected.length === rows.length} onChange={(e) => toggleAll(e.target.checked)} />, render: (_, r) => (
+    ...(isAdmin ? [{ key: 'check', title: <input type="checkbox" checked={rows.length > 0 && selected.length === rows.length} onChange={(e) => toggleAll(e.target.checked)} />, render: (_, r) => (
       <input type="checkbox" checked={selected.includes(r.id)} onChange={(e) => toggleOne(r.id, e.target.checked)} />
-    ) },
+    ) }] : []),
     { key: 'id', title: 'ID', width: 90 },
     { key: 'created_at', title: '时间', render: (v) => fmtTime(v) },
     { key: 'request_method', title: '方法', width: 70 },
@@ -172,7 +248,7 @@ export default function ChatAnalysis({ route }) {
       <h2 className="page-title">对话明细分析</h2>
 
       <div className="toolbar">
-        <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name" style={{ width: 130 }} /></label>
+        {isAdmin ? <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name" style={{ width: 130 }} /></label> : null}
         <label>模型名 <input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="model_name" style={{ width: 150 }} /></label>
         <label>时间跨度
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
@@ -221,9 +297,9 @@ export default function ChatAnalysis({ route }) {
         <label>URL <input value={filterUrl} onChange={(e) => setFilterUrl(e.target.value)} placeholder="URL 包含" style={{ width: 150 }} /></label>
         <label>工具串 <input value={filterTools} onChange={(e) => setFilterTools(e.target.value)} placeholder="tools 包含" style={{ width: 120 }} /></label>
         <button className="btn btn-primary" onClick={() => { setPage(1); doQuery(1) }} disabled={loading}>查询</button>
-        <button className="btn btn-danger" onClick={batchDelete} disabled={!selected.length || deleting}>
+        {isAdmin ? <button className="btn btn-danger" onClick={batchDelete} disabled={!selected.length || deleting}>
           {deleting ? '删除中…' : `批量删除(${selected.length})`}
-        </button>
+        </button> : null}
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
@@ -256,7 +332,51 @@ export default function ChatAnalysis({ route }) {
             <dt>大小</dt><dd>请求 {fmtBytes(detailRow.request_content_length)} / 响应 {fmtBytes(detailRow.response_content_length)}</dd>
           </dl>
           {detailLoading ? <div className="table-loading">字段内容加载中…</div>
-            : <pre className="log-box">{detailValue || '（空）'}</pre>}
+            : (() => {
+              // 视图切换：raw 原文 / json 美化 / sse 事件解析 / agg 聚合解析（仅 body 类字段有意义）
+              const isBody = detailTab.includes('body')
+              let shown = detailValue || '（空）'
+              if (isBody && detailView === 'json') shown = prettyJSON(detailValue) || '（空）'
+              if (isBody && detailView === 'sse') {
+                const evs = parseSSEEvents(detailValue)
+                shown = evs.length
+                  ? evs.map((e, i) => `# ${i + 1} event: ${e.event || '(default)'}\n${e.parsed ? JSON.stringify(e.parsed, null, 2) : e.raw}`).join('\n\n')
+                  : '（未解析出 SSE 事件）'
+              }
+              if (isBody && detailView === 'agg') {
+                const agg = aggregateSSE(detailValue)
+                const usage = agg.usage || {}
+                shown = [
+                  `事件类型分布: ${Object.entries(agg.eventTypes).map(([k, v]) => `${k || '(default)'}×${v}`).join('、') || '无'}`,
+                  agg.toolCalls.length ? `工具调用: ${agg.toolCalls.join('、')}` : '',
+                  `usage: input=${usage.input_tokens_final ?? usage.input_tokens ?? 0} output=${usage.output_tokens_final ?? usage.output_tokens ?? 0}`,
+                  '---- 聚合文本 ----',
+                  agg.textParts.join('') || '（无文本增量）',
+                ].filter(Boolean).join('\n')
+              }
+              const copy = () => {
+                navigator.clipboard.writeText(detailValue || '').then(() => {
+                  setCopyOk(true); setTimeout(() => setCopyOk(false), 1500)
+                }).catch(() => {})
+              }
+              return (
+                <div>
+                  <div className="toolbar" style={{ padding: '4px 0' }}>
+                    {isBody ? (
+                      <span>
+                        {['raw', 'json', 'sse', 'agg'].map((v) => (
+                          <button key={v} className={`btn btn-sm${detailView === v ? ' btn-primary' : ''}`} onClick={() => setDetailView(v)}>
+                            {{ raw: '原文', json: 'JSON 美化', sse: 'SSE 解析', agg: '聚合解析' }[v]}
+                          </button>
+                        ))}
+                      </span>
+                    ) : null}
+                    <button className="btn btn-sm" onClick={copy}>{copyOk ? '已复制 ✓' : '复制'}</button>
+                  </div>
+                  <pre className="log-box">{shown}</pre>
+                </div>
+              )
+            })()}
         </Modal>
       ) : null}
     </div>

@@ -47,10 +47,8 @@ export default function SpiderDataSource() {
   }
 
   useEffect(() => {
-    // 管理端 mux 独有 delete 权限，探测一次（用户端接口同样存在，此处用 UserManageInterface 探测）
-    fetch('UserManageInterface', { credentials: 'include' })
-      .then((r) => setIsAdmin(r.status !== 404))
-      .catch(() => setIsAdmin(false))
+    // 阶段T：角色由构建期常量决定，用户端构建不再探测管理端接口
+    setIsAdmin(__APP_ROLE__ === 'manager')
     load()
     return () => { if (esRef.current) esRef.current.close() }
   }, [])

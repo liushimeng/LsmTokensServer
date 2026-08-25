@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { post } from '../shared/api'
+import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 
-// 源站管理：DstEndPointManageInterface（POST JSON {action:...}）
+// 源站管理（管理端）：DstEndPointManageInterface（POST JSON {action:...}）
 // action: list / add / update / toggle_status / delete / batch_enable / batch_disable / batch_delete / test / list_platforms / list_models
+// 用户端（29001）同名接口仅支持 list / test（只读 + 连通性测试），增删改按钮不展示。
 
 const emptyForm = {
   id: 0, user_id: 0, platform_name: '', model_name: '',
@@ -31,6 +33,7 @@ function formatJSON(s) {
 }
 
 export default function DstEndPointManage() {
+  const isAdmin = __APP_ROLE__ === 'manager' ? isAdminRole() : false // 用户端：只读列表 + 连通性测试（构建期裁剪管理分支）
   const [users, setUsers] = useState([])
   const [endpoints, setEndpoints] = useState([])
   const [loading, setLoading] = useState(true)
@@ -45,7 +48,8 @@ export default function DstEndPointManage() {
     setLoading(true)
     setError('')
     Promise.all([
-      post('UserManageInterface', { action: 'list' }),
+      // 用户下拉仅管理端 mux 提供；用户端 Promise.all 会整体失败导致列表不渲染，须跳过
+      isAdmin ? post('UserManageInterface', { action: 'list' }) : Promise.resolve(null),
       post('DstEndPointManageInterface', { action: 'list' }),
     ])
       .then(([u, e]) => {
@@ -54,7 +58,7 @@ export default function DstEndPointManage() {
       })
       .catch((e2) => setError(e2.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [isAdmin])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -135,16 +139,16 @@ export default function DstEndPointManage() {
   }
 
   const columns = [
-    {
+    ...(isAdmin ? [{
       key: 'checkbox', title: (
         <input type="checkbox" title="全选"
           checked={endpoints.length > 0 && selected.size >= endpoints.length}
           onChange={(e) => setSelected(e.target.checked ? new Set(endpoints.map((x) => x.id)) : new Set())} />
       ), width: 36,
       render: (_, ep) => <input type="checkbox" checked={selected.has(ep.id)} onChange={() => toggleSelect(ep.id)} />,
-    },
+    }] : []),
     { key: 'id', title: 'ID', width: 60 },
-    { key: 'user_id', title: '所属用户', render: (v) => userName(v) },
+    ...(isAdmin ? [{ key: 'user_id', title: '所属用户', render: (v) => userName(v) }] : []),
     { key: 'platform_name', title: '平台' },
     { key: 'model_name', title: '模型' },
     { key: 'protocol_type', title: '协议', render: (v) => (v == 1 ? 'Anthropic' : 'OpenAI') },
@@ -154,10 +158,10 @@ export default function DstEndPointManage() {
       key: 'actions', title: '操作',
       render: (_, ep) => (
         <span>
-          <button className="btn btn-sm" onClick={() => toggleStatus(ep)}>{ep.status == 1 ? '禁用' : '启用'}</button>{' '}
-          <button className="btn btn-sm btn-primary" onClick={() => setForm({ ...emptyForm, ...ep, api_key: '' })}>编辑</button>{' '}
-          <button className="btn btn-sm" onClick={() => testItem(ep)}>测试</button>{' '}
-          <button className="btn btn-sm btn-danger" onClick={() => deleteItem(ep)}>删除</button>
+          {isAdmin ? <button className="btn btn-sm" onClick={() => toggleStatus(ep)}>{ep.status == 1 ? '禁用' : '启用'}</button> : null}{' '}
+          {isAdmin ? <button className="btn btn-sm btn-primary" onClick={() => setForm({ ...emptyForm, ...ep, api_key: '' })}>编辑</button> : null}{' '}
+          <button className="btn btn-sm" onClick={() => testItem(ep)}>测试</button>
+          {isAdmin ? <>{' '}<button className="btn btn-sm btn-danger" onClick={() => deleteItem(ep)}>删除</button></> : null}
         </span>
       ),
     },
@@ -168,7 +172,8 @@ export default function DstEndPointManage() {
       <h2 className="page-title">源站管理</h2>
       <div className="toolbar">
         <button className="btn" onClick={loadData}>刷新</button>
-        <button className="btn btn-primary" onClick={() => setForm({ ...emptyForm, user_id: users[0]?.id || 0 })}>+ 添加源站</button>
+        {isAdmin ? <button className="btn btn-primary" onClick={() => setForm({ ...emptyForm, user_id: users[0]?.id || 0 })}>+ 添加源站</button>
+          : <span style={{ color: '#888', fontSize: 13 }}>用户模式：只读列表 + 连通性测试</span>}
         {selected.size > 0 ? (
           <>
             <span>已选择 {selected.size} 条（单次最多 500 条）</span>

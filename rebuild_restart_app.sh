@@ -188,12 +188,12 @@ if [ "$MODE" = "stop-only" ]; then
     exit 0
 fi
 
-# ---- Step 1: 编译前端 ----
+# ---- Step 1: 编译前端（阶段T 双构建：dist-manager + dist-user，产物完全隔离） ----
 if [ "$SKIP_WEB" = false ] && [ -d "$WEB_DIR" ]; then
-    log_step "Building frontend (ClientWeb)..."
+    log_step "Building frontend (ClientWeb, dual-build: dist-manager + dist-user)..."
     (cd "$WEB_DIR" && npm ci --no-fund --no-audit 2>/dev/null || npm install --no-fund --no-audit)
     (cd "$WEB_DIR" && npm run build)
-    log_info "Frontend build OK -> $WEB_DIR/dist"
+    log_info "Frontend build OK -> $WEB_DIR/dist-manager + $WEB_DIR/dist-user"
 else
     log_info "Skip frontend build"
 fi

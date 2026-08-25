@@ -79,6 +79,8 @@ LsmTokensServer = AI 代理服务 + AI 信息爬虫：
 
 **HTTPS（v1.3.0+）**：仅 User Web 支持；通过 `userWebUseHTTPS` / `userWebCertFile` / `userWebKeyFile` 配置；自签证书放项目根目录 `server.crt` / `server.key`。
 
+**Web 双构建隔离（阶段T/v2.0.57+，强制）**：前端一套源码、两套产物 —— `npm run build` 产出 `ClientWeb/dist-manager`（管理端 9101 托管）与 `ClientWeb/dist-user`（用户端 29001 托管），`webserver` 按角色绑定目录、禁止共享或跨目录回落。角色由构建期常量 `__APP_ROLE__`（vite `define` 静态替换）决定，**禁止运行时嗅探端口/localStorage 判断角色**；管理员专属页面与接口调用（`UserManage`/`ManagerLogin`/`UserManageInterface`/`ManagerLoginInterface` 等）必须经 `__APP_ROLE__ === 'manager'` 常量门控 + 动态 `import()` 懒加载，确保用户端产物经死代码消除不含任何管理端代码。详见 `docs/项目迁移解决方案/管理员与用户Web服务双构建隔离升级方案_20260825.md`。
+
 核心特性：内存缓存热路径零 DB、动态配置零重启、智能路由、源站级协议处理算法、v1.3.0 协议转换器、SSE 透传、MySQL 哈希分表、Request Tools 解析、AI Agent 识别统计、协议转换分析器、**v2.0.0 爬虫服务 chromedp 模式**。
 
 ## 2. 强制工作流

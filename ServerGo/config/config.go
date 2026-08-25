@@ -102,6 +102,9 @@ type LsmTokensServerConfig struct {
 	UserWebUseHTTPS          bool          `json:"userWebUseHTTPS"`
 	UserWebCertFile          string        `json:"userWebCertFile"`
 	UserWebKeyFile           string        `json:"userWebKeyFile"`
+	// 阶段T 双构建隔离：管理端/用户端静态产物目录可选覆盖（空 → 默认 ClientWeb/dist-manager / dist-user）
+	ManagerWebStaticDir      string        `json:"managerWebStaticDir,omitempty"`
+	UserWebStaticDir         string        `json:"userWebStaticDir,omitempty"`
 	AgentListenPort          int           `json:"agentListenPort"`
 	AgentHttpsListenPort     int           `json:"agentHttpsListenPort"`
 	AgentProductListenAddr   string        `json:"agentProductListenAddr"`
@@ -194,6 +197,8 @@ type rawLsmTokensServerConfig struct {
 	UserWebUseHTTPS          bool          `json:"userWebUseHTTPS"`
 	UserWebCertFile          string        `json:"userWebCertFile"`
 	UserWebKeyFile           string        `json:"userWebKeyFile"`
+	ManagerWebStaticDir      string        `json:"managerWebStaticDir,omitempty"`
+	UserWebStaticDir         string        `json:"userWebStaticDir,omitempty"`
 	AgentListenPort          int           `json:"agentListenPort"`
 	AgentHttpsListenPort     int           `json:"agentHttpsListenPort"`
 	AgentProductListenAddr   string        `json:"agentProductListenAddr"`
@@ -771,6 +776,8 @@ func LoadConfig(path string) (*LsmTokensServerConfig, error) {
 		cfg.UserWebUseHTTPS = raw.UserWebUseHTTPS
 		cfg.UserWebCertFile = raw.UserWebCertFile
 		cfg.UserWebKeyFile = raw.UserWebKeyFile
+		cfg.ManagerWebStaticDir = raw.ManagerWebStaticDir
+		cfg.UserWebStaticDir = raw.UserWebStaticDir
 		cfg.AgentListenPort = raw.AgentListenPort
 		cfg.AgentHttpsListenPort = raw.AgentHttpsListenPort
 		cfg.AgentProductListenAddr = raw.AgentProductListenAddr

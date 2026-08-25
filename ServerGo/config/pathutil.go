@@ -40,6 +40,13 @@ func GetConfigDir() string {
 	return "."
 }
 
+// SetConfigDirForTest 单测专用：临时覆盖配置目录基准，返回旧值便于 defer 恢复。
+func SetConfigDirForTest(dir string) string {
+	old := configDir
+	configDir = dir
+	return old
+}
+
 // ResolvePath 解析路径：绝对路径原样返回，相对路径基于配置文件所在目录解析。
 func ResolvePath(path string) (string, error) {
 	if filepath.IsAbs(path) {

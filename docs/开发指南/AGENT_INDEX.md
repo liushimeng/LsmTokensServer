@@ -5,7 +5,7 @@
 > 旧 LsmHttpAgent 为根目录平铺 `.go` 文件；新工程按模块分包（见 [docs/INDEX.md](../INDEX.md)）。
 > 本文保留旧版文件名说明，便于对照检索；新路径按 [迁移方案](项目迁移解决方案/00-总体迁移方案.md) 映射。
 > 新版源码根目录：`ServerGo/`（`config/` `logger/` `database/` `models/` `proxy/` `protocol/` `api/` `spider/` `websocket/` `system/` `webserver/`）。
-> 新版前端：`ClientWeb/`（React + Vite）。
+> 新版前端：`ClientWeb/`（React + Vite，阶段T 起双构建：`dist-manager` / `dist-user` 两套隔离产物，见 `../项目迁移解决方案/管理员与用户Web服务双构建隔离升级方案_20260825.md`）。
 
 > 修改代码前，请先阅读与你所用工具对应的上下文文件（[`AGENT.md`](AGENT.md) / [`CLAUDE.md`](CLAUDE.md) / [`KILO.md`](KILO.md)）。
 

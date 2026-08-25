@@ -34,8 +34,31 @@ export async function logout() {
   window.location.reload()
 }
 
+// 阶段T 双构建隔离：角色由构建期常量 __APP_ROLE__（vite define 静态替换）决定，
+// 不再嗅探端口；localStorage 'lsm.role' 仅作历史遗留兜底。
+export const BUILD_ROLE = __APP_ROLE__
+
+// 当前构建角色：管理端构建恒为 'manager'，用户端构建恒为 'user'
+export function currentRole() {
+  if (BUILD_ROLE === 'manager' || BUILD_ROLE === 'user') return BUILD_ROLE
+  try { return localStorage.getItem('lsm.role') === 'manager' ? 'manager' : 'user' } catch { return 'user' }
+}
+export const isAdminRole = () => currentRole() === 'manager'
+
+// 用户端"我的模型列表"（UserModelListInterface）：返回模型对象数组（含 model_name）
+export async function fetchMyModels() {
+  const res = await fetch('UserModelListInterface', {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' }, body: '{}',
+  })
+  const d = await res.json().catch(() => null)
+  return (d && d.data) || []
+}
+
 // 管理端登出：清 manager 会话 Cookie 后回管理端登录页
+// 用户端构建经 DCE 裁剪，不携带 ManagerLogoutInterface / /ManagerLogin 字样
 export async function managerLogout() {
+  if (__APP_ROLE__ !== 'manager') { return logout() }
   try { await fetch('ManagerLogoutInterface', { credentials: 'include' }) } catch { /* 忽略 */ }
   window.location.href = '/ManagerLogin'
 }

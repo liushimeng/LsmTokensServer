@@ -2,7 +2,8 @@
 // 一级 = 功能分组（可折叠），二级 = 页面项；key 与 App.jsx PAGES 注册表一致。
 
 export const NAV_TREES = {
-  admin: [
+  // 阶段T：admin 树经构建期常量裁剪，用户端产物不携带管理菜单字样
+  admin: __APP_ROLE__ === 'manager' ? [
     { id: 'overview', label: '总览', icon: '🏠', items: [
       { key: 'Home', label: '首页' },
     ]},
@@ -29,7 +30,7 @@ export const NAV_TREES = {
       { key: 'SpiderDailyInfo', label: '爬虫日报' },
       { key: 'CleanupReport', label: '清理报告' },
     ]},
-  ],
+  ] : [],
   user: [
     { id: 'overview', label: '总览', icon: '🏠', items: [
       { key: 'Home', label: '首页' },

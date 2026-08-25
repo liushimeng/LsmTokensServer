@@ -41,7 +41,14 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 - 中文 commit message，分阶段提交，格式：`阶段X：简要说明`
 - 每阶段完成后必须保证 `go build ./...` 通过、`go test ./...` 全绿（新增测试用例）。
 
-### 2.5 安全红线（v2.0.56 全面安全加固起强制）
+### 2.5 管理员/用户 Web 服务双构建隔离（阶段T/v2.0.57 起强制）
+- **前端必须双构建**：`npm run build` 一条命令产出 `ClientWeb/dist-manager`（管理员 Web，`managerWebListenPort`）与 `ClientWeb/dist-user`（用户 Web，`userWebListenPort`）两套产物；`webserver` 按角色绑定目录，**禁止共享目录或跨目录回落**。
+- **角色由构建期常量决定**：前端代码用 `__APP_ROLE__`（vite `define` 静态替换为 `'manager'`/`'user'`）判断角色，**禁止运行时嗅探端口/localStorage**。
+- **用户端产物零管理代码**：管理员专属页面（`UserManage`、`ManagerLogin`）必须动态 `import()` 懒加载且经 `__APP_ROLE__ === 'manager'` 常量门控注册；管理接口调用（`UserManageInterface`、`ManagerLoginInterface` 等）同样门控，确保经 Rollup 死代码消除后 `dist-user` 不含任何管理端字样（构建后需 grep 复验）。
+- 管理员 Web 为超级管理员权限（无需用户登录，走 `ManagerLoginInterface` + 管理端 JWT）；用户 Web 支持用户名+密码 / 模型名+API Key 登录，数据按用户/模型维度（JWT claims）过滤，无创建用户/模型能力，可配置本人路由。
+- 方案详见 [`docs/项目迁移解决方案/管理员与用户Web服务双构建隔离升级方案_20260825.md`](docs/项目迁移解决方案/管理员与用户Web服务双构建隔离升级方案_20260825.md)。
+
+### 2.6 安全红线（v2.0.56 全面安全加固起强制）
 - **禁止硬编码密钥/密码/生产 IP**：JWT 密钥与管理端登录凭证只放 `LsmTokensServer.conf` 的 `security` 段（`jwtSecret`/`managerUserName`/`managerPassword`/`trustProxyHeaders`）；Python 分析脚本 DB 凭证走环境变量 `LSM_MYSQL_*`。
 - **管理端（9101）所有业务接口必须经过 `api.ManagerAuthMiddleware`**：新接口在 `api.RegisterManagerAPIRoutes` 内注册即自动受保护；登录走 `/ManagerLoginInterface`。
 - **用户密码只存 bcrypt 哈希**：写库前 `api.HashPassword`，校验 `api.VerifyPassword`（自动兼容旧明文并升级）。

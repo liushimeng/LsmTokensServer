@@ -1,29 +1,32 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { get } from './shared/api'
 import Layout from './components/Layout'
-import Login from './pages/Login'
-import Home from './pages/Home'
-import UserManage from './pages/UserManage'
-import DstEndPointManage from './pages/DstEndPointManage'
-import AIRouteManage from './pages/AIRouteManage'
-import ModelInfo from './pages/ModelInfo'
-import AgentInfo from './pages/AgentInfo'
-import ProtocolConvertAnalyzer from './pages/ProtocolConvertAnalyzer'
-import SpiderDataSource from './pages/SpiderDataSource'
-import SpiderDailyInfo from './pages/SpiderDailyInfo'
-import CleanupReport from './pages/CleanupReport'
-import ChatAnalysis from './pages/ChatAnalysis'
-import ChatAnalysisTotal from './pages/ChatAnalysisTotal'
-import ChatAnalysisSession from './pages/ChatAnalysisSession'
-import ChatAnalysisTask from './pages/ChatAnalysisTask'
-import ChatDialog from './pages/ChatDialog'
-import ManagerLogin from './pages/ManagerLogin'
 
-// 页面注册表：key = hash 路由名
+// 阶段T 双构建隔离：页面改为懒加载器，管理员专属页仅在 manager 构建注册。
+// 注意：判断必须直接使用 __APP_ROLE__ 字面量（vite define 全局文本替换），
+// user 构建下条件恒为 false，Rollup 死代码消除连同 import() 一并移除 → chunk 不产出；
+// 若经由其他模块间接引用（如 auth.js 的 BUILD_ROLE），define 无法替换，裁剪将失效。
 const PAGES = {
-  Login, ManagerLogin, Home, UserManage, DstEndPointManage, AIRouteManage, ModelInfo, AgentInfo,
-  ProtocolConvertAnalyzer, SpiderDataSource, SpiderDailyInfo, CleanupReport,
-  ChatAnalysis, ChatAnalysisTotal, ChatAnalysisSession, ChatAnalysisTask, ChatDialog,
+  Home: lazy(() => import('./pages/Home')),
+  Login: lazy(() => import('./pages/Login')),
+  DstEndPointManage: lazy(() => import('./pages/DstEndPointManage')),
+  AIRouteManage: lazy(() => import('./pages/AIRouteManage')),
+  ModelInfo: lazy(() => import('./pages/ModelInfo')),
+  AgentInfo: lazy(() => import('./pages/AgentInfo')),
+  ProtocolConvertAnalyzer: lazy(() => import('./pages/ProtocolConvertAnalyzer')),
+  SpiderDataSource: lazy(() => import('./pages/SpiderDataSource')),
+  SpiderDailyInfo: lazy(() => import('./pages/SpiderDailyInfo')),
+  CleanupReport: lazy(() => import('./pages/CleanupReport')),
+  ChatAnalysis: lazy(() => import('./pages/ChatAnalysis')),
+  ChatAnalysisTotal: lazy(() => import('./pages/ChatAnalysisTotal')),
+  ChatAnalysisSession: lazy(() => import('./pages/ChatAnalysisSession')),
+  ChatAnalysisTask: lazy(() => import('./pages/ChatAnalysisTask')),
+  ChatDialog: lazy(() => import('./pages/ChatDialog')),
+}
+if (__APP_ROLE__ === 'manager') {
+  // 管理员专属页：UserManage（用户管理）、ManagerLogin（管理端登录）
+  PAGES.UserManage = lazy(() => import('./pages/UserManage'))
+  PAGES.ManagerLogin = lazy(() => import('./pages/ManagerLogin'))
 }
 
 // 路径别名映射：兼容服务端 redirect（如 /UserLogin → Login）
@@ -55,47 +58,33 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (route.path === 'Login' || route.path === 'ManagerLogin') return
+    if (route.path === 'Login' || (__APP_ROLE__ === 'manager' && route.path === 'ManagerLogin')) return
     let alive = true
-    // 登录信息与角色探测并发获取后合并为一次 setState，避免两个 setState 竞态
-    // 导致 isAdmin 被后到的 UserInfoInterface 结果覆盖（管理端误显示为“用户端”）。
-    const infoP = get('UserInfoInterface')
-      .then((d) => ({ ...((d && d.data) || d), loaded: true }))
-      .catch(() => null)
-    // 角色探测：管理端 mux 独有 UserManageInterface POST 接口；
-    // 用户端 302/404 → user 角色；管理端未登录返回 401 JSON → manager 端口但需跳管理端登录页
-    const roleP = fetch('UserManageInterface', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'list' }),
-    })
-      .then((r) => {
-        const ct = r.headers.get('content-type') || ''
-        if (r.status === 401 && ct.includes('json')) return 'manager-unauth'
-        return r.ok && ct.includes('json') ? 'manager' : 'user'
+    // 角色由构建期常量决定（阶段T），不再运行时探测管理端接口
+    get('UserInfoInterface')
+      .then((d) => {
+        if (!alive) return
+        setUserInfo({ ...((d && d.data) || d), loaded: true, isAdmin: __APP_ROLE__ === 'manager' })
       })
-      .catch(() => 'user')
-    Promise.all([infoP, roleP]).then(([info, role]) => {
-      if (!alive) return
-      // 记录端口角色，供 api.js 401 时选择正确的登录页
-      try { localStorage.setItem('lsm.role', role === 'user' ? 'user' : 'manager') } catch { /* 忽略 */ }
-      if (!info) {
-        if (role === 'manager-unauth') { window.location.href = '/ManagerLogin'; return }
-        window.location.hash = '#/Login'; return
-      }
-      setUserInfo({ ...info, isAdmin: role === 'manager' })
-    })
+      .catch(() => {
+        if (!alive) return
+        // 登录态失效：401 时 api.js 已按构建角色跳转，这里兜底处理其他失败
+        if (__APP_ROLE__ === 'manager') { window.location.href = '/ManagerLogin'; return }
+        window.location.hash = '#/Login'
+      })
     return () => { alive = false }
   }, [route.path])
 
-  if (route.path === 'Login') return <Login />
-  if (route.path === 'ManagerLogin') return <ManagerLogin />
-
-  const Page = PAGES[route.path] || Home
+  const Page = PAGES[route.path] || PAGES.Home
   return (
-    <Layout route={route.path} userInfo={userInfo}>
-      <Page route={route} />
-    </Layout>
+    <Suspense fallback={<div className="page-loading" style={{ padding: 24 }}>加载中…</div>}>
+      {route.path === 'Login' || (__APP_ROLE__ === 'manager' && route.path === 'ManagerLogin') ? (
+        <Page route={route} />
+      ) : (
+        <Layout route={route.path} userInfo={userInfo}>
+          <Page route={route} />
+        </Layout>
+      )}
+    </Suspense>
   )
 }

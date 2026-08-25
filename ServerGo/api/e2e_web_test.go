@@ -82,3 +82,44 @@ func TestManagerLoginRoutesRegisteredPublic(t *testing.T) {
 		}
 	}
 }
+
+// e2eUserRoutes 用户端（userWebListenPort=29001）mux 必须注册的接口全量清单。
+// 护栏：防止前端已按用户角色调用（如 UserAIRouteInterface），后端却漏挂路由。
+var e2eUserRoutes = []string{
+	"/CaptchaGenerate", "/UserLoginInterface",
+	"/UserInfoInterface", "/UserModelListInterface", "/UserLogoutInterface",
+	"/ChatAnalysisInterface", "/ChatAnalysisDstModelsInterface", "/ChatAnalysisAgentToolsInterface",
+	"/ChatAnalysisDetailInterface", "/ChatAnalysisTotalInterface", "/ChatAnalysisTotalRangeInterface",
+	"/ChatAnalysisTotalWS", "/ChatAnalysisSessionInterface", "/ChatAnalysisTaskInterface",
+	"/UserAIRouteInterface", "/DstEndPointManageInterface", "/ModelInfoInterface", "/AgentInfoInterface",
+	"/BuildTimeLogInterface", "/GitInfoInterface", "/SystemInfoInterface", "/SourceCodeInterface",
+	"/ReadmeInterface", "/ChatDialogInterface",
+	"/SpiderDataSourceInterface", "/SpiderDailyInfoInterface", "/SpiderDataSourceCrawl",
+	"/CleanupReportInterface",
+	"/ProtocolConvertAnalyzerStatus", "/ProtocolConvertAnalyzerTest", "/ProtocolConvertAnalyzerRecords",
+	"/ProtocolConvertAnalyzerRecordDetail", "/ProtocolConvertAnalyzerMapping",
+	"/CertDownloadInfoInterface", "/CertDownloadInterface", "/WikiInterface", "/UserInfoLogInterface",
+}
+
+// 用户端路由注册对等性：前端用户角色依赖的关键接口必须全部可解析，
+// 且管理端独占接口（AIRouteManageInterface/UserManageInterface/批量删除）不得挂到用户 mux。
+func TestUserRoutesRegistered(t *testing.T) {
+	mux := http.NewServeMux()
+	if config.G == nil {
+		config.G = config.DefaultConfig()
+	}
+	RegisterUserAPIRoutes(mux)
+
+	for _, p := range e2eUserRoutes {
+		_, pattern := mux.Handler(httptest.NewRequest("POST", p, nil))
+		if pattern == "" || pattern == "/" {
+			t.Errorf("用户端路由未注册: %s", p)
+		}
+	}
+	for _, p := range []string{"/AIRouteManageInterface", "/UserManageInterface", "/ChatAnalysisBatchDeleteInterface"} {
+		_, pattern := mux.Handler(httptest.NewRequest("POST", p, nil))
+		if pattern != "" && pattern != "/" {
+			t.Errorf("管理端独占接口泄漏到用户 mux: %s", p)
+		}
+	}
+}

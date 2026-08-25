@@ -18,11 +18,9 @@ export async function request(path, options = {}) {
   let data = null
   try { data = await res.json() } catch { /* 非 JSON（如文件下载） */ }
   if (!res.ok) {
-    // 登录态失效 → 按端口角色跳对应登录页（管理端 401 / 用户端 302 回落）
+    // 登录态失效 → 按构建角色跳对应登录页（阶段T：角色由 __APP_ROLE__ 构建期决定）
     if (res.status === 401) {
-      let role = 'user'
-      try { role = localStorage.getItem('lsm.role') || 'user' } catch { /* 忽略 */ }
-      if (role === 'manager') { window.location.href = '/ManagerLogin'; }
+      if (__APP_ROLE__ === 'manager') { window.location.href = '/ManagerLogin'; }
       else { window.location.hash = '#/Login'; window.location.reload(); }
     }
     throw new Error((data && data.message) || `HTTP ${res.status}`)

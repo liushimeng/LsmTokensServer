@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { openWs, post } from '../shared/api'
+import { isAdminRole, fetchMyModels } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import { fmtNum, fmtMs, pickRouteQuery } from '../shared/format'
 
@@ -24,7 +25,8 @@ const STAGE_NAMES = {
 
 export default function ChatAnalysisTotal({ route }) {
   const init = pickRouteQuery(route && route.query)
-  const [userName, setUserName] = useState(init.userName)
+  const isAdmin = isAdminRole() // 用户端：服务端强制本人数据，隐藏用户名输入
+  const [userName, setUserName] = useState(isAdmin ? init.userName : '')
   const [modelName, setModelName] = useState(init.modelName)
   const [days, setDays] = useState(7)
   // 各 stage 累计快照
@@ -221,6 +223,17 @@ export default function ChatAnalysisTotal({ route }) {
   }, [])
   useEffect(() => {
     if (init.userName && init.modelName) runQuery(days, init.userName, init.modelName)
+    // 用户端未带模型进入：自动取本人第一个模型并查询（对齐旧版重定向逻辑）
+    else if (!isAdmin && !init.modelName) {
+      fetchMyModels()
+        .then((ms) => {
+          const first = ms && ms[0]
+          if (!first) return
+          setModelName(first.model_name || '')
+          runQuery(days, '', first.model_name || '')
+        })
+        .catch(() => {})
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -247,7 +260,7 @@ export default function ChatAnalysisTotal({ route }) {
       <h2 className="page-title">对话汇总统计</h2>
 
       <div className="toolbar">
-        <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name（可留空=全站）" style={{ width: 160 }} /></label>
+        {isAdmin ? <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name（可留空=全站）" style={{ width: 160 }} /></label> : null}
         <label>模型名 <input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="model_name（可留空）" style={{ width: 160 }} /></label>
         <label>时间跨度
           <select value={days} onChange={(e) => { const d = Number(e.target.value); setDays(d); setStages({}); setDoneInfo(null); if (!running) runQuery(d) }}>
