@@ -983,6 +983,105 @@ function SysDialog({ onClose }) {
   )
 }
 
+// ===== 构建日志弹窗（阶段AK：结构化构建记录 + 服务端分页） =====
+function BuildLogDialog({ onClose }) {
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    setErr('')
+    get(`BuildLogInterface?page_num=${page}&page_size=${pageSize}`)
+      .then(setData)
+      .catch((e) => setErr(e.message || '加载失败'))
+      .finally(() => setLoading(false))
+  }, [page, pageSize])
+
+  const totalPages = data ? (data.totalPages || 0) : 0
+  const totalCount = data ? (data.totalCount || 0) : 0
+  const records = data ? (data.records || []) : []
+
+  // 构建模式标签颜色
+  const modeStyle = (mode) => {
+    switch (mode) {
+      case 'restart':   return { bg: '#dbeafe', color: '#1d4ed8' }
+      case 'build-only': return { bg: '#f3f4f6', color: '#6b7280' }
+      case 'skip-web':  return { bg: '#fef3c7', color: '#b45309' }
+      default:          return { bg: '#f3f4f6', color: '#6b7280' }
+    }
+  }
+  const modeLabel = (mode) => {
+    switch (mode) {
+      case 'restart':    return '完整重启'
+      case 'build-only': return '仅编译'
+      case 'skip-web':   return '跳过前端'
+      default:           return mode || '-'
+    }
+  }
+
+  // 状态指示
+  const statusBadge = (val, label) => {
+    if (val === null || val === undefined) return <span className="buildlog-badge buildlog-skip" title={label}>- 跳过</span>
+    if (val === true)  return <span className="buildlog-badge buildlog-ok" title={label}>✓ {label}</span>
+    return <span className="buildlog-badge buildlog-fail" title={label}>✗ {label}</span>
+  }
+
+  // 卡片左边框色条颜色
+  const cardBorder = (entry) => {
+    if (entry.backend_ok === false) return '#ef4444'
+    if (entry.web_ok === false) return '#f59e0b'
+    if (entry.backend_ok === true) return '#22c55e'
+    return '#94a3b8'
+  }
+
+  return (
+    <Modal title="构建日志" onClose={onClose} width={800}>
+      {err ? <div className="alert alert-error">{err}</div> : null}
+      {loading && !data ? <div className="table-loading">加载中…</div> : null}
+      {!loading && !err && records.length === 0 ? <div className="table-empty">暂无构建日志</div> : null}
+      {records.length > 0 && (
+        <div className="buildlog-list">
+          {records.map((entry, i) => {
+            const ms = modeStyle(entry.mode)
+            return (
+              <div className="buildlog-card" key={i} style={{ borderLeftColor: cardBorder(entry) }}>
+                <div className="buildlog-head">
+                  <span className="buildlog-time">{entry.time || '-'}</span>
+                  <div className="buildlog-badges">
+                    {entry.mode ? <span className="buildlog-badge" style={{ background: ms.bg, color: ms.color }}>{modeLabel(entry.mode)}</span> : null}
+                    {statusBadge(entry.web_ok, '前端')}
+                    {statusBadge(entry.backend_ok, '后端')}
+                  </div>
+                </div>
+                {(entry.git_hash || entry.git_msg) && (
+                  <div className="buildlog-git">
+                    {entry.git_hash ? <span className="buildlog-hash">{entry.git_hash}</span> : null}
+                    {entry.git_msg ? <span className="buildlog-msg" title={entry.git_msg}>{entry.git_msg}</span> : null}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+      <div className="pager">
+        <span>共 {totalCount} 条 · 第 {page} / {totalPages || 1} 页</span>
+        <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }} style={{ fontSize: 12 }}>
+          <option value={10}>10 条/页</option>
+          <option value={20}>20 条/页</option>
+          <option value={50}>50 条/页</option>
+          <option value={100}>100 条/页</option>
+        </select>
+        <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
+        <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
+      </div>
+    </Modal>
+  )
+}
+
 // 工具按钮注册表
 const DIALOGS = {
   userlog: { label: '用户日志', Comp: UserLogDialog },
@@ -990,6 +1089,7 @@ const DIALOGS = {
   cert: { label: '证书', Comp: CertDialog },
   git: { label: 'Git', Comp: GitDialog },
   sysinfo: { label: '系统信息', Comp: SysDialog },
+  buildlog: { label: '构建日志', Comp: BuildLogDialog },
 }
 
 // 顶部工具栏：桌面端一排小按钮；≤860px 收进「⋯」下拉面板（见 00 文档 §3.1）

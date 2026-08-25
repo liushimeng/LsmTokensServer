@@ -83,11 +83,12 @@ func RegisterManagerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ProtocolConvertAnalyzerUsers", protocolConvertAnalyzerUsersInterface)
 	mux.HandleFunc("/ProtocolConvertAnalyzerMapping", protocolConvertAnalyzerMappingInterface)
 
-	// 工具类公共接口（证书下载 / Wiki / 用户操作日志）
+	// 工具类公共接口（证书下载 / Wiki / 用户操作日志 / 构建日志）
 	mux.HandleFunc("/CertDownloadInfoInterface", certDownloadInfoInterfaceHandle)
 	mux.HandleFunc("/CertDownloadInterface", certDownloadInterfaceHandle)
 	mux.HandleFunc("/WikiInterface", wikiInterfaceHandle)
 	mux.HandleFunc("/UserInfoLogInterface", userInfoLogInterfaceHandle)
+	mux.HandleFunc("/BuildLogInterface", buildLogInterfaceHandle) // 阶段AK：构建日志
 }
 
 // RegisterUserAPIRoutes 挂载用户端（userWebListenPort）REST API 路由
@@ -152,9 +153,10 @@ func RegisterUserAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ProtocolConvertAnalyzerRecordDetail", userProtocolConvertAnalyzerRecordDetailInterface)
 	mux.HandleFunc("/ProtocolConvertAnalyzerMapping", protocolConvertAnalyzerMappingInterface)
 
-	// 工具类公共接口（证书下载 / Wiki / 用户操作日志）
+	// 工具类公共接口（证书下载 / Wiki / 用户操作日志 / 构建日志）
 	mux.HandleFunc("/CertDownloadInfoInterface", certDownloadInfoInterfaceHandle)
 	mux.HandleFunc("/CertDownloadInterface", certDownloadInterfaceHandle)
 	mux.HandleFunc("/WikiInterface", wikiInterfaceHandle)
 	mux.HandleFunc("/UserInfoLogInterface", userInfoLogInterfaceHandle)
+	mux.HandleFunc("/BuildLogInterface", buildLogInterfaceHandle) // 阶段AK：构建日志
 }

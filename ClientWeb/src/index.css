@@ -228,6 +228,21 @@ a { color: var(--primary); text-decoration: none; }
 .wiki-welcome p { margin: 6px 0; font-size: 14px; }
 .wiki-welcome-hint { font-size: 12px !important; }
 
+/* ===== 构建日志弹窗（阶段AK：结构化构建记录 + 服务端分页） ===== */
+.buildlog-list { display: flex; flex-direction: column; gap: 8px; max-height: 55vh; overflow-y: auto; padding: 2px 0; }
+.buildlog-card { background: #fff; border: 1px solid var(--border); border-left: 4px solid #94a3b8; border-radius: 8px; padding: 12px 14px; transition: box-shadow .15s; }
+.buildlog-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+.buildlog-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.buildlog-time { font-size: 14px; font-weight: 600; color: var(--text); font-family: ui-monospace, Menlo, Consolas, monospace; }
+.buildlog-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.buildlog-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.buildlog-ok { background: #dcfce7; color: #166534; }
+.buildlog-fail { background: #fef2f2; color: #dc2626; }
+.buildlog-skip { background: #f3f4f6; color: #9ca3af; }
+.buildlog-git { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.buildlog-hash { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; background: #f1f5f9; padding: 1px 6px; border-radius: 4px; color: #475569; flex-shrink: 0; }
+.buildlog-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ===== 移动端适配（docs/Web页面手机端UI设计以及美化方案/00） ===== */
 
 /* 触控基础：去掉 iOS 点击蓝闪 */
@@ -339,6 +354,13 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
   .cert-code-block { padding: 26px 10px 10px; }
   .cert-code-copy { top: 4px; right: 4px; font-size: 10px; padding: 2px 6px; }
   .cert-fingerprint { font-size: 10.5px; }
+
+  /* 构建日志弹窗移动端 */
+  .buildlog-list { max-height: 60vh; }
+  .buildlog-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .buildlog-time { font-size: 13px; }
+  .buildlog-git { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .buildlog-msg { white-space: normal; }
 
   /* iOS 安全区 */
   .layout-header { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }

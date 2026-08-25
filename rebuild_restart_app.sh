@@ -188,11 +188,17 @@ if [ "$MODE" = "stop-only" ]; then
 fi
 
 # ---- Step 1: 编译前端（阶段T 双构建：dist-manager + dist-user，产物完全隔离） ----
+FRONTEND_BUILD_OK="null"  # null=跳过, true=成功, false=失败
 if [ "$SKIP_WEB" = false ] && [ -d "$WEB_DIR" ]; then
     log_step "Building frontend (ClientWeb, dual-build: dist-manager + dist-user)..."
     (cd "$WEB_DIR" && npm ci --no-fund --no-audit 2>/dev/null || npm install --no-fund --no-audit)
-    (cd "$WEB_DIR" && npm run build)
-    log_info "Frontend build OK -> $WEB_DIR/dist-manager + $WEB_DIR/dist-user"
+    if (cd "$WEB_DIR" && npm run build); then
+        log_info "Frontend build OK -> $WEB_DIR/dist-manager + $WEB_DIR/dist-user"
+        FRONTEND_BUILD_OK="true"
+    else
+        log_error "Frontend build failed (continuing to backend build...)"
+        FRONTEND_BUILD_OK="false"
+    fi
 else
     log_info "Skip frontend build"
 fi
@@ -207,23 +213,36 @@ fi
 # ---- Step 3: 编译后端 ----
 log_step "Building backend binary..."
 BUILD_TIME=$(date '+%Y-%m-%d_%H:%M:%S')
-(cd "$SERVER_DIR" && go build -ldflags "-X main.buildTime=$BUILD_TIME" -o "./$APP_NAME" .)
-
-if [ ! -f "$SERVER_DIR/$APP_NAME" ]; then
-    log_error "Build failed"
+BACKEND_BUILD_OK="false"
+if (cd "$SERVER_DIR" && go build -ldflags "-X main.buildTime=$BUILD_TIME" -o "./$APP_NAME" .) && [ -f "$SERVER_DIR/$APP_NAME" ]; then
+    log_info "Backend build OK (buildTime: $BUILD_TIME)"
+    BACKEND_BUILD_OK="true"
+else
+    log_error "Backend build failed"
     exit 1
 fi
-log_info "Backend build OK (buildTime: $BUILD_TIME)"
 
-# ---- 记录编译时间到日志文件 ----
+# ---- 记录编译信息到日志文件（JSON-lines 格式，最新在头部） ----
 BUILD_DATE_TIME_LOG="$PROJECT_DIR/${APP_NAME}BuildDateTime.log"
 BUILD_DATE_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+GIT_HASH=$(cd "$PROJECT_DIR" && git log -1 --pretty=%h 2>/dev/null || echo "unknown")
+GIT_MSG=$(cd "$PROJECT_DIR" && git log -1 --pretty=%s 2>/dev/null || echo "unknown")
+# 构建模式标签
+case "$MODE" in
+    build-only) BUILD_MODE_LABEL="build-only" ;;
+    *)          if [ "$SKIP_WEB" = true ]; then BUILD_MODE_LABEL="skip-web"; else BUILD_MODE_LABEL="restart"; fi ;;
+esac
+# 构造 JSON 行（转义双引号）
+GIT_MSG_ESCAPED=$(printf '%s' "$GIT_MSG" | sed 's/\\/\\\\/g; s/"/\\"/g')
+JSON_LINE="{\"time\":\"$BUILD_DATE_TIME\",\"git_hash\":\"$GIT_HASH\",\"git_msg\":\"$GIT_MSG_ESCAPED\",\"mode\":\"$BUILD_MODE_LABEL\",\"web_ok\":$FRONTEND_BUILD_OK,\"backend_ok\":$BACKEND_BUILD_OK}"
+# Prepend 新记录到文件头部，限制最大 500 行
+MAX_LOG_LINES=500
 if [ -f "$BUILD_DATE_TIME_LOG" ]; then
-    { echo "$BUILD_DATE_TIME"; cat "$BUILD_DATE_TIME_LOG"; } > "$BUILD_DATE_TIME_LOG.tmp" && mv "$BUILD_DATE_TIME_LOG.tmp" "$BUILD_DATE_TIME_LOG"
+    { echo "$JSON_LINE"; cat "$BUILD_DATE_TIME_LOG"; } | head -n "$MAX_LOG_LINES" > "$BUILD_DATE_TIME_LOG.tmp" && mv "$BUILD_DATE_TIME_LOG.tmp" "$BUILD_DATE_TIME_LOG"
 else
-    echo "$BUILD_DATE_TIME" > "$BUILD_DATE_TIME_LOG"
+    echo "$JSON_LINE" > "$BUILD_DATE_TIME_LOG"
 fi
-log_info "Build time recorded to $BUILD_DATE_TIME_LOG"
+log_info "Build log recorded to $BUILD_DATE_TIME_LOG (JSON-lines format)"
 
 # ---- 仅编译模式 ----
 if [ "$MODE" = "build-only" ]; then
