@@ -34,7 +34,7 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 - `server.crt` / `server.key`（TLS 证书私钥）
 - `*.log`、二进制、pid 文件
 - `go-web-debug-tool/`（本地私有子模块）
-- `python-generate-image-tool/`（本地私有 Python SDK，仅供本机 Agent 加载，不入库）
+- `python-generate-image-tool/`（本地私有子模块，图片生成 Python SDK）
 - `node_modules/`、`ClientWeb/dist/`
 
 ### 2.4 提交规范
@@ -73,7 +73,7 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 
 ## 6. 本地私有 Python 工具（AI Agent 加载使用）
 
-> 这些工具以本地目录形式存在于工程根目录，**仅在本机使用，不入库**（已在 `.gitignore` 中排除）。
+> 这些工具以本地私有子模块形式存在（gitlink 提交到本仓库，实体库位于本地 `/usr/local/git-local-repos/`，不开源）。
 > AI Agent（Claude Code / Codex / OpenCode / pi / Hermes / OpenClaw）启动时会自动扫描项目根目录，结合本节说明即可加载。
 
 | 工具目录 | 用途 | 关键能力 |

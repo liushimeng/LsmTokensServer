@@ -2,3 +2,7 @@
 	path = go-web-debug-tool
 	url = /usr/local/git-local-repos/go-web-debug-tool.git
 	branch = main
+[submodule "python-generate-image-tool"]
+	path = python-generate-image-tool
+	url = /usr/local/git-local-repos/python-generate-image-tool.git
+	branch = main
