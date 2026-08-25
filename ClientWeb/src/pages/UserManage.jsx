@@ -129,11 +129,11 @@ export default function UserManage() {
   }
 
   const columns = [
-    { key: 'id', title: 'ID', width: 60 },
-    { key: 'user_name', title: '用户名' },
+    { key: 'id', title: 'ID', width: 60, sortable: true },
+    { key: 'user_name', title: '用户名', sortable: true },
     { key: 'phone', title: '手机号', render: (v) => v || '-' },
     {
-      key: 'status', title: '用户状态',
+      key: 'status', title: '用户状态', sortable: true,
       render: (v) => (
         <span>
           <span className={`status-dot ${v === 2 ? 'status-off' : 'status-on'}`} />
@@ -172,7 +172,8 @@ export default function UserManage() {
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
-        <DataTable columns={columns} rows={users} loading={loading} empty="暂无用户" rowKey="id" />
+        <DataTable columns={columns} rows={users} loading={loading} empty="暂无用户" rowKey="id"
+          rowClass={(u) => (u.status === 2 ? 'row-disabled' : '')} />
         {expanded != null && users.find((u) => u.id === expanded) ? (
           <div style={{ marginTop: 12 }}>
             <div className="toolbar" style={{ marginBottom: 8 }}>
@@ -187,11 +188,12 @@ export default function UserManage() {
               empty="暂无模型"
               rowKey="id"
               rows={models}
+              rowClass={(m) => (m.status === 2 ? 'row-disabled' : '')}
               columns={[
-                { key: 'id', title: 'ID', width: 60 },
-                { key: 'model_name', title: '模型名' },
+                { key: 'id', title: 'ID', width: 60, sortable: true },
+                { key: 'model_name', title: '模型名', sortable: true },
                 { key: 'api_key', title: 'API Key', render: (v) => (v ? v.substring(0, 8) + '****' : '-') },
-                { key: 'status', title: '状态', render: (v) => <span><span className={`status-dot ${v === 2 ? 'status-off' : 'status-on'}`} />{v === 2 ? '禁用' : '启用'}</span> },
+                { key: 'status', title: '状态', sortable: true, render: (v) => <span><span className={`status-dot ${v === 2 ? 'status-off' : 'status-on'}`} />{v === 2 ? '禁用' : '启用'}</span> },
                 {
                   key: 'analysis', title: '分析',
                   render: (_, m) => {

@@ -131,14 +131,14 @@ export default function SpiderDataSource() {
   }
 
   const columns = [
-    { key: 'id', title: 'ID', width: 60 },
-    { key: 'platform_name', title: '平台名称' },
+    { key: 'id', title: 'ID', width: 60, sortable: true },
+    { key: 'platform_name', title: '平台名称', sortable: true },
     { key: 'url_address', title: 'URL', render: (v) => (
       <a href={v} target="_blank" rel="noreferrer" className="wrap">{v}</a>
     ) },
     { key: 'description', title: '源信息描述', render: (v) => <span className="wrap">{v || '-'}</span> },
     { key: 'remark', title: '备注' },
-    { key: 'status', title: '状态', render: (v) => (
+    { key: 'status', title: '状态', sortable: true, render: (v) => (
       <span><span className={'status-dot ' + (v === 1 ? 'status-on' : 'status-off')} />{v === 1 ? '启用' : '禁用'}</span>
     ) },
     { key: 'updated_at', title: '更新时间', render: (v) => fmtTime(v) },
@@ -168,7 +168,8 @@ export default function SpiderDataSource() {
       </div>
       {err ? <div className="alert alert-error">{err}</div> : null}
       {msg ? <div className="alert alert-ok">{msg}</div> : null}
-      <DataTable columns={columns} rows={rows || []} loading={!rows} empty="暂无数据源" rowKey="id" />
+      <DataTable columns={columns} rows={rows || []} loading={!rows} empty="暂无数据源" rowKey="id"
+        rowClass={(rec) => (rec.status === 1 ? 'row-enabled' : 'row-disabled')} />
 
       {/* 新增/编辑弹窗 */}
       {editing && (

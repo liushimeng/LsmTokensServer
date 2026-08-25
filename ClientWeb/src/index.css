@@ -95,6 +95,13 @@ a { color: var(--primary); text-decoration: none; }
 .data-table td.wrap { white-space: normal; word-break: break-all; max-width: 420px; }
 .data-table th { background: #fafbfc; color: var(--muted); font-weight: 600; position: sticky; top: 0; }
 .data-table tr:hover td { background: #f6f8fa; }
+/* 状态行高亮：禁用行淡红 + 左侧红条，启用行淡绿（hover 仍回常规 hover 色） */
+.data-table tr.row-disabled td { background: #fdf1f1; }
+.data-table tr.row-disabled td:first-child { box-shadow: inset 3px 0 0 #ef4444; }
+.data-table tr.row-enabled td { background: #f4faf4; }
+.data-table th.sortable { cursor: pointer; user-select: none; }
+.data-table th.sortable:hover { color: #2563eb; }
+.data-table tr.row-disabled:hover td, .data-table tr.row-enabled:hover td { background: #eef2f6; }
 .table-loading, .table-empty { padding: 32px; text-align: center; color: var(--muted); background: var(--panel); border: 1px dashed var(--border); border-radius: 8px; }
 .pager { display: flex; gap: 8px; align-items: center; margin-top: 12px; justify-content: flex-end; color: var(--muted); }
 

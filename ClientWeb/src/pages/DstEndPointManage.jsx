@@ -147,13 +147,13 @@ export default function DstEndPointManage() {
       ), width: 36,
       render: (_, ep) => <input type="checkbox" checked={selected.has(ep.id)} onChange={() => toggleSelect(ep.id)} />,
     }] : []),
-    { key: 'id', title: 'ID', width: 60 },
-    ...(isAdmin ? [{ key: 'user_id', title: '所属用户', render: (v) => userName(v) }] : []),
-    { key: 'platform_name', title: '平台' },
-    { key: 'model_name', title: '模型' },
-    { key: 'protocol_type', title: '协议', render: (v) => (v == 1 ? 'Anthropic' : 'OpenAI') },
-    { key: 'url_address', title: 'URL', render: (v) => <span style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>{v}</span> },
-    { key: 'status', title: '状态', render: (v) => <span><span className={`status-dot ${v == 1 ? 'status-on' : 'status-off'}`} />{v == 1 ? '启用' : '禁用'}</span> },
+    { key: 'id', title: 'ID', width: 60, sortable: true },
+    ...(isAdmin ? [{ key: 'user_id', title: '所属用户', sortable: true, sortValue: (r) => userName(r.user_id), render: (v) => userName(v) }] : []),
+    { key: 'platform_name', title: '平台', sortable: true },
+    { key: 'model_name', title: '模型', sortable: true },
+    { key: 'protocol_type', title: '协议', sortable: true, render: (v) => (v == 1 ? 'Anthropic' : 'OpenAI') },
+    { key: 'url_address', title: 'URL', sortable: true, render: (v) => <span style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>{v}</span> },
+    { key: 'status', title: '状态', sortable: true, render: (v) => <span><span className={`status-dot ${v == 1 ? 'status-on' : 'status-off'}`} />{v == 1 ? '启用' : '禁用'}</span> },
     {
       key: 'actions', title: '操作',
       render: (_, ep) => (
@@ -186,7 +186,8 @@ export default function DstEndPointManage() {
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
-        <DataTable columns={columns} rows={endpoints} loading={loading} empty="暂无源站" rowKey="id" />
+        <DataTable columns={columns} rows={endpoints} loading={loading} empty="暂无源站" rowKey="id"
+          rowClass={(ep) => (ep.status == 1 ? 'row-enabled' : 'row-disabled')} />
       </div>
 
       {form ? (
