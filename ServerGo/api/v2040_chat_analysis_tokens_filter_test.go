@@ -145,7 +145,7 @@ func TestQueryAgentHttpTransactions_TokensNonZeroFilter(t *testing.T) {
 			records, total, err := modelsdb.QueryAgentHttpTransactions(
 				user, mod, config.G.DBMysqlSubTableNumber, 1, 50,
 				"", "", "", false, 0, "", "", "", 0,
-				c.inNonZero, c.outNonZero,
+				c.inNonZero, c.outNonZero, 0,
 			)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)
@@ -329,7 +329,7 @@ func TestQueryAgentHttpTransactions_TokensNonZeroFilter_SQLite(t *testing.T) {
 			records, total, err := modelsdb.QueryAgentHttpTransactions(
 				user, mod, config.G.DBMysqlSubTableNumber, 1, 50,
 				"", "", "", false, 0, "", "", "", 0,
-				c.inNonZero, c.outNonZero,
+				c.inNonZero, c.outNonZero, 0,
 			)
 			if err != nil {
 				t.Fatalf("query failed: %v", err)

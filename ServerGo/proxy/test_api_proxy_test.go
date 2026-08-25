@@ -196,7 +196,7 @@ func TestEndToEndProxyForwarding(t *testing.T) {
 	var err error
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		records, total, err = modelsdb.QueryAgentHttpTransactions("testuser", testModel.ModelName, config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0)
+		records, total, err = modelsdb.QueryAgentHttpTransactions("testuser", testModel.ModelName, config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0, 0)
 		if err != nil || total == 1 || time.Now().After(deadline) {
 			break
 		}
@@ -328,7 +328,7 @@ func TestProtocolConverterOpenAIToAnthropicRewritesPathAndPreservesError(t *test
 	var total int64
 	var err error
 	for {
-		records, total, err = modelsdb.QueryAgentHttpTransactions("converteruser", testModel.ModelName, config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0)
+		records, total, err = modelsdb.QueryAgentHttpTransactions("converteruser", testModel.ModelName, config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0, 0)
 		if err != nil || total == 1 || time.Now().After(deadline) {
 			break
 		}
@@ -429,7 +429,7 @@ func TestProtocolConverterStreamRequestWrapsJSONResponseAsSSE(t *testing.T) {
 	var total int64
 	var err error
 	for {
-		records, total, err = modelsdb.QueryAgentHttpTransactions("streamconverter", testModel.ModelName, config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0)
+		records, total, err = modelsdb.QueryAgentHttpTransactions("streamconverter", testModel.ModelName, config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0, 0)
 		if err != nil || total == 1 || time.Now().After(deadline) {
 			break
 		}

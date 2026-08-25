@@ -37,6 +37,7 @@ type ChatAnalysisInterfaceRequest struct {
 	Days                      int    `json:"days"`
 	FilterInputTokensNonzero  int    `json:"filter_input_tokens_nonzero"`  // 0=全部,1=非零,2=为零
 	FilterOutputTokensNonzero int    `json:"filter_output_tokens_nonzero"` // 0=全部,1=非零,2=为零
+	FilterAlgorithmType       int    `json:"filter_algorithm_type"`       // v2.0.7x 阶段AM：0=全部,1=协议直连,2=协议转换器
 }
 
 // ChatAnalysisInterfaceResponse 查询接口响应体
@@ -107,8 +108,8 @@ func chatAnalysisInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	}
 	days := normalizeChatAnalysisDays(req.Days)
 
-	logger.Printf("[WEB] ChatAnalysisInterface user=%s model=%s page=%d size=%d days=%d url=%s method=%s status=%s statusNot=%v tools=%s",
-		req.UserName, req.ModelName, page, pageSize, days, req.FilterURL, req.FilterMethod, req.FilterStatus, req.FilterStatusNot, req.FilterTools)
+	logger.Printf("[WEB] ChatAnalysisInterface user=%s model=%s page=%d size=%d days=%d url=%s method=%s status=%s statusNot=%v tools=%s algoType=%d",
+		req.UserName, req.ModelName, page, pageSize, days, req.FilterURL, req.FilterMethod, req.FilterStatus, req.FilterStatusNot, req.FilterTools, req.FilterAlgorithmType)
 
 	// 查询数据（从哈希分表按用户名+模型索引名称查询）
 	records, total, err := modelsdb.QueryAgentHttpTransactions(
@@ -116,6 +117,7 @@ func chatAnalysisInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		req.FilterURL, req.FilterMethod, req.FilterStatus, req.FilterStatusNot, req.FilterProtocolType,
 		req.FilterDstModelName, req.FilterTools, req.FilterAgentToolName, days,
 		req.FilterInputTokensNonzero, req.FilterOutputTokensNonzero,
+		req.FilterAlgorithmType,
 	)
 	if err != nil {
 		json.NewEncoder(w).Encode(ChatAnalysisInterfaceResponse{

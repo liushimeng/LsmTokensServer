@@ -670,6 +670,13 @@ func selectTransactionColumns() string {
 // filterInputTokensNonzero / filterOutputTokensNonzero 为三态整数：
 //
 //	0 = 全部（不过滤）；1 = 仅保留非零（>0）；2 = 仅保留为零（=0）
+//
+// filterAlgorithmType 三态整数：
+//
+//	0 = 全部（不过滤）；1 = 仅保留协议直连(DstEndPointAlgorithmType_Direct)；
+//	2 = 仅保留协议转换器(DstEndPointAlgorithmType_ProtocolConverter)。
+//
+// v2.0.7x 阶段AM：支持「协议直连-转发代理」与「协议转换-转发代理」的列表区分筛选。
 func QueryAgentHttpTransactions(
 	userName, modelName string,
 	subTableNum, page, pageSize int,
@@ -682,6 +689,7 @@ func QueryAgentHttpTransactions(
 	days int,
 	filterInputTokensNonzero int,
 	filterOutputTokensNonzero int,
+	filterAlgorithmType int,
 ) ([]TAgentHttpTransactionDataItem, int64, error) {
 	if database.DB == nil {
 		return nil, 0, fmt.Errorf("database not initialized")
@@ -748,6 +756,11 @@ func QueryAgentHttpTransactions(
 		query = query.Where("tokens_output_size > 0")
 	} else if filterOutputTokensNonzero == 2 {
 		query = query.Where("tokens_output_size = 0")
+	}
+	if filterAlgorithmType == DstEndPointAlgorithmType_Direct {
+		query = query.Where("dst_endpoint_algorithm_type = ?", DstEndPointAlgorithmType_Direct)
+	} else if filterAlgorithmType == DstEndPointAlgorithmType_ProtocolConverter {
+		query = query.Where("dst_endpoint_algorithm_type = ?", DstEndPointAlgorithmType_ProtocolConverter)
 	}
 
 	// 查询总数
@@ -821,6 +834,11 @@ func QueryAgentHttpTransactions(
 		listQuery = listQuery.Where("tokens_output_size > 0")
 	} else if filterOutputTokensNonzero == 2 {
 		listQuery = listQuery.Where("tokens_output_size = 0")
+	}
+	if filterAlgorithmType == DstEndPointAlgorithmType_Direct {
+		listQuery = listQuery.Where("dst_endpoint_algorithm_type = ?", DstEndPointAlgorithmType_Direct)
+	} else if filterAlgorithmType == DstEndPointAlgorithmType_ProtocolConverter {
+		listQuery = listQuery.Where("dst_endpoint_algorithm_type = ?", DstEndPointAlgorithmType_ProtocolConverter)
 	}
 	// v2.0.39：使用 selectTransactionColumns() 统一白名单，禁止任何遗漏 4 个 longtext。
 	result := listQuery.Select(selectTransactionColumns()).

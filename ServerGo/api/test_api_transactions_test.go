@@ -50,7 +50,7 @@ func TestSaveAndQueryTransaction(t *testing.T) {
 	}
 
 	// 查询记录
-	records, total, err := modelsdb.QueryAgentHttpTransactions("testuser", "model-a", config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0)
+	records, total, err := modelsdb.QueryAgentHttpTransactions("testuser", "model-a", config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("query transaction failed: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestSaveTransactionWithInvalidUTF8ResponseBody(t *testing.T) {
 
 	// 记录必须能从分表查回来
 	records, total, err := modelsdb.QueryAgentHttpTransactions(
-		"utf8user", "test-model-bad", config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0,
+		"utf8user", "test-model-bad", config.G.DBMysqlSubTableNumber, 1, 10, "", "", "", false, 0, "", "", "", 3, 0, 0, 0,
 	)
 	if err != nil {
 		t.Fatalf("query failed: %v", err)

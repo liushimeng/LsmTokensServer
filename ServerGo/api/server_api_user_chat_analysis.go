@@ -74,14 +74,15 @@ func userChatAnalysisInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	}
 	days := normalizeChatAnalysisDays(req.Days)
 
-	logger.Printf("[WEB] UserChatAnalysisInterface user=%s model=%s page=%d size=%d days=%d url=%s method=%s status=%s statusNot=%v tools=%s",
-		req.UserName, req.ModelName, page, pageSize, days, req.FilterURL, req.FilterMethod, req.FilterStatus, req.FilterStatusNot, req.FilterTools)
+	logger.Printf("[WEB] UserChatAnalysisInterface user=%s model=%s page=%d size=%d days=%d url=%s method=%s status=%s statusNot=%v tools=%s algoType=%d",
+		req.UserName, req.ModelName, page, pageSize, days, req.FilterURL, req.FilterMethod, req.FilterStatus, req.FilterStatusNot, req.FilterTools, req.FilterAlgorithmType)
 
 	records, total, err := modelsdb.QueryAgentHttpTransactions(
 		req.UserName, req.ModelName, config.G.DBMysqlSubTableNumber, page, pageSize,
 		req.FilterURL, req.FilterMethod, req.FilterStatus, req.FilterStatusNot, req.FilterProtocolType,
 		req.FilterDstModelName, req.FilterTools, req.FilterAgentToolName, days,
 		req.FilterInputTokensNonzero, req.FilterOutputTokensNonzero,
+		req.FilterAlgorithmType,
 	)
 	if err != nil {
 		json.NewEncoder(w).Encode(ChatAnalysisInterfaceResponse{
