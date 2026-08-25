@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { openWs, post } from '../shared/api'
 import { isAdminRole, fetchMyModels } from '../shared/auth'
+import { useUserModelOptions, modelNamesOf, allModelNames } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import { fmtNum, fmtMs, pickRouteQuery } from '../shared/format'
 
@@ -53,6 +54,12 @@ export default function ChatAnalysisTotal({ route }) {
   const [rangeError, setRangeError] = useState('')
   const [rangeReport, setRangeReport] = useState(null) // {range_report, agent_dist}
   const rangeDoneRef = useRef(false)
+  // 用户名/模型名级联下拉：管理端用 UserModelOptionsInterface（页面生命周期内缓存一次），用户端用本人模型列表
+  const { users: userOptions } = useUserModelOptions()
+  const [myModels, setMyModels] = useState([])
+  const modelOptions = isAdmin
+    ? (userName.trim() ? modelNamesOf(userOptions, userName.trim()) : allModelNames(userOptions))
+    : myModels.map((m) => m.model_name).filter(Boolean)
 
   // 趋势数据到位后，默认区间取趋势首尾日期
   useEffect(() => {
@@ -227,6 +234,7 @@ export default function ChatAnalysisTotal({ route }) {
     else if (!isAdmin && !init.modelName) {
       fetchMyModels()
         .then((ms) => {
+          setMyModels(ms || [])
           const first = ms && ms[0]
           if (!first) return
           setModelName(first.model_name || '')
@@ -260,8 +268,18 @@ export default function ChatAnalysisTotal({ route }) {
       <h2 className="page-title">对话汇总统计</h2>
 
       <div className="toolbar">
-        {isAdmin ? <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name（可留空=全站）" style={{ width: 160 }} /></label> : null}
-        <label>模型名 <input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="model_name（可留空）" style={{ width: 160 }} /></label>
+        {isAdmin ? <label>用户名
+          <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName('') }} style={{ width: 160 }}>
+            <option value="">全部用户</option>
+            {userOptions.map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
+          </select>
+        </label> : null}
+        <label>模型名
+          <select value={modelName} onChange={(e) => setModelName(e.target.value)} style={{ width: 170 }}>
+            <option value="">全部模型</option>
+            {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
         <label>时间跨度
           <select value={days} onChange={(e) => { const d = Number(e.target.value); setDays(d); setStages({}); setDoneInfo(null); if (!running) runQuery(d) }}>
             {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近 ${d} 天`}</option>)}

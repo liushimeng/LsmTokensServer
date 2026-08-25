@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { post } from '../shared/api'
+import { isAdminRole } from '../shared/auth'
+import { useUserModelOptions } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import { pickRouteQuery } from '../shared/format'
 
@@ -12,6 +14,8 @@ import { pickRouteQuery } from '../shared/format'
 // {AgentAnthropicListenURL} 与 {AgentOpenAIListenURL} 代理，无 CORS 问题）。
 export default function ChatDialog({ route }) {
   const init = pickRouteQuery(route && route.query)
+  const isAdmin = isAdminRole() // 管理端：用户名下拉选择（页面生命周期内缓存一次）；用户端保持手输本人用户名
+  const { users: userOptions } = useUserModelOptions()
   const [userName, setUserName] = useState(init.userName)
   const [models, setModels] = useState([]) // [{id, model_name, api_key_masked}]
   const [modelName, setModelName] = useState(init.modelName)
@@ -297,7 +301,12 @@ export default function ChatDialog({ route }) {
       <h2 className="page-title">对话</h2>
 
       <div className="toolbar">
-        <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name" style={{ width: 140 }} /></label>
+        {isAdmin ? <label>用户名
+          <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName(''); loadModels(e.target.value) }} style={{ width: 150 }}>
+            <option value="">请选择用户</option>
+            {userOptions.map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
+          </select>
+        </label> : <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name" style={{ width: 140 }} /></label>}
         <button className="btn btn-primary" onClick={() => loadModels()} disabled={loadingModels}>
           {loadingModels ? '加载中…' : '加载模型列表'}
         </button>

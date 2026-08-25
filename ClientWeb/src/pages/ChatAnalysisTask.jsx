@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { post } from '../shared/api'
 import { isAdminRole, fetchMyModels } from '../shared/auth'
+import { useUserModelOptions, modelNamesOf, allModelNames } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/format'
@@ -21,6 +22,12 @@ export default function ChatAnalysisTask({ route }) {
   const [error, setError] = useState('')
   const [page, setPage] = useState(1)
   const [detail, setDetail] = useState(null) // 任务详情弹窗
+  // 用户名/模型名级联下拉：管理端用 UserModelOptionsInterface（页面生命周期内缓存一次），用户端用本人模型列表
+  const { users: userOptions } = useUserModelOptions()
+  const [myModels, setMyModels] = useState([])
+  const modelOptions = isAdmin
+    ? (userName.trim() ? modelNamesOf(userOptions, userName.trim()) : allModelNames(userOptions))
+    : myModels.map((m) => m.model_name).filter(Boolean)
 
   const hasKey = (isAdmin ? userName.trim() !== '' : true) && modelName.trim() !== ''
 
@@ -45,6 +52,7 @@ export default function ChatAnalysisTask({ route }) {
     if (!isAdmin) {
       fetchMyModels()
         .then((ms) => {
+          setMyModels(ms || [])
           const first = ms && ms[0]
           if (!first) return
           setModelName(first.model_name || '')
@@ -87,8 +95,18 @@ export default function ChatAnalysisTask({ route }) {
       <h2 className="page-title">任务 / 工具调用分析</h2>
 
       <div className="toolbar">
-        {isAdmin ? <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name" style={{ width: 140 }} /></label> : null}
-        <label>模型名 <input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="model_name" style={{ width: 160 }} /></label>
+        {isAdmin ? <label>用户名
+          <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName('') }} style={{ width: 150 }}>
+            <option value="">请选择用户</option>
+            {userOptions.map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
+          </select>
+        </label> : null}
+        <label>模型名
+          <select value={modelName} onChange={(e) => setModelName(e.target.value)} style={{ width: 170 }}>
+            <option value="">请选择模型</option>
+            {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
         <label>时间跨度
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
             {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近 ${d} 天`}</option>)}

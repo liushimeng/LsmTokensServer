@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { post } from '../shared/api'
+import { clearUserModelOptionsCache } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 
@@ -72,6 +73,7 @@ export default function UserManage() {
         openai_enabled: !!userForm.openai_enabled,
       })
       setUserForm(null)
+      clearUserModelOptionsCache() // 用户增改后失效下拉选项缓存
       loadUsers()
     } catch (e) { alert(e.message) } finally { setSaving(false) }
   }
@@ -90,6 +92,7 @@ export default function UserManage() {
     if (!confirm('确定删除该用户？其所有模型也会被删除。')) return
     try {
       await post('UserManageInterface', { action: 'delete', id: u.id })
+      clearUserModelOptionsCache()
       loadUsers()
     } catch (e) { alert(e.message) }
   }
@@ -104,6 +107,7 @@ export default function UserManage() {
         model_name: modelForm.model_name,
       })
       setModelForm(null)
+      clearUserModelOptionsCache() // 模型增改后失效下拉选项缓存
       if (expanded === modelForm.user_id) loadModels(modelForm.user_id)
     } catch (e) { alert(e.message) } finally { setSaving(false) }
   }
@@ -119,6 +123,7 @@ export default function UserManage() {
     if (!confirm('确定删除该模型？')) return
     try {
       await post('UserModelManageInterface', { action: 'delete', id: m.id })
+      clearUserModelOptionsCache()
       loadModels(userId)
     } catch (e) { alert(e.message) }
   }

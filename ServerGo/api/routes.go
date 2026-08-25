@@ -56,6 +56,9 @@ func RegisterManagerAPIRoutes(mux *http.ServeMux) {
 	// 对话页面数据接口
 	mux.HandleFunc("/ChatDialogInterface", chatDialogInterfaceHandle)
 
+	// 用户名+模型名下拉选项（管理端各查询页面级联下拉共用，页面生命周期内前端只调用一次）
+	mux.HandleFunc("/UserModelOptionsInterface", userModelOptionsInterfaceHandle)
+
 	// Agent 代理路径挂载（同进程转发，让 JS 可以用相对 URL 同源访问，
 	// 解决跨端口 CORS / Mixed Content 导致 fetch 被浏览器静默阻止的问题）
 	proxy.MountAIProxyHandlers(mux)
