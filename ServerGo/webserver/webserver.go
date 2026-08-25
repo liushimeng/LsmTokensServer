@@ -9,10 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
-	"time"
 	"strings"
+	"time"
 
 	"github.com/lishimeng/LsmTokensServer/api"
 	"github.com/lishimeng/LsmTokensServer/config"
@@ -70,6 +71,13 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := s.root.Open(path)
 	if err != nil {
+		// 页面导航（Accept 含 text/html）回落 index.html 前先 301 补尾斜杠，
+		// 保证页面内相对资源（./assets/...）以目录为基准解析（网关子路径代理兼容）
+		if strings.Contains(r.Header.Get("Accept"), "text/html") &&
+			!strings.HasSuffix(r.URL.Path, "/") && !strings.HasSuffix(r.URL.Path, ".html") {
+			http.Redirect(w, r, r.URL.Path+"/", http.StatusMovedPermanently)
+			return
+		}
 		// 回落到 index.html（前端路由）
 		if f2, err2 := s.root.Open("index.html"); err2 == nil {
 			f = f2
@@ -92,6 +100,59 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
+// prefixStripMiddleware 代理前缀自动剥离（v2.0.58 网关代理支持）：
+// 网关按子路径转发且不剥前缀时（如 /ChatAnalysis/assets/x.js、/pfx/UserManageInterface），
+// 后端按根级路由无法匹配。本中间件在「未匹配任何已注册路由（落入 SPA / 回落）」时
+// 逐级剥离路径首段重试（最多 5 级），命中条件为命中注册路由或 dist 内存在对应静态文件：
+//   - /pfx/assets/x.js        → /assets/x.js        （静态资源）
+//   - /pfx/XxxInterface       → /XxxInterface       （API）
+//   - /pfx1/pfx2/AnyPage      → 剥到空仍回落 SPA    （页面路由）
+// 剥离只发生在未匹配时，不影响根级真实路由（本工程无多段注册路由）。
+func prefixStripMiddleware(mux *http.ServeMux, staticRoot string) http.Handler {
+	matchRoute := func(p string) (http.Handler, bool) {
+		h, pattern := mux.Handler(&http.Request{Method: http.MethodGet, URL: &url.URL{Path: p}})
+		if pattern != "/" {
+			return h, true
+		}
+		// SPA 根 handler 下：检查 dist 内是否存在对应静态文件（assets/ 等无独立注册路由）
+		if staticRoot != "" {
+			rel := strings.TrimPrefix(p, "/")
+			if rel != "" && !strings.Contains(rel, "..") {
+				if st, err := os.Stat(filepath.Join(staticRoot, filepath.FromSlash(rel))); err == nil && !st.IsDir() {
+					return h, true
+				}
+			}
+		}
+		return h, false
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "" {
+			h, _ := mux.Handler(r)
+			h.ServeHTTP(w, r)
+			return
+		}
+		if _, ok := matchRoute(r.URL.Path); ok {
+			h, _ := mux.Handler(r)
+			h.ServeHTTP(w, r)
+			return
+		}
+		// 未命中注册路由/静态文件：逐级剥离首段重试
+		segments := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		for i := 1; i < len(segments) && i <= 5; i++ {
+			stripped := "/" + strings.Join(segments[i:], "/")
+			if h, ok := matchRoute(stripped); ok {
+				r2 := r.Clone(r.Context())
+				r2.URL.Path = stripped
+				h.ServeHTTP(w, r2)
+				return
+			}
+		}
+		// 全部未命中：按原路径走 SPA 回落
+		h, _ := mux.Handler(r)
+		h.ServeHTTP(w, r)
+	})
+}
+
 // RegisterAPIRoutes 挂载健康检查（阶段5：其余路由见 buildManagerMux / buildUserMux）
 func RegisterAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -102,34 +163,36 @@ func RegisterAPIRoutes(mux *http.ServeMux) {
 
 // mountSPA 在 mux 上挂载前端静态资源（找不到角色 dist 时仅记日志，API 不受影响；
 // 阶段T：管理端/用户端各自绑定 dist-manager / dist-user，互不共享）
-func mountSPA(mux *http.ServeMux, cfg *config.LsmTokensServerConfig, role string) {
+func mountSPA(mux *http.ServeMux, cfg *config.LsmTokensServerConfig, role string) string {
 	dist, err := clientWebDist(cfg, role)
 	if err != nil {
 		logger.Printf("[WEB] Warning: %v, %s Web UI unavailable (API only)", err, role)
-		return
+		return ""
 	}
 	mux.Handle("/", &spaFileServer{root: http.Dir(dist)})
 	logger.Printf("[WEB] Serving ClientWeb dist-%s: %s", role, dist)
+	return dist
 }
 
 // buildManagerMux 构造管理端 mux：登录路由 + 管理 API + SPA
 // （v2.0.56 安全加固：鉴权中间件在 Start 时套上，见 ManagerAuthMiddleware）
-func buildManagerMux(cfg *config.LsmTokensServerConfig) *http.ServeMux {
+// v2.0.58 网关代理支持：prefixStripMiddleware 兜底子路径前缀（/pfx/assets/...、/pfx/XxxInterface）
+func buildManagerMux(cfg *config.LsmTokensServerConfig) http.Handler {
 	mux := http.NewServeMux()
 	RegisterAPIRoutes(mux)
 	api.RegisterManagerLoginRoutes(mux)
 	api.RegisterManagerAPIRoutes(mux)
-	mountSPA(mux, cfg, "manager")
-	return mux
+	managerDist := mountSPA(mux, cfg, "manager")
+	return prefixStripMiddleware(mux, managerDist)
 }
 
 // buildUserMux 构造用户端 mux：用户 API（含登录）+ SPA（鉴权中间件在 Start 时套上）
-func buildUserMux(cfg *config.LsmTokensServerConfig) *http.ServeMux {
+func buildUserMux(cfg *config.LsmTokensServerConfig) http.Handler {
 	mux := http.NewServeMux()
 	RegisterAPIRoutes(mux)
 	api.RegisterUserAPIRoutes(mux)
-	mountSPA(mux, cfg, "user")
-	return mux
+	userDist := mountSPA(mux, cfg, "user")
+	return prefixStripMiddleware(mux, userDist)
 }
 
 // StartManagerWebServer 启动管理员 Web 服务（管理后台，默认 49101）

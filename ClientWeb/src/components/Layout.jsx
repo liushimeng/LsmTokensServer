@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { logout, managerLogout } from '../shared/auth'
+import { baseUrl } from '../shared/api'
 import { loadSidebarCollapsed, saveSidebarCollapsed } from '../shared/navConfig'
 import ToolbarDialogs from './ToolbarDialogs'
 import SideNav from './SideNav'
@@ -42,7 +43,7 @@ export default function Layout({ route, userInfo, children }) {
       <header className="layout-header">
         <div className="header-left">
           <button className="menu-toggle" onClick={onToggle}>☰</button>
-          <img className="app-logo" src="/logo-48.png" alt="logo" />
+          <img className="app-logo" src={baseUrl() + "logo-48.png"} alt="logo" />
           <span className="app-title">LsmTokensServer</span>
           <span className="app-role">{isAdmin ? '管理端' : '用户端'}</span>
         </div>

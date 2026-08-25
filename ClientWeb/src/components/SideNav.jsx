@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { baseUrl } from '../shared/api'
 import {
   NAV_TREES, findMenuEntry,
   loadCollapsedGroups, saveCollapsedGroups,
@@ -40,7 +41,7 @@ export default function SideNav({ role, route, collapsed, open, onClose, onExpan
       (open ? ' open' : '') +
       (collapsed ? ' mini' : '')
     }>
-      {collapsed && <img className="nav-mini-logo" src="/logo-32.png" alt="L" />}
+      {collapsed && <img className="nav-mini-logo" src={baseUrl() + "logo-32.png"} alt="L" />}
       {groups.map((g) => (
         <div key={g.id} className="nav-group">
           {collapsed ? (

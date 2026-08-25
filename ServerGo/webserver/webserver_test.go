@@ -1,6 +1,9 @@
 package webserver
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,5 +68,86 @@ func TestClientWebDistMissingRoleDir(t *testing.T) {
 	cfg := &config.LsmTokensServerConfig{}
 	if _, err := clientWebDist(cfg, "user"); err == nil {
 		t.Fatal("dist-user 缺失时应返回错误")
+	}
+}
+
+// v2.0.58 网关代理支持：prefixStripMiddleware 子路径前缀剥离 + SPA 回落尾斜杠 301
+func TestPrefixStripMiddleware(t *testing.T) {
+	tmp := t.TempDir()
+	dist := filepath.Join(tmp, "ClientWeb", "dist-manager")
+	assets := filepath.Join(dist, "assets")
+	if err := os.MkdirAll(assets, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(assets, "app.js"), []byte("console.log(1)"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "index.html"), []byte("<html>idx</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldDir := config.SetConfigDirForTest(tmp)
+	defer config.SetConfigDirForTest(oldDir)
+
+	cfg := &config.LsmTokensServerConfig{}
+	mux := http.NewServeMux()
+	RegisterAPIRoutes(mux)
+	mux.HandleFunc("/UserManageInterface", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"success":true}`)
+	})
+	managerDist := mountSPA(mux, cfg, "manager")
+	handler := prefixStripMiddleware(mux, managerDist)
+	// ① 子路径静态资源：剥前缀命中真实 JS（而非 SPA 回落的 HTML）
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/ChatAnalysis/assets/app.js", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+		t.Fatalf("子路径静态资源应命中真实 JS: code=%d ct=%s body=%q", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+	}
+
+	// ② 子路径 API：剥前缀命中 JSON 接口
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("POST", "/ChatAnalysis/UserManageInterface", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"success"`) {
+		t.Fatalf("子路径 API 应命中 JSON: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	// ③ 多级前缀：/a/b/assets/app.js 剥到 /assets/app.js
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/a/b/assets/app.js", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+		t.Fatalf("多级前缀静态资源应命中: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	// ④ 根级路径不受影响
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/assets/app.js", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("根级静态资源应命中: %d", rec.Code)
+	}
+
+	// ⑤ 页面导航无尾斜杠：301 补斜杠（相对资源以目录为基准）
+	rec = httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/ChatAnalysis", nil)
+	req.Header.Set("Accept", "text/html")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/ChatAnalysis/" {
+		t.Fatalf("无尾斜杠页面应 301 补斜杠: code=%d loc=%s", rec.Code, rec.Header().Get("Location"))
+	}
+
+	// ⑥ 尾斜杠页面路由：SPA 回落 index.html
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/ChatAnalysis/", nil)
+	req.Header.Set("Accept", "text/html")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "idx") {
+		t.Fatalf("页面路由应回落 index.html: code=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	// ⑦ 非页面请求（无 Accept text/html）不 301，直接 SPA 回落
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/ChatAnalysis", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "idx") {
+		t.Fatalf("非页面请求应回落 index.html 而非 301: code=%d", rec.Code)
 	}
 }

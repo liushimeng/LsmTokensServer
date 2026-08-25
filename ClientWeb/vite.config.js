@@ -10,6 +10,9 @@ export default defineConfig(({ mode }) => {
   const role = mode === 'user' ? 'user' : 'manager'
   return {
     plugins: [react()],
+    // 相对基路径（v2.0.58 网关代理支持）：产物资源引用 ./assets/...，
+    // 支持网关按任意子路径代理托管（如 https://host:8080/ChatAnalysis/）。
+    base: './',
     define: { __APP_ROLE__: JSON.stringify(role) },
     build: { outDir: `dist-${role}` },
   }
