@@ -165,6 +165,22 @@ func RegisterManagerLoginRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ManagerLogoutInterface", managerLogoutInterfaceHandle)
 }
 
+// isManagerAPIPath 判定管理端数据接口路径（必须鉴权；页面导航放行见 ManagerAuthMiddleware）
+// 规则覆盖全部 REST 接口命名：*Interface 后缀、*WS 后缀、验证码、协议转换分析器 8 个接口。
+// 未匹配的路径（如 /ChatAnalysis、/UserManage 等 SPA 前端路由）不属于数据接口。
+func isManagerAPIPath(path string) bool {
+	if strings.HasSuffix(path, "Interface") || strings.HasSuffix(path, "WS") {
+		return true
+	}
+	if path == "/CaptchaGenerate" || path == "/CaptchaAudio" {
+		return true
+	}
+	if strings.HasPrefix(path, "/ProtocolConvertAnalyzer") {
+		return true
+	}
+	return false
+}
+
 // ManagerAuthMiddleware 管理端鉴权中间件（供 webserver 装配）
 func ManagerAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +215,14 @@ func ManagerAuthMiddleware(next http.Handler) http.Handler {
 
 		claims := getManagerToken(r)
 		if claims.ManagerName == "" {
-			// 页面导航（Accept 含 text/html）302 跳转管理端登录页；API 请求返回 401 JSON
+			// SPA 页面导航放行（Accept 含 text/html 且非数据接口）：页面外壳不含业务数据，
+			// 回落 index.html 由前端路由接管；未登录时前端经 UserInfoInterface 401 自行跳登录页。
+			// 兼容网关代理部署（网关侧已完成 Web 鉴权），旧版即页面直出、服务端不拦截页面路由。
+			if strings.Contains(r.Header.Get("Accept"), "text/html") && !isManagerAPIPath(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// 数据接口：页面型伪装请求 302 跳转管理端登录页；API 请求返回 401 JSON
 			if strings.Contains(r.Header.Get("Accept"), "text/html") {
 				http.Redirect(w, r, "/ManagerLogin", http.StatusFound)
 				return

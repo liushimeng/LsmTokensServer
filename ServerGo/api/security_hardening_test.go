@@ -98,6 +98,36 @@ func TestManagerAuthMiddlewareRejectsUnauthenticated(t *testing.T) {
 	}
 }
 
+// 网关代理支持：SPA 页面导航（非数据接口）未登录放行，数据接口仍拦截
+func TestManagerAuthMiddlewareSPANavigationPassThrough(t *testing.T) {
+	for _, p := range []string{"/ChatAnalysis", "/ChatAnalysisTotal", "/UserManage", "/ManagerHome"} {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		handler := ManagerAuthMiddleware(next)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", p, nil)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml")
+		handler.ServeHTTP(rec, req)
+		if !called || rec.Code != http.StatusOK {
+			t.Fatalf("SPA 页面路由 %s 应放行由前端路由接管: called=%v code=%d", p, called, rec.Code)
+		}
+	}
+
+	// 页面型伪装请求访问数据接口：仍必须拦截（302 登录页），不得泄露数据
+	for _, p := range []string{"/ChatAnalysisInterface", "/UserManageInterface", "/ChatAnalysisTotalWS", "/ProtocolConvertAnalyzerStatus"} {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		handler := ManagerAuthMiddleware(next)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", p, nil)
+		req.Header.Set("Accept", "text/html")
+		handler.ServeHTTP(rec, req)
+		if called || rec.Code != http.StatusFound {
+			t.Fatalf("数据接口 %s 伪装 text/html 仍应拦截: called=%v code=%d", p, called, rec.Code)
+		}
+	}
+}
+
 func TestJWTSecretDeterministicInProcess(t *testing.T) {
 	a := string(getJWTSecret())
 	b := string(getJWTSecret())
