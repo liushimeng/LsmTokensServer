@@ -4,23 +4,20 @@ package api
 // server_web_common_wiki.go / server_web_common_dialog_handlers.go 的 JSON 接口部分）：
 //   - /CertDownloadInfoInterface /CertDownloadInterface  HTTPS 证书信息与下载
 //   - /WikiInterface                                     项目 Wiki 文档列表/内容
-//   - /UserInfoLogInterface                              用户操作日志分页/搜索
+//   - /UserInfoLogInterface                              用户操作日志分页/搜索（数据库版）
 // 前端弹窗（HTML/CSS/JS）由 ClientWeb SPA 实现。
 
 import (
-	"bufio"
 	"encoding/json"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/lishimeng/LsmTokensServer/config"
+	modelsdb "github.com/lishimeng/LsmTokensServer/models"
 	"github.com/lishimeng/LsmTokensServer/system"
 )
 
@@ -267,384 +264,88 @@ func wikiInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================================================
-// 用户操作日志
+// 用户操作日志（数据库持久化，支持结构化分页查询）
 // ============================================================================
 
-// logEntry 日志条目（包含原始行和解析后的时间戳）
-type logEntry struct {
-	line      string    // 原始日志行
-	timestamp time.Time // 解析后的时间戳
-	valid     bool      // 时间戳是否有效
-}
-
-// UserLogReader 大日志文件读取器（支持分页和流式读取）
-type UserLogReader struct {
-	filePath   string
-	file       *os.File
-	entries    []logEntry // 解析后的日志条目（按时间倒序排列）
-	totalLines int        // 总行数
-	fileSize   int64      // 文件大小
-	mu         sync.RWMutex
-	isClosed   bool
-}
-
-// parseLogTimestamp 从日志行解析时间戳
-// 日志格式: [2006-01-02 15:04:05] actionType username details
-func parseLogTimestamp(line string) (time.Time, bool) {
-	if len(line) < 21 {
-		return time.Time{}, false
-	}
-	if line[0] != '[' || line[20] != ']' {
-		return time.Time{}, false
-	}
-	timeStr := line[1:20]
-	t, err := time.ParseInLocation("2006-01-02 15:04:05", timeStr, time.Local)
-	if err != nil {
-		return time.Time{}, false
-	}
-	return t, true
-}
-
-// NewUserLogReader 创建日志读取器
-func NewUserLogReader(filePath string) (*UserLogReader, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	lr := &UserLogReader{
-		filePath: filePath,
-		file:     file,
-	}
-
-	if err := lr.buildLogEntries(); err != nil {
-		file.Close()
-		return nil, err
-	}
-
-	return lr, nil
-}
-
-// Close 关闭日志读取器
-func (lr *UserLogReader) Close() error {
-	lr.mu.Lock()
-	defer lr.mu.Unlock()
-
-	if lr.isClosed {
-		return nil
-	}
-	lr.isClosed = true
-	return lr.file.Close()
-}
-
-// TotalLines 获取总行数
-func (lr *UserLogReader) TotalLines() int {
-	lr.mu.RLock()
-	defer lr.mu.RUnlock()
-	return lr.totalLines
-}
-
-// buildLogEntries 读取所有日志行，解析时间戳并排序
-func (lr *UserLogReader) buildLogEntries() error {
-	// 重置文件指针到开头
-	if _, err := lr.file.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-
-	scanner := bufio.NewScanner(lr.file)
-	// 增加缓冲区大小，处理超长行（最大支持 10MB 行）
-	buf := make([]byte, 1024*1024)    // 1MB 缓冲区
-	scanner.Buffer(buf, 1024*1024*10) // 最大支持 10MB 行
-
-	var entries []logEntry
-	var offset int64
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		lineLength := len(scanner.Bytes()) + 1 // +1 是换行符
-		offset += int64(lineLength)
-
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		timestamp, valid := parseLogTimestamp(line)
-		entries = append(entries, logEntry{
-			line:      line,
-			timestamp: timestamp,
-			valid:     valid,
-		})
-	}
-
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-
-	// 按时间倒序排序（最新的在前）
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].valid && entries[j].valid {
-			// 都有有效时间戳，按时间倒序
-			return entries[i].timestamp.After(entries[j].timestamp)
-		}
-		if entries[i].valid {
-			// i 有时间戳，j 没有，i 排前面
-			return true
-		}
-		if entries[j].valid {
-			// j 有时间戳，i 没有，j 排前面
-			return false
-		}
-		// 都没有时间戳，保持相对顺序（倒序）
-		return i > j
-	})
-
-	lr.entries = entries
-	lr.totalLines = len(entries)
-	lr.fileSize = offset
-
-	// 重新设置文件指针到开头
-	_, err := lr.file.Seek(0, io.SeekStart)
-	return err
-}
-
-// ReadPage 读取指定页的日志（已按时间倒序排列，pageNum 从 1 开始）
-func (lr *UserLogReader) ReadPage(pageNum, pageSize int) ([]string, int, bool, error) {
-	lr.mu.RLock()
-	defer lr.mu.RUnlock()
-
-	if lr.isClosed {
-		return nil, 0, false, nil
-	}
-
-	if pageSize <= 0 {
-		pageSize = 100 // 默认每页 100 行
-	}
-	if pageNum <= 0 {
-		pageNum = 1
-	}
-
-	startLine := (pageNum - 1) * pageSize
-	if startLine >= lr.totalLines {
-		return []string{}, lr.totalLines, false, nil
-	}
-
-	endLine := startLine + pageSize
-	if endLine > lr.totalLines {
-		endLine = lr.totalLines
-	}
-
-	// 从已排序的 entries 中提取行
-	lines := make([]string, 0, endLine-startLine)
-	for i := startLine; i < endLine; i++ {
-		lines = append(lines, lr.entries[i].line)
-	}
-
-	return lines, lr.totalLines, endLine < lr.totalLines, nil
-}
-
-// SearchEntries 搜索匹配关键词的条目，返回匹配的索引列表
-func (lr *UserLogReader) SearchEntries(keyword string) []int {
-	lr.mu.RLock()
-	defer lr.mu.RUnlock()
-
-	if lr.isClosed || keyword == "" {
-		return []int{}
-	}
-
-	keywordLower := strings.ToLower(keyword)
-	var matchIndices []int
-
-	for i, entry := range lr.entries {
-		if strings.Contains(strings.ToLower(entry.line), keywordLower) {
-			matchIndices = append(matchIndices, i)
-		}
-	}
-
-	return matchIndices
-}
-
-// ReadSearchResultPage 读取搜索结果的指定页
-func (lr *UserLogReader) ReadSearchResultPage(matchIndices []int, pageNum, pageSize int) ([]string, int, int, bool, error) {
-	lr.mu.RLock()
-	defer lr.mu.RUnlock()
-
-	if lr.isClosed {
-		return nil, 0, 0, false, nil
-	}
-
-	if pageSize <= 0 {
-		pageSize = 100
-	}
-	if pageNum <= 0 {
-		pageNum = 1
-	}
-
-	matchCount := len(matchIndices)
-	if matchCount == 0 {
-		return []string{}, 0, 0, false, nil
-	}
-
-	startIdx := (pageNum - 1) * pageSize
-	if startIdx >= matchCount {
-		return []string{}, matchCount, 0, false, nil
-	}
-
-	endIdx := startIdx + pageSize
-	if endIdx > matchCount {
-		endIdx = matchCount
-	}
-
-	totalPages := (matchCount + pageSize - 1) / pageSize
-	hasMore := endIdx < matchCount
-
-	lines := make([]string, 0, endIdx-startIdx)
-	for i := startIdx; i < endIdx; i++ {
-		entryIdx := matchIndices[i]
-		lines = append(lines, lr.entries[entryIdx].line)
-	}
-
-	return lines, matchCount, totalPages, hasMore, nil
-}
-
-// userLogReaderPool 用户日志读取器连接池，避免重复构建行索引
-var userLogReaderPool = struct {
-	reader   *UserLogReader
-	mu       sync.RWMutex
-	logPath  string
-	fileSize int64
-	modTime  int64
-}{}
-
-// getOrCreateUserLogReader 获取或创建日志读取器（带缓存和文件变化检测）
-func getOrCreateUserLogReader(logPath string) (*UserLogReader, error) {
-	userLogReaderPool.mu.Lock()
-	defer userLogReaderPool.mu.Unlock()
-
-	// 获取文件信息以检测变化
-	fileInfo, err := os.Stat(logPath)
-	if err != nil {
-		return nil, err
-	}
-
-	currentSize := fileInfo.Size()
-	currentModTime := fileInfo.ModTime().Unix()
-
-	// 检查缓存是否有效
-	if userLogReaderPool.reader != nil &&
-		userLogReaderPool.logPath == logPath &&
-		userLogReaderPool.fileSize == currentSize &&
-		userLogReaderPool.modTime == currentModTime {
-		return userLogReaderPool.reader, nil
-	}
-
-	// 文件发生变化，关闭旧读取器
-	if userLogReaderPool.reader != nil {
-		userLogReaderPool.reader.Close()
-	}
-
-	// 创建新读取器
-	reader, err := NewUserLogReader(logPath)
-	if err != nil {
-		return nil, err
-	}
-
-	userLogReaderPool.reader = reader
-	userLogReaderPool.logPath = logPath
-	userLogReaderPool.fileSize = currentSize
-	userLogReaderPool.modTime = currentModTime
-
-	return reader, nil
-}
-
-// userInfoLogInterfaceHandle 读取用户操作日志文件并返回 JSON（支持分页和搜索）
+// userInfoLogInterfaceHandle 查询用户操作日志（数据库版，支持分页/关键词/类型/用户筛选）
 func userInfoLogInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	setNoCacheHeaders(w)
 	w.Header().Set("Content-Type", "application/json")
 
-	logPath := config.G.UserInfoLogURL
-
-	// 解析分页和搜索参数
+	// 解析请求参数
 	var req struct {
 		PageNum       int    `json:"page_num"`
 		PageSize      int    `json:"page_size"`
 		SearchKeyword string `json:"search_keyword"`
+		ActionType    string `json:"action_type"`
+		UserName      string `json:"user_name"`
 	}
 	if r.Method == http.MethodPost {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	if req.PageSize <= 0 || req.PageSize > 500 {
-		req.PageSize = 100 // 默认每页 100 行，最大 500
+	// 分页参数校验
+	pageSize := req.PageSize
+	switch pageSize {
+	case 10, 20, 50, 100:
+		// 允许的分页大小
+	default:
+		pageSize = 20 // 默认 20 条
 	}
-	if req.PageNum <= 0 {
-		req.PageNum = 1
+	pageNum := req.PageNum
+	if pageNum <= 0 {
+		pageNum = 1
 	}
 
-	// 获取日志读取器
-	reader, err := getOrCreateUserLogReader(logPath)
+	// 查询数据库
+	records, totalCount, err := modelsdb.QueryUserOperationLogs(pageNum, pageSize, req.SearchKeyword, req.ActionType, req.UserName)
 	if err != nil {
-		// 文件不存在时返回空结果
+		// 数据库未初始化或其他错误，返回空结果
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"lines":          []string{},
-			"count":          0,
-			"page_num":       req.PageNum,
-			"page_size":      req.PageSize,
-			"total_pages":    0,
-			"has_more":       false,
-			"is_search":      false,
-			"search_keyword": "",
-			"match_count":    0,
+			"success":     true,
+			"records":     []interface{}{},
+			"total_count": 0,
+			"total_pages": 0,
+			"page_num":    pageNum,
+			"page_size":   pageSize,
 		})
 		return
 	}
 
-	// 检查是否为搜索模式
-	isSearch := req.SearchKeyword != ""
+	// 计算总页数
+	totalPages := 0
+	if totalCount > 0 {
+		totalPages = int((totalCount + int64(pageSize) - 1) / int64(pageSize))
+	}
+	if pageNum > totalPages && totalPages > 0 {
+		pageNum = totalPages
+	}
 
-	if isSearch {
-		// 搜索模式
-		matchIndices := reader.SearchEntries(req.SearchKeyword)
-		lines, matchCount, totalPages, hasMore, err := reader.ReadSearchResultPage(matchIndices, req.PageNum, req.PageSize)
-		if err != nil {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
-			return
-		}
-
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"lines":          lines,
-			"count":          reader.TotalLines(),
-			"page_num":       req.PageNum,
-			"page_size":      req.PageSize,
-			"total_pages":    totalPages,
-			"has_more":       hasMore,
-			"is_search":      true,
-			"search_keyword": req.SearchKeyword,
-			"match_count":    matchCount,
-		})
-	} else {
-		// 普通模式
-		lines, totalLines, hasMore, err := reader.ReadPage(req.PageNum, req.PageSize)
-		if err != nil {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"error": err.Error()})
-			return
-		}
-
-		totalPages := 0
-		if totalLines > 0 {
-			totalPages = (totalLines + req.PageSize - 1) / req.PageSize
-		}
-
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"lines":          lines,
-			"count":          totalLines,
-			"page_num":       req.PageNum,
-			"page_size":      req.PageSize,
-			"total_pages":    totalPages,
-			"has_more":       hasMore,
-			"is_search":      false,
-			"search_keyword": "",
-			"match_count":    0,
+	// 格式化记录为前端需要的格式
+	type logRecord struct {
+		ID         uint64 `json:"id"`
+		CreatedAt  string `json:"created_at"`
+		ActionType string `json:"action_type"`
+		UserName   string `json:"user_name"`
+		Details    string `json:"details"`
+	}
+	formatted := make([]logRecord, 0, len(records))
+	for _, rec := range records {
+		formatted = append(formatted, logRecord{
+			ID:         rec.ID,
+			CreatedAt:  rec.CreatedAt.Format("2006-01-02 15:04:05"),
+			ActionType: rec.ActionType,
+			UserName:   rec.UserName,
+			Details:    rec.Details,
 		})
 	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"records":     formatted,
+		"total_count": totalCount,
+		"total_pages": totalPages,
+		"page_num":    pageNum,
+		"page_size":   pageSize,
+	})
 }

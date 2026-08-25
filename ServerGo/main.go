@@ -272,6 +272,12 @@ func main() {
 		} else {
 			modelsdb.StartTransactionCleanupService(cfg)
 		}
+		if err := modelsdb.InitUserOperationLogTable(); err != nil {
+			logger.Printf("[WARNING] Failed to init user operation log table: %v", err)
+		} else {
+			logger.DBLogWriter = modelsdb.AddUserOperationLog
+			logger.Printf("[INIT] User operation log table initialized, DB log writer injected")
+		}
 		if err := modelsdb.InitSpiderTables(); err != nil {
 			logger.Printf("[WARNING] Failed to init spider tables: %v", err)
 		} else {

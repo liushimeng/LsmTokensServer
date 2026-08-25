@@ -26,6 +26,10 @@ type logConfig struct {
 
 var cfg logConfig
 
+// DBLogWriter 数据库日志写入回调（由 main.go 注入，避免 logger → models 循环依赖）
+// 数据库初始化成功后设置，LogUserAction 中异步调用
+var DBLogWriter func(actionType, userName, details string)
+
 // SetConfig 注入日志配置（在 config.LoadConfig 之后、InitLogger 之前调用）
 func SetConfig(fileURL string, maxSizeMB int, userInfoLogURL string) {
 	cfg = logConfig{LogFileURL: fileURL, LogMaxSizeMB: maxSizeMB, UserInfoLogURL: userInfoLogURL}
@@ -315,6 +319,11 @@ func LogUserAction(actionType string, username string, details string) {
 
 	if _, err := userLogFile.WriteString(logLine); err != nil {
 		log.Printf("[WARNING] Failed to write user log: %v", err)
+	}
+
+	// 异步写入数据库（回调由 main.go 注入）
+	if DBLogWriter != nil {
+		go DBLogWriter(actionType, username, details)
 	}
 }
 

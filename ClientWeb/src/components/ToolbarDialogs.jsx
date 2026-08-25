@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { get, post, download } from '../shared/api'
 import Modal from './Modal'
+import DataTable from './DataTable'
 
 // 顶部工具栏弹窗组（迁移自旧 server_web_common_dialog_*.go / server_web_common_wiki.go）：
 // 用户日志 / Wiki / 证书 / Git 信息 / 系统信息 / README / 构建日志
@@ -57,45 +58,103 @@ function MarkdownView({ md }) {
   return <div className="md-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(md) }} />
 }
 
-// ===== 用户日志弹窗 =====
+// ===== 用户日志弹窗（数据库版，DataTable 结构化展示） =====
+const ACTION_TYPES = [
+  { value: '', label: '全部类型' },
+  { value: 'LOGIN', label: 'LOGIN' },
+  { value: 'MANAGER_LOGIN', label: 'MANAGER_LOGIN' },
+  { value: 'MANAGER_LOGIN_FAIL', label: 'MANAGER_LOGIN_FAIL' },
+  { value: 'ADD_MODEL', label: 'ADD_MODEL' },
+  { value: 'UPDATE_MODEL', label: 'UPDATE_MODEL' },
+  { value: 'DELETE_MODEL', label: 'DELETE_MODEL' },
+  { value: 'UPDATE_MODEL_STATUS', label: 'UPDATE_MODEL_STATUS' },
+  { value: 'ADD_ENDPOINT', label: 'ADD_ENDPOINT' },
+  { value: 'UPDATE_ENDPOINT', label: 'UPDATE_ENDPOINT' },
+  { value: 'TOGGLE_ENDPOINT', label: 'TOGGLE_ENDPOINT' },
+  { value: 'DELETE_ENDPOINT', label: 'DELETE_ENDPOINT' },
+  { value: 'ADD_USER', label: 'ADD_USER' },
+  { value: 'UPDATE_USER', label: 'UPDATE_USER' },
+  { value: 'DELETE_USER', label: 'DELETE_USER' },
+  { value: 'UPDATE_USER_STATUS', label: 'UPDATE_USER_STATUS' },
+]
+
+// 操作类型颜色映射
+function actionChipStyle(type) {
+  const t = (type || '').toUpperCase()
+  if (t.includes('FAIL')) return { bg: '#fecaca', color: '#991b1b' }       // 红色
+  if (t.startsWith('LOGIN')) return { bg: '#bfdbfe', color: '#1e40af' }    // 蓝色
+  if (t.startsWith('ADD')) return { bg: '#bbf7d0', color: '#166534' }      // 绿色
+  if (t.startsWith('DELETE')) return { bg: '#fecaca', color: '#991b1b' }   // 红色
+  if (t.startsWith('UPDATE') || t.startsWith('TOGGLE')) return { bg: '#fde68a', color: '#92400e' } // 橙色
+  if (t.includes('ROUTE') || t.includes('AIRoute')) return { bg: '#ddd6fe', color: '#5b21b6' } // 紫色
+  return { bg: '#e5e7eb', color: '#374151' }                               // 灰色
+}
+
 function UserLogDialog({ onClose }) {
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
   const [keyword, setKeyword] = useState('')
   const [input, setInput] = useState('')
+  const [actionType, setActionType] = useState('')
   const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
   useEffect(() => {
+    setLoading(true)
     setErr('')
-    post('UserInfoLogInterface', { page_num: page, page_size: 100, search_keyword: keyword })
+    post('UserInfoLogInterface', {
+      page_num: page, page_size: pageSize,
+      search_keyword: keyword, action_type: actionType,
+    })
       .then(setData)
       .catch((e) => setErr(e.message || '加载失败'))
-  }, [page, keyword])
+      .finally(() => setLoading(false))
+  }, [page, pageSize, keyword, actionType])
 
   const totalPages = data ? (data.total_pages || 0) : 0
+  const totalCount = data ? (data.total_count || 0) : 0
+
+  const columns = [
+    { key: 'created_at', title: '时间', width: 155, nowrap: true },
+    { key: 'action_type', title: '操作类型', width: 150,
+      render: (v) => {
+        const s = actionChipStyle(v)
+        return <span className="action-chip" style={{ background: s.bg, color: s.color }}>{v}</span>
+      },
+    },
+    { key: 'user_name', title: '用户', width: 100 },
+    { key: 'details', title: '详情' },
+  ]
+
+  const doSearch = () => { setKeyword(input); setActionType(input ? '' : actionType); setPage(1) }
+  const doReset = () => { setKeyword(''); setInput(''); setActionType(''); setPage(1) }
+
   return (
-    <Modal title="用户日志" onClose={onClose} width={860}
-           footer={<>
-             <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
-             <span style={{ fontSize: 12 }}>第 {data ? data.page_num : page} / {totalPages} 页</span>
-             <button className="btn btn-sm" disabled={!data || !data.has_more} onClick={() => setPage(page + 1)}>下一页</button>
-           </>}>
-      <div className="toolbar">
-        <input style={{ flex: 1 }} value={input} placeholder="关键词查询…"
+    <Modal title="用户日志" onClose={onClose} width={960}>
+      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <input style={{ flex: 1, minWidth: 150 }} value={input} placeholder="关键词搜索…"
                onChange={(e) => setInput(e.target.value)}
-               onKeyDown={(e) => { if (e.key === 'Enter') { setKeyword(input); setPage(1) } }} />
-        <button className="btn btn-sm btn-primary" onClick={() => { setKeyword(input); setPage(1) }}>查询</button>
-        {keyword ? <button className="btn btn-sm" onClick={() => { setKeyword(''); setInput(''); setPage(1) }}>重置</button> : null}
+               onKeyDown={(e) => { if (e.key === 'Enter') doSearch() }} />
+        <select value={actionType} onChange={(e) => { setActionType(e.target.value); setKeyword(''); setInput(''); setPage(1) }}>
+          {ACTION_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+        <button className="btn btn-sm btn-primary" onClick={doSearch}>查询</button>
+        {(keyword || actionType) ? <button className="btn btn-sm" onClick={doReset}>重置</button> : null}
       </div>
       {err ? <div className="alert alert-error">{err}</div> : null}
-      {data && data.is_search && (
-        <p style={{ fontSize: 12, color: 'var(--muted)' }}>查询「{data.search_keyword}」匹配 {data.match_count} 条（总 {data.count} 条）</p>
-      )}
-      {data && data.lines && data.lines.length ? (
-        <div className="log-box">{data.lines.join('\n')}</div>
-      ) : (
-        !err && <div className="table-empty">{data ? (data.is_search ? '无匹配记录' : '暂无日志') : '加载中…'}</div>
-      )}
+      <DataTable columns={columns} rows={(data && data.records) || []} loading={loading} empty="暂无日志" rowKey="id" />
+      <div className="pager">
+        <span>共 {totalCount} 条 · 第 {page} / {totalPages || 1} 页</span>
+        <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }} style={{ fontSize: 12 }}>
+          <option value={10}>10 条/页</option>
+          <option value={20}>20 条/页</option>
+          <option value={50}>50 条/页</option>
+          <option value={100}>100 条/页</option>
+        </select>
+        <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
+        <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
+      </div>
     </Modal>
   )
 }
