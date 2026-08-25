@@ -1,40 +1,11 @@
-// 登录态与本地凭据存储（与旧版 server_web_user_login.go 算法保持一致）
+// 登录态与本地偏好存储
+// v2 安全加固（20260825）：不再持久化 API Key（旧版 XOR+Base64 伪加密可被离线还原），
+// "记住我"仅保存模型名称；加载时发现旧版记录（含 ak 字段）立即清除。
 const STORAGE_KEY = 'lsm_agent_creds'
 
-function simpleEncrypt(text, salt) {
-  if (!text) return ''
-  let result = ''
-  for (let i = 0; i < text.length; i++) {
-    result += String.fromCharCode(text.charCodeAt(i) ^ salt.charCodeAt(i % salt.length))
-  }
-  return btoa(encodeURIComponent(result))
-}
-
-function simpleDecrypt(encoded, salt) {
-  if (!encoded) return ''
+export function saveCredentials(modelName) {
   try {
-    const text = decodeURIComponent(atob(encoded))
-    let result = ''
-    for (let i = 0; i < text.length; i++) {
-      result += String.fromCharCode(text.charCodeAt(i) ^ salt.charCodeAt(i % salt.length))
-    }
-    return result
-  } catch {
-    return ''
-  }
-}
-
-function generateSalt() {
-  const hostname = window.location.hostname || 'lsm_agent'
-  const userAgent = navigator.userAgent || ''
-  return 'lsm_' + hostname.replace(/[^a-zA-Z0-9]/g, '_') + '_' + userAgent.length
-}
-
-export function saveCredentials(modelName, apiKey) {
-  try {
-    const salt = generateSalt()
-    const data = { v: 1, mn: simpleEncrypt(modelName, salt + '_mn'), ak: simpleEncrypt(apiKey, salt + '_ak'), ts: Date.now() }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 2, mn: modelName, ts: Date.now() }))
   } catch { /* 忽略 */ }
 }
 
@@ -43,12 +14,12 @@ export function loadCredentials() {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) return null
     const data = JSON.parse(stored)
-    if (data.v !== 1) { localStorage.removeItem(STORAGE_KEY); return null }
-    const salt = generateSalt()
-    return {
-      modelName: simpleDecrypt(data.mn, salt + '_mn'),
-      apiKey: simpleDecrypt(data.ak, salt + '_ak'),
+    // 旧版记录（v:1，含加密 ak）→ 直接清除，仅返回可用的模型名
+    if (data.v !== 2 || typeof data.ak !== 'undefined') {
+      localStorage.removeItem(STORAGE_KEY)
+      return null
     }
+    return { modelName: data.mn || '' }
   } catch { return null }
 }
 
@@ -61,4 +32,10 @@ export async function logout() {
   try { await fetch('UserLogoutInterface', { credentials: 'include' }) } catch { /* 忽略 */ }
   window.location.hash = '#/Login'
   window.location.reload()
+}
+
+// 管理端登出：清 manager 会话 Cookie 后回管理端登录页
+export async function managerLogout() {
+  try { await fetch('ManagerLogoutInterface', { credentials: 'include' }) } catch { /* 忽略 */ }
+  window.location.href = '/ManagerLogin'
 }

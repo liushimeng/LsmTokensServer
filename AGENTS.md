@@ -19,8 +19,17 @@ LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，由私有项
 
 1. **不要停止旧服务**：`/usr/local/LsmHttpAgent` 必须持续运行，AI 代理端口全量验证前严禁停。
 2. **编译/启动走脚本**：`./rebuild_restart_app.sh`，仅编译用 `--build-only`。
-3. **敏感信息不提交**：`LsmTokensServer.conf`、证书、日志、tools/ 私有子模块。
+3. **敏感信息不提交**：`LsmTokensServer.conf`、证书、日志、`tmpPlan/`、`.env`、私有子模块。
 4. **中文 commit**：分阶段提交，格式 `阶段X：说明`。
+
+## 安全红线（v2.0.56 起强制）
+
+- **禁止硬编码任何密钥/密码/IP**：JWT 密钥、管理员凭证只能放 `LsmTokensServer.conf` 的 `security` 段；Python 分析脚本数据库凭证走环境变量 `LSM_MYSQL_*`。
+- **新增管理端接口必须在 `ManagerAuthMiddleware` 之后挂载**（`api.RegisterManagerAPIRoutes` 内注册即自动受保护）；用户端接口同理走 `UserAuthMiddleware`。
+- **密码只存 bcrypt 哈希**（`api.HashPassword`），校验用 `api.VerifyPassword`（自动兼容并升级旧明文）。
+- **API 响应禁止返回明文密码/完整手机号**：用 `api.MaskPhone`，密码字段置空。
+- **前端禁止持久化 API Key**：记住我只存模型名；对话历史 localStorage 须限条数（200）并带过期清理。
+- 详见 [`docs/开发指南/SECURITY.md`](docs/开发指南/SECURITY.md)。
 
 ## 快速定位
 

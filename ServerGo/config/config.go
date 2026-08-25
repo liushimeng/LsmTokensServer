@@ -31,7 +31,7 @@ const (
 	// v2.0.31: AI 代理 HTTPS 监听端口（与 HTTP 代理 agentListenPort 并存，复用同一套 handler）
 	DEFAULT_AGENT_HTTPS_LISTEN_PORT  = 29003
 	DEFAULT_SUB_TABLE_NUM            = 8
-	DEFAULT_AGENT_PRODUCT_ADDR       = "8.130.85.252"
+	DEFAULT_AGENT_PRODUCT_ADDR       = "127.0.0.1" // v2.0.56：默认本地地址，生产 IP 仅写入私有 conf
 	DEFAULT_AGENT_ANTHROPIC_URL      = "Anthropic"
 	DEFAULT_AGENT_OPENAI_URL         = "OpenAI"
 	DEFAULT_SPIDER_CDP_PORT          = 9222
@@ -170,6 +170,19 @@ type LsmTokensServerConfig struct {
 	OpenClawUserPromptTemplate string `json:"openClawUserPromptTemplate,omitempty"` // 用户提示词模板（含 XXXXXXXXX 占位符）
 	// v2.0.47: 过期数据保留天数（浏览记录保留 N 天；0 = 禁用自动清理）
 	TransactionRetentionDays int `json:"transactionRetentionDays"` // 默认 45 天，上限 3650 天（≈10 年）；显式 0 必须持久化
+	// v2.0.56: 安全配置（见 SecurityConfig）
+	Security SecurityConfig `json:"security"`
+}
+
+// SecurityConfig 安全配置：JWT 密钥与管理端登录凭证（仅存在于已 gitignore 的 LsmTokensServer.conf）
+type SecurityConfig struct {
+	// JWTSecret 用户端/管理端 JWT 签名密钥；为空时启动阶段自动生成随机密钥（重启后登录态失效）
+	JWTSecret string `json:"jwtSecret,omitempty"`
+	// ManagerUserName / ManagerPassword 管理端登录凭证；两者均未配置时管理端业务接口默认拒绝
+	ManagerUserName string `json:"managerUserName,omitempty"`
+	ManagerPassword string `json:"managerPassword,omitempty"`
+	// TrustProxyHeaders 是否信任 X-Forwarded-For/X-Real-IP（仅部署于可信反向代理后开启）
+	TrustProxyHeaders bool `json:"trustProxyHeaders,omitempty"`
 }
 
 // rawLsmTokensServerConfig 用于读取旧版配置格式，实现向后兼容
@@ -247,6 +260,7 @@ type rawLsmTokensServerConfig struct {
 	OpenClawModel              string `json:"openClawModel,omitempty"`              // OpenClaw 模型名称
 	OpenClawSystemPrompt       string `json:"openClawSystemPrompt,omitempty"`       // 系统提示词（默认 "user"）
 	OpenClawUserPromptTemplate string `json:"openClawUserPromptTemplate,omitempty"` // 用户提示词模板（含 XXXXXXXXX 占位符）
+	Security                   SecurityConfig `json:"security,omitempty"`
 	// v2.0.47: 过期数据保留天数（向后兼容：旧配置无该字段时为 0，由 validateAndFixConfig 修复为默认 60）
 	TransactionRetentionDays int `json:"transactionRetentionDays,omitempty"`
 }
@@ -819,6 +833,8 @@ func LoadConfig(path string) (*LsmTokensServerConfig, error) {
 		cfg.OpenClawModel = raw.OpenClawModel
 		cfg.OpenClawSystemPrompt = raw.OpenClawSystemPrompt
 		cfg.OpenClawUserPromptTemplate = raw.OpenClawUserPromptTemplate
+		// v2.0.56: 安全配置（jwtSecret/管理端凭证/代理头信任）
+		cfg.Security = raw.Security
 		// v2.0.47: 过期数据保留天数从 raw 读取
 		// 语义：raw.TransactionRetentionDays < 0 → 非法值由 validateAndFixConfig 修复；
 		//      raw.TransactionRetentionDays == 0 → 旧配置缺失字段，强制启用默认 45 天；

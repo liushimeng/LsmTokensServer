@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -22,11 +23,35 @@ import (
 const (
 	userTokenExpireDuration = time.Hour * 24 * 1
 	userLoginCookieName     = "lsm_user_token"
-	jwtUserSecret           = "lsm-user-jwt-secret-key-32bytes!"
 	maxLoginFailures        = 3
 	loginLockDuration       = 10 * time.Minute
 	loginFailureWindow      = time.Minute
 )
+
+// ========== JWT 密钥管理（v2.0.56 安全加固） ==========
+
+var (
+	runtimeJWTSecret  []byte // 配置未提供 jwtSecret 时进程内随机生成（重启后登录态失效）
+	runtimeJWTSecretO sync.Once
+)
+
+// getJWTSecret 获取 JWT 签名密钥：优先 conf 的 security.jwtSecret，
+// 否则启动时 crypto/rand 生成 32 字节随机密钥（仅进程内有效）。
+func getJWTSecret() []byte {
+	if config.G != nil && config.G.Security.JWTSecret != "" {
+		return []byte(config.G.Security.JWTSecret)
+	}
+	runtimeJWTSecretO.Do(func() {
+		buf := make([]byte, 32)
+		if _, err := rand.Read(buf); err != nil {
+			// crypto/rand 失败属系统级异常，直接 panic（禁止降级为可预测密钥）
+			panic("生成随机 JWT 密钥失败: " + err.Error())
+		}
+		runtimeJWTSecret = buf
+		logger.Printf("[SECURITY] security.jwtSecret 未配置，已生成进程内随机 JWT 密钥（重启后所有登录态失效；建议在 LsmTokensServer.conf 配置固定密钥）")
+	})
+	return runtimeJWTSecret
+}
 
 // ========== JWT Claims ==========
 
@@ -93,14 +118,18 @@ func GetClientIP(r *http.Request) string {
 }
 
 func getClientIP(r *http.Request) string {
-	ip := r.Header.Get("X-Forwarded-For")
-	if ip == "" {
-		ip = r.Header.Get("X-Real-IP")
+	// v2.0.56 安全加固：仅显式配置信任反向代理时才读取 X-Forwarded-For / X-Real-IP，
+	// 否则一律使用 TCP 对端地址，防止伪造请求头绕过防爆破锁定与限速。
+	if config.G != nil && config.G.Security.TrustProxyHeaders {
+		ip := r.Header.Get("X-Forwarded-For")
+		if ip == "" {
+			ip = r.Header.Get("X-Real-IP")
+		}
+		if ip != "" {
+			return strings.TrimSpace(strings.Split(ip, ",")[0])
+		}
 	}
-	if ip == "" {
-		ip = strings.Split(r.RemoteAddr, ":")[0]
-	}
-	return strings.TrimSpace(strings.Split(ip, ",")[0])
+	return strings.Split(r.RemoteAddr, ":")[0]
 }
 
 // checkLoginAttempt 检查是否被锁定
@@ -279,13 +308,13 @@ func userLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 设置 Cookie
+	// 设置 Cookie（v2.0.56：HTTPS 部署时自动带 Secure 标志）
 	cookie := &http.Cookie{
 		Name:     userLoginCookieName,
 		Value:    tokenStr,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(userTokenExpireDuration.Seconds()),
 	}
@@ -372,14 +401,29 @@ func doUserLogin(req userLoginReq) (*modelsdb.TAgentHttpUserInfo, error) {
 		}
 	}
 
-	// 校验密码
-	if user.Password != strings.TrimSpace(req.Password) {
-		return nil, fmt.Errorf("用户名或密码错误")
+	// 校验密码（v2.0.56：bcrypt 哈希校验，兼容旧明文并自动升级）
+	pwOK, isLegacy := VerifyPassword(user.Password, strings.TrimSpace(req.Password))
+	if !pwOK {
+		return nil, fmt.Errorf("用户名、密码或手机号错误")
 	}
 
-	// 校验手机号
-	if user.Phone != strings.TrimSpace(req.Phone) {
-		return nil, fmt.Errorf("手机号不匹配")
+	// 校验手机号（错误信息与密码一致，避免枚举探测）
+	if subtleConstantTimeEq(user.Phone, strings.TrimSpace(req.Phone)) != true {
+		return nil, fmt.Errorf("用户名、密码或手机号错误")
+	}
+
+	// 旧明文密码命中：自动升级为 bcrypt 哈希后落库（平滑迁移，无感）
+	if isLegacy {
+		if hashed, err := HashPassword(strings.TrimSpace(req.Password)); err == nil {
+			_ = modelsdb.UpdateUserPasswordHashed(user.ID, hashed)
+			user.Password = hashed
+			// 刷新用户缓存，避免缓存中残留明文
+			if refreshed, err := modelsdb.GetUserByID(user.ID); err == nil {
+				modelsdb.AddUserToCache(refreshed)
+			}
+		} else {
+			logger.Printf("[SECURITY] Warning: 用户 %s 密码哈希升级失败: %v", user.UserName, err)
+		}
 	}
 
 	// 检查用户状态
@@ -408,7 +452,7 @@ func generateUserToken(user *modelsdb.TAgentHttpUserInfo, loginType, modelName s
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(jwtUserSecret))
+	return token.SignedString(getJWTSecret())
 }
 
 // getUserToken 从请求中解析用户 Token
@@ -439,7 +483,7 @@ func getUserToken(r *http.Request) *UserTokenClaims {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("不支持的签名算法: %v", token.Header["alg"])
 			}
-			return []byte(jwtUserSecret), nil
+			return getJWTSecret(), nil
 		})
 		if err != nil || !token.Valid {
 			return &UserTokenClaims{}

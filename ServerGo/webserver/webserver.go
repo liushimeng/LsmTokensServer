@@ -90,10 +90,12 @@ func mountSPA(mux *http.ServeMux) {
 	logger.Printf("[WEB] Serving ClientWeb dist: %s", dist)
 }
 
-// buildManagerMux 构造管理端 mux：管理 API + SPA（安全链在 Start 时套上）
+// buildManagerMux 构造管理端 mux：登录路由 + 管理 API + SPA
+// （v2.0.56 安全加固：鉴权中间件在 Start 时套上，见 ManagerAuthMiddleware）
 func buildManagerMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	RegisterAPIRoutes(mux)
+	api.RegisterManagerLoginRoutes(mux)
 	api.RegisterManagerAPIRoutes(mux)
 	mountSPA(mux)
 	return mux
@@ -114,7 +116,7 @@ func StartManagerWebServer(cfg *config.LsmTokensServerConfig) {
 	addr := fmt.Sprintf(":%d", cfg.ManagerWebListenPort)
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      ManagerSecurityChain(mux),
+		Handler:      ManagerSecurityChain(api.ManagerAuthMiddleware(mux)),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,

@@ -41,6 +41,16 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 - 中文 commit message，分阶段提交，格式：`阶段X：简要说明`
 - 每阶段完成后必须保证 `go build ./...` 通过、`go test ./...` 全绿（新增测试用例）。
 
+### 2.5 安全红线（v2.0.56 全面安全加固起强制）
+- **禁止硬编码密钥/密码/生产 IP**：JWT 密钥与管理端登录凭证只放 `LsmTokensServer.conf` 的 `security` 段（`jwtSecret`/`managerUserName`/`managerPassword`/`trustProxyHeaders`）；Python 分析脚本 DB 凭证走环境变量 `LSM_MYSQL_*`。
+- **管理端（9101）所有业务接口必须经过 `api.ManagerAuthMiddleware`**：新接口在 `api.RegisterManagerAPIRoutes` 内注册即自动受保护；登录走 `/ManagerLoginInterface`。
+- **用户密码只存 bcrypt 哈希**：写库前 `api.HashPassword`，校验 `api.VerifyPassword`（自动兼容旧明文并升级）。
+- **接口响应禁止明文密码/完整手机号**：密码字段置空，手机号用 `api.MaskPhone`。
+- **前端禁止持久化 API Key**："记住我"仅存模型名；对话历史 localStorage 上限 200 条 + 30 天过期。
+- **API Key / JWT 密钥生成禁止时间戳降级**：`crypto/rand` 失败必须返回错误。
+- `tmpPlan/`、`.env` 已加入 `.gitignore`，方案文档与本地密钥文件严禁入库。
+- 完整规范见 [`docs/开发指南/SECURITY.md`](docs/开发指南/SECURITY.md)。
+
 ## 3. 代码结构速查
 
 | 旧文件前缀 | 新位置（`ServerGo/` 下） | 说明 |

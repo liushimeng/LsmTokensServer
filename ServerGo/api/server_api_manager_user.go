@@ -57,6 +57,11 @@ func userManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})
 			return
 		}
+		// v2.0.56 安全加固：响应脱敏（不回传密码哈希，手机号掩码）
+		for i := range users {
+			users[i].Password = ""
+			users[i].Phone = MaskPhone(users[i].Phone)
+		}
 		json.NewEncoder(w).Encode(userManageResp{Success: true, Data: users})
 	case "add":
 		userName, err := ValidateField(strings.TrimSpace(req.UserName), 50, "用户名")
@@ -69,6 +74,13 @@ func userManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})
 			return
 		}
+		// v2.0.56：密码 bcrypt 哈希后入库
+		hashed, err := HashPassword(password)
+		if err != nil {
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "密码加密失败"})
+			return
+		}
+		password = hashed
 		phone, err := ValidateField(strings.TrimSpace(req.Phone), 20, "手机号")
 		if err != nil {
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})
@@ -85,6 +97,7 @@ func userManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})
 			return
 		}
+		item.Password = "" // 响应脱敏
 		json.NewEncoder(w).Encode(userManageResp{Success: true, Message: "添加成功", Data: item})
 	case "update":
 		userName, err := ValidateField(strings.TrimSpace(req.UserName), 50, "用户名")
@@ -101,6 +114,26 @@ func userManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})
 			return
+		}
+		// v2.0.56：列表接口已脱敏，回传的掩码手机号 / 空密码 / 哈希密码 表示"未修改"，保留原值；
+		// 提交新明文密码时 bcrypt 哈希后更新。
+		existing, exErr := modelsdb.GetUserByID(req.ID)
+		if exErr != nil {
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "用户不存在"})
+			return
+		}
+		if password == "" || IsPasswordHashed(password) {
+			password = existing.Password
+		} else {
+			hashed, herr := HashPassword(password)
+			if herr != nil {
+				json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "密码加密失败"})
+				return
+			}
+			password = hashed
+		}
+		if strings.Contains(phone, "****") || phone == "" {
+			phone = existing.Phone
 		}
 		item := &modelsdb.TAgentHttpUserInfo{
 			ID:               req.ID,

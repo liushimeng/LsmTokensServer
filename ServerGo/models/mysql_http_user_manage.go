@@ -6,6 +6,7 @@ import (
 	"github.com/lishimeng/LsmTokensServer/logger"
 	"strings"
 	"sync"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -335,6 +336,28 @@ func GetUserByName(name string) (*TAgentHttpUserInfo, error) {
 		return nil, fmt.Errorf("failed to query user: %w", err)
 	}
 	return &item, nil
+}
+
+// UpdateUserPasswordHashed 更新用户密码为哈希值（v2.0.56 安全加固：登录时旧明文自动升级用）
+func UpdateUserPasswordHashed(id uint64, hashedPassword string) error {
+	agentUserMutex.Lock()
+	defer agentUserMutex.Unlock()
+
+	if database.DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	result := database.DB.Table(AgentHttpUserInfoTableName).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Updates(map[string]any{
+			"password":   hashedPassword,
+			"updated_at": time.Now(),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("failed to update user password: %w", result.Error)
+	}
+	invalidateUserCache(id)
+	return nil
 }
 
 // UpdateUserStatus 更新用户状态

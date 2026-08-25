@@ -41,7 +41,7 @@ Agent 通过本组接口查询 `TAgentHttpTransactionDataItem` 表里**某个用
 - 当前实现**直接信任**请求体内的 `user_name` + `model_name`（参见 `chatAnalysisInterfaceHandle` 在 `server_api_manager_chat_analysis.go:64-145`）
 - 由于调用入口为同机进程内的 Web 监听（管理端 9101 端口），**仅本机 / 同子网可信客户端**可访问；生产环境如对外暴露必须挂反向代理 + IP 白名单
 
-> **特别警告**：调用前请确认 Agent 所在机器与 `http://localhost:9101`（或对应的 `managerWebListenPort`）网络可达。生产环境若端口为 `8.130.85.252:9101`，请替换为对应 `agentProductListenAddr`。
+> **特别警告**：调用前请确认 Agent 所在机器与 `http://localhost:9101`（或对应的 `managerWebListenPort`）网络可达。生产环境若端口为 `<服务器IP>:9101`，请替换为对应 `agentProductListenAddr`。
 
 ### 2.3 用户端 Token（如果 Agent 想改走用户端 29001）
 

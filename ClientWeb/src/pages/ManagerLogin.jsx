@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react'
 import { get, post } from '../shared/api'
-import { saveCredentials, loadCredentials, clearCredentials } from '../shared/auth'
 
-// 登录页：模型登录（model_name + api_key）+ 验证码，与旧 /UserLogin 表单等价
-export default function Login() {
+// 管理端登录页（v2.0.56 安全加固）：管理员账号 + 密码 + 验证码
+// 凭证在服务端 LsmTokensServer.conf 的 security 段配置，前端不保存任何管理员敏感信息
+export default function ManagerLogin() {
   const [captchaId, setCaptchaId] = useState('')
   const [captchaUrl, setCaptchaUrl] = useState('')
-  const [modelName, setModelName] = useState('')
-  const [apiKey, setApiKey] = useState('')
+  const [userName, setUserName] = useState('')
+  const [password, setPassword] = useState('')
   const [captchaCode, setCaptchaCode] = useState('')
-  const [remember, setRemember] = useState(false)
   const [error, setError] = useState('')
-  const [showKey, setShowKey] = useState(false)
+  const [showPwd, setShowPwd] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const refreshCaptcha = async () => {
@@ -21,28 +20,20 @@ export default function Login() {
     } catch { /* 忽略 */ }
   }
 
-  useEffect(() => {
-    refreshCaptcha()
-    // v2 安全加固：记住我只回填模型名称，API Key 不再本地存储
-    const creds = loadCredentials()
-    if (creds && creds.modelName) {
-      setModelName(creds.modelName); setRemember(true)
-    }
-  }, [])
+  useEffect(() => { refreshCaptcha() }, [])
 
   const submit = async (e) => {
     e.preventDefault()
     setError('')
-    if (!modelName || !apiKey || !captchaCode) { setError('请填写完整登录信息'); return }
+    if (!userName || !password || !captchaCode) { setError('请填写完整登录信息'); return }
     setBusy(true)
     try {
-      const d = await post('UserLoginInterface', {
-        login_type: 'model', model_name: modelName, api_key: apiKey,
+      const d = await post('ManagerLoginInterface', {
+        user_name: userName, password,
         captcha_id: captchaId, captcha_code: captchaCode,
       })
       if (d.success) {
-        if (remember) saveCredentials(modelName); else clearCredentials()
-        window.location.hash = '#/Home'
+        window.location.href = '/Home'
         window.location.reload()
       } else {
         setError(d.message || '登录失败')
@@ -57,22 +48,22 @@ export default function Login() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={submit}>
-        <h1 className="login-title">LsmTokensServer</h1>
-        <p className="login-sub">AI Tokens 代理与管理服务</p>
+        <h1 className="login-title">LsmTokensServer 管理端</h1>
+        <p className="login-sub">管理员登录</p>
         {error ? <div className="login-error">{error}</div> : null}
         <label className="field">
-          <span>模型名称</span>
-          <input value={modelName} onChange={(e) => setModelName(e.target.value)}
-                 autoComplete="username" placeholder="请输入模型名称" />
+          <span>管理员账号</span>
+          <input value={userName} onChange={(e) => setUserName(e.target.value)}
+                 autoComplete="username" placeholder="请输入管理员账号" />
         </label>
         <label className="field">
-          <span>API Key</span>
+          <span>密码</span>
           <span className="field-inline">
-            <input type={showKey ? 'text' : 'password'} value={apiKey}
-                   onChange={(e) => setApiKey(e.target.value)}
-                   autoComplete="current-password" placeholder="请输入 API Key" />
-            <button type="button" className="btn btn-link" onClick={() => setShowKey(!showKey)}>
-              {showKey ? '隐藏' : '显示'}
+            <input type={showPwd ? 'text' : 'password'} value={password}
+                   onChange={(e) => setPassword(e.target.value)}
+                   autoComplete="current-password" placeholder="请输入密码" />
+            <button type="button" className="btn btn-link" onClick={() => setShowPwd(!showPwd)}>
+              {showPwd ? '隐藏' : '显示'}
             </button>
           </span>
         </label>
@@ -86,10 +77,6 @@ export default function Login() {
                      title="点击刷新" alt="验证码" />
               : <button type="button" className="btn btn-link" onClick={refreshCaptcha}>刷新</button>}
           </span>
-        </label>
-        <label className="field-check">
-          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-          <span>记住模型名称（API Key 不在本地保存）</span>
         </label>
         <button className="btn btn-primary login-submit" type="submit" disabled={busy}>
           {busy ? '登录中…' : '登录'}

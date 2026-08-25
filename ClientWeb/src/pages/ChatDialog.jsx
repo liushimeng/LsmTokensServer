@@ -81,6 +81,10 @@ export default function ChatDialog({ route }) {
   }
 
   // ========== 历史（localStorage，键名对齐旧版） ==========
+  // v2 安全加固：单 key 消息上限 200 条（超出裁掉最旧）、30 天未更新自动过期清理
+  const HISTORY_MAX_MESSAGES = 200
+  const HISTORY_EXPIRE_MS = 30 * 24 * 60 * 60 * 1000
+
   const loadHistory = (cfg, pt) => {
     const key = userMode
       ? `lsm_chat_history_user_${cfg.model_name}`
@@ -89,8 +93,14 @@ export default function ChatDialog({ route }) {
       const raw = localStorage.getItem(key)
       if (raw) {
         const parsed = JSON.parse(raw)
-        setMessages(parsed.messages || [])
-        setSystemPrompt(parsed.systemPrompt || '')
+        // 30 天未更新 → 过期清理
+        if (parsed.savedAt && Date.now() - parsed.savedAt > HISTORY_EXPIRE_MS) {
+          localStorage.removeItem(key)
+          setMessages([]); setSystemPrompt('')
+        } else {
+          setMessages((parsed.messages || []).slice(-HISTORY_MAX_MESSAGES))
+          setSystemPrompt(parsed.systemPrompt || '')
+        }
       } else {
         setMessages([]); setSystemPrompt('')
       }
@@ -105,7 +115,11 @@ export default function ChatDialog({ route }) {
   const saveHistory = (msgs, sys) => {
     if (!storageKey) return
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ systemPrompt: sys, messages: msgs }))
+      localStorage.setItem(storageKey, JSON.stringify({
+        savedAt: Date.now(),
+        systemPrompt: sys,
+        messages: (msgs || []).slice(-HISTORY_MAX_MESSAGES),
+      }))
     } catch { /* 忽略 */ }
   }
 

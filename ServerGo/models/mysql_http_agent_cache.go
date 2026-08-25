@@ -634,13 +634,13 @@ func ClearChatSession(endpointID uint64) {
 
 // generateAPIKey 生成模型 API Key。
 // 使用 crypto/rand 生成高熵随机值，避免从用户名、模型名或时间戳反推出密钥。
-func generateAPIKey(userName, modelName string) string {
+// v2.0.56 安全加固：crypto/rand 失败时不再降级为纳秒时间戳（可预测），直接返回错误。
+func generateAPIKey(userName, modelName string) (string, error) {
 	_ = userName
 	_ = modelName
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
-		// 极端情况下保留可用性；调用方仍会在数据库唯一约束下处理冲突。
-		return fmt.Sprintf("sk-%d000000000000000000000000", time.Now().UnixNano())
+		return "", fmt.Errorf("生成 API Key 失败（系统熵源不可用）: %w", err)
 	}
-	return "sk-" + hex.EncodeToString(buf)
+	return "sk-" + hex.EncodeToString(buf), nil
 }

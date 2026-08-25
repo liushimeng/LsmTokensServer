@@ -6,6 +6,10 @@ server.crt
 server.key
 *.pem
 *.p12
+.env
+
+# ===== 本地方案文档（含安全审计细节，禁止提交）=====
+tmpPlan/
 
 # ===== Go =====
 ServerGo/LsmTokensServer

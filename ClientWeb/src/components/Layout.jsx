@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { logout } from '../shared/auth'
+import { logout, managerLogout } from '../shared/auth'
 import { loadSidebarCollapsed, saveSidebarCollapsed } from '../shared/navConfig'
 import ToolbarDialogs from './ToolbarDialogs'
 import SideNav from './SideNav'
@@ -53,7 +53,7 @@ export default function Layout({ route, userInfo, children }) {
               {userInfo.user_name}{userInfo.model_name ? ` / ${userInfo.model_name}` : ''}
             </span>
           ) : null}
-          <button className="btn btn-link" onClick={logout}>退出</button>
+          <button className="btn btn-link" onClick={isAdmin ? managerLogout : logout}>退出</button>
         </div>
       </header>
       <div className="layout-body">

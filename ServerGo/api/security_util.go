@@ -3,37 +3,65 @@ package api
 import (
 	"fmt"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
-// ValidateField 输入校验（自旧工程 server_web_security.go 提取）
-// ValidateField 通用字段校验：长度限制 + 危险字符过滤
+// ValidateField 通用字段校验：仅做长度限制（SQL 注入防护由 GORM 参数化查询保证，
+// 不再做关键字黑名单替换——旧实现对含 "end"/"select" 等子串的密码会静默改写，已移除）
 func ValidateField(input string, maxLen int, fieldName string) (string, error) {
 	if len(input) > maxLen {
 		return "", fmt.Errorf("%s 长度超过限制（最大 %d 字符）", fieldName, maxLen)
 	}
-	sanitized, _ := SanitizeInput(input)
-	return sanitized, nil
+	return input, nil
 }
 
-// SanitizeInput 过滤输入中的危险 SQL 关键字，返回过滤后的字符串和是否包含危险字符
-func SanitizeInput(input string) (string, bool) {
-	lower := strings.ToLower(input)
-	for _, keyword := range DangerousSQLKeywords {
-		if strings.Contains(lower, keyword) {
-			// 替换危险关键字为空格
-			input = strings.ReplaceAll(input, keyword, "")
-			input = strings.ReplaceAll(strings.ToLower(input), keyword, "")
-		}
+// ========== 密码哈希（v2.0.56 安全加固） ==========
+
+// HashPassword 使用 bcrypt 哈希密码（cost 10）
+func HashPassword(plain string) (string, error) {
+	b, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
 	}
-	// 移除多余的空格
-	input = strings.Join(strings.Fields(input), " ")
-	return input, true
+	return string(b), nil
 }
 
-var DangerousSQLKeywords = []string{
-	"--", ";--", "/*", "*/", "@@", "@",
-	"char", "nchar", "varchar", "nvarchar",
-	"alter", "begin", "cast", "create", "cursor", "declare", "delete", "drop", "end", "exec", "execute",
-	"fetch", "insert", "kill", "open", "select", "sys", "sysobjects", "syscolumns",
-	"table", "update", "union", "waitfor", "delay",
+// IsPasswordHashed 判断存储值是否已是 bcrypt 哈希（$2a$/$2b$/$2y$ 前缀）
+func IsPasswordHashed(stored string) bool {
+	return strings.HasPrefix(stored, "$2")
+}
+
+// VerifyPassword 校验密码：支持 bcrypt 哈希与旧版明文（返回 isPlainLegacy=true 表示命中旧明文，调用方可择机升级哈希）
+func VerifyPassword(stored, input string) (ok bool, isPlainLegacy bool) {
+	if IsPasswordHashed(stored) {
+		err := bcrypt.CompareHashAndPassword([]byte(stored), []byte(input))
+		return err == nil, false
+	}
+	// 旧版明文：常量时间比较
+	ok = subtleConstantTimeEq(stored, input)
+	return ok, ok // 命中即视为旧明文，需升级
+}
+
+// subtleConstantTimeEq 常量时间字符串比较
+func subtleConstantTimeEq(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var v byte
+	for i := 0; i < len(a); i++ {
+		v |= a[i] ^ b[i]
+	}
+	return v == 0
+}
+
+// MaskPhone 手机号掩码（138****1234；长度不足 7 位时全掩码）
+func MaskPhone(phone string) string {
+	if len(phone) < 7 {
+		if phone == "" {
+			return ""
+		}
+		return "****"
+	}
+	return phone[:3] + "****" + phone[len(phone)-4:]
 }

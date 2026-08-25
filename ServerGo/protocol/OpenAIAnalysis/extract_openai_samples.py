@@ -23,16 +23,19 @@ except ImportError:
     print("错误: 请先安装 pymysql: pip3 install pymysql")
     sys.exit(1)
 
-# 数据库配置（从 LsmHttpAgent.conf 读取）
+# 数据库配置（v2.0.56 安全加固：凭证从环境变量读取，禁止硬编码）
+import os
 DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3306,
-    'user': 'superuser',
-    'password': 'da=p1da@asd+12',
-    'database': 'lsmDB',
+    'host': os.environ.get('LSM_MYSQL_HOST', '127.0.0.1'),
+    'port': int(os.environ.get('LSM_MYSQL_PORT', '3306')),
+    'user': os.environ.get('LSM_MYSQL_USER', ''),
+    'password': os.environ.get('LSM_MYSQL_PASSWORD', ''),
+    'database': os.environ.get('LSM_MYSQL_DATABASE', 'lsmDB'),
     'charset': 'utf8mb4',
     'cursorclass': pymysql.cursors.DictCursor
 }
+if not DB_CONFIG['user'] or not DB_CONFIG['password']:
+    raise SystemExit('请设置环境变量 LSM_MYSQL_USER / LSM_MYSQL_PASSWORD')
 
 # 分表数量（从 LsmHttpAgent.conf 读取）
 SUB_TABLE_NUM = 8

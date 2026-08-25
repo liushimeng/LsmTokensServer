@@ -59,7 +59,11 @@ func AddUserModel(item *TAgentHttpUserModelInfo) error {
 
 	// 自动生成 API Key（如果未提供）
 	if item.APIKey == "" {
-		item.APIKey = generateAPIKey(user.UserName, item.ModelName)
+		generated, gerr := generateAPIKey(user.UserName, item.ModelName)
+		if gerr != nil {
+			return gerr
+		}
+		item.APIKey = generated
 	} else {
 		item.APIKey = strings.TrimSpace(item.APIKey)
 		if err := ValidateUserModelAPIKey(item.APIKey); err != nil {

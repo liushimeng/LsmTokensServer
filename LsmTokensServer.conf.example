@@ -45,5 +45,11 @@
   "openClawAPIKey": "<your-openclaw-api-key>",
   "openClawModel": "openclaw",
   "openClawSystemPrompt": "user",
-  "transactionRetentionDays": 15
+  "transactionRetentionDays": 15,
+  "security": {
+    "jwtSecret": "<your-random-jwt-secret-at-least-32-chars>",
+    "managerUserName": "<your-manager-username>",
+    "managerPassword": "<your-strong-manager-password>",
+    "trustProxyHeaders": false
+  }
 }
