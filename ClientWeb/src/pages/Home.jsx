@@ -19,7 +19,19 @@ export default function Home() {
     aliveRef.current = true
     get('UserInfoInterface')
       .then((d) => { if (aliveRef.current) setInfo((d && d.data) || d) })
-      .catch((e) => { if (aliveRef.current) setError(e.message) })
+      .catch((e) => {
+        if (aliveRef.current) {
+          // 区分超时/网络错误，给出更友好的提示
+          const msg = e.message || ''
+          if (/超时|重启/.test(msg)) {
+            setError('服务正在重启中，请稍后刷新页面重试')
+          } else if (/网络错误/.test(msg)) {
+            setError('网络连接异常，请检查网络或刷新页面重试')
+          } else {
+            setError(msg)
+          }
+        }
+      })
       .finally(() => { if (aliveRef.current) setInfoLoaded(true) })
     post('UserModelListInterface', {})
       .then((d) => { if (aliveRef.current) setModels((d && (d.data || d.models)) || []) })

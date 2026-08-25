@@ -6,8 +6,8 @@ export function baseUrl() {
   return p.substring(0, p.lastIndexOf('/') + 1)
 }
 
-// 请求超时上限（毫秒）：服务重启期间避免请求永久挂起
-const REQUEST_TIMEOUT_MS = 10000
+// 请求超时上限（毫秒）：服务重启期间避免请求永久挂起（5 秒平衡用户体验与网络波动容忍）
+const REQUEST_TIMEOUT_MS = 5000
 
 export async function request(path, options = {}) {
   const opts = { credentials: 'include', ...options }

@@ -10,6 +10,8 @@ import (
 	modelsdb "github.com/lishimeng/LsmTokensServer/models"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -28,27 +30,86 @@ const (
 	loginFailureWindow      = time.Minute
 )
 
-// ========== JWT 密钥管理（v2.0.56 安全加固） ==========
+// ========== JWT 密钥管理（v2.0.56 安全加固 + 持久化兜底） ==========
+
+const jwtSecretFile = ".jwt_secret" // 已 gitignore，仅作配置缺失时的持久化兜底
 
 var (
-	runtimeJWTSecret  []byte // 配置未提供 jwtSecret 时进程内随机生成（重启后登录态失效）
+	runtimeJWTSecret  []byte // 配置未提供 jwtSecret 时持久化/随机生成
 	runtimeJWTSecretO sync.Once
 )
 
-// getJWTSecret 获取 JWT 签名密钥：优先 conf 的 security.jwtSecret，
-// 否则启动时 crypto/rand 生成 32 字节随机密钥（仅进程内有效）。
+// getJWTSecretFilePath 返回 .jwt_secret 文件路径（与配置文件同目录）
+func getJWTSecretFilePath() string {
+	// 与 LsmTokensServer.conf 同目录（进程工作目录）
+	return jwtSecretFile
+}
+
+// persistJWTSecret 将密钥持久化到文件（权限 600）
+func persistJWTSecret(secret []byte) error {
+	path := getJWTSecretFilePath()
+	encoded := base64.StdEncoding.EncodeToString(secret)
+	// 0600 权限：仅所有者可读写
+	if err := os.WriteFile(path, []byte(encoded), 0600); err != nil {
+		return fmt.Errorf("写入 JWT 密钥文件失败: %w", err)
+	}
+	// 确保文件权限（umask 可能影响初始创建）
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("设置 JWT 密钥文件权限失败: %w", err)
+	}
+	return nil
+}
+
+// loadPersistedJWTSecret 尝试从文件读取持久化的密钥
+func loadPersistedJWTSecret() ([]byte, error) {
+	path := getJWTSecretFilePath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	encoded := strings.TrimSpace(string(data))
+	secret, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("JWT 密钥文件内容无效: %w", err)
+	}
+	if len(secret) < 32 {
+		return nil, fmt.Errorf("JWT 密钥长度不足: %d 字节", len(secret))
+	}
+	return secret, nil
+}
+
+// getJWTSecret 获取 JWT 签名密钥：
+// 1. 优先 conf 的 security.jwtSecret
+// 2. 其次 .jwt_secret 持久化文件（服务重启后恢复原有密钥）
+// 3. 最后 crypto/rand 生成 + 持久化（首次启动）
 func getJWTSecret() []byte {
 	if config.G != nil && config.G.Security.JWTSecret != "" {
 		return []byte(config.G.Security.JWTSecret)
 	}
 	runtimeJWTSecretO.Do(func() {
+		// 尝试加载持久化密钥
+		if secret, err := loadPersistedJWTSecret(); err == nil {
+			runtimeJWTSecret = secret
+			logger.Printf("[SECURITY] 已从 %s 恢复 JWT 密钥（服务重启后登录态保持有效）", filepath.Base(jwtSecretFile))
+			return
+		} else if !os.IsNotExist(err) {
+			logger.Printf("[SECURITY] 读取 JWT 密钥文件失败(%v)，将生成新密钥", err)
+		}
+
+		// 生成新密钥
 		buf := make([]byte, 32)
 		if _, err := rand.Read(buf); err != nil {
 			// crypto/rand 失败属系统级异常，直接 panic（禁止降级为可预测密钥）
 			panic("生成随机 JWT 密钥失败: " + err.Error())
 		}
 		runtimeJWTSecret = buf
-		logger.Printf("[SECURITY] security.jwtSecret 未配置，已生成进程内随机 JWT 密钥（重启后所有登录态失效；建议在 LsmTokensServer.conf 配置固定密钥）")
+
+		// 持久化到文件
+		if err := persistJWTSecret(buf); err != nil {
+			logger.Printf("[SECURITY] 警告: JWT 密钥持久化失败(%v)，重启后登录态将失效", err)
+		} else {
+			logger.Printf("[SECURITY] security.jwtSecret 未配置，已生成随机 JWT 密钥并持久化到 %s（重启后登录态保持有效）", filepath.Base(jwtSecretFile))
+		}
 	})
 	return runtimeJWTSecret
 }
