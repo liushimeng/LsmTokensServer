@@ -5,8 +5,7 @@
 #
 # 规则: 所有涉及编译、启动的操作，必须通过此脚本完成，禁止直接执行 go build 或 nohup。
 # 功能: 自动编译后端(ServerGo) + 前端(ClientWeb)，部署前端产物，启动并验证服务。
-# 注意: 迁移期内旧服务 LsmHttpAgent 仍在运行且端口相同，请使用 --build-only（默认推荐）
-#       仅编译不启动；待全部功能迁移并人工确认后，再执行完整 restart 切换。
+# 注意: 如需仅编译不启动（不占端口），请使用 --build-only；确认服务可切换后再执行完整 restart。
 # 兼容: Linux / macOS
 
 set -e
@@ -280,7 +279,7 @@ while [ $port_wait -lt 20 ]; do
     port_wait=$((port_wait + 1))
 done
 if ! check_port_free "$MANAGER_PORT"; then
-    log_warn "Port $MANAGER_PORT still in use (旧服务 LsmHttpAgent 可能仍在运行)，continuing anyway..."
+    log_warn "Port $MANAGER_PORT still in use (可能已有 LsmTokensServer 实例在运行)，continuing anyway..."
 fi
 
 # ---- Step 7: 启动新实例 ----

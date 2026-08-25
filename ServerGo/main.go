@@ -1,6 +1,6 @@
 // LsmTokensServer - AI Tokens 代理与管理服务（前后端分离架构，后端入口）
 //
-// 由私有项目 LsmHttpAgent 迁移重构而来，前端见 ../ClientWeb（React + Vite）。
+// 前端见 ../ClientWeb（React + Vite）。
 // 启动顺序（与旧版一致，AI 代理为核心链路）：
 //  1. 配置/日志初始化
 //  2. MySQL（可选，失败不影响 AI 代理）

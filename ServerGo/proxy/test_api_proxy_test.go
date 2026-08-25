@@ -26,7 +26,7 @@ func initTestEnv(t *testing.T) func() {
 	oldSkipBackfill, hadSkipBackfill := os.LookupEnv("LSM_SKIP_TASK_FEATURE_BACKFILL")
 	os.Setenv("LSM_SKIP_TASK_FEATURE_BACKFILL", "1")
 
-	// 关闭用户信息日志写入：测试期间所有 fixture 操作不再污染 LsmHttpAgentUsersInfo.log
+	// 关闭用户信息日志写入：测试期间所有 fixture 操作不再污染 LsmTokensServerUsersInfo.log
 	oldDisabled := logger.IsUserLogDisabled()
 	logger.SetDisableUserLog(true)
 

@@ -5,7 +5,7 @@
 
 ## 项目概述
 
-LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，由私有项目 LsmHttpAgent 迁移重构，前后端分离：
+LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，前后端分离：
 
 - **后端 Go**（`ServerGo/`）：按业务域分包，核心能力：
   - AI 代理转发（29000 HTTP / 29003 HTTPS），支持 Anthropic / OpenAI 协议互转
@@ -17,7 +17,7 @@ LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，由私有项
 
 ## Agent 必读
 
-1. **不要停止旧服务**：`/usr/local/LsmHttpAgent` 必须持续运行，AI 代理端口全量验证前严禁停。
+1. **端口规范**：管理端 `9101`、AI 代理 `29000`（HTTP）/`29003`（HTTPS）、用户端 `29001`、MCP `29002`、爬虫 CDP `9222`。
 2. **编译/启动走脚本**：`./rebuild_restart_app.sh`，仅编译用 `--build-only`。
 3. **敏感信息不提交**：`LsmTokensServer.conf`、证书、日志、`tmpPlan/`、`.env`、私有子模块。
 4. **中文 commit**：分阶段提交，格式 `阶段X：说明`。

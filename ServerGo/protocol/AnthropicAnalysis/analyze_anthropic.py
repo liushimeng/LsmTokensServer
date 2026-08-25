@@ -453,7 +453,7 @@ def main():
         md_report = generate_markdown_report(analysis, records)
         
         # 保存报告
-        output_path = "/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmHttpAgent/AnthropicAnalysis/OutputAnalysis.md"
+        output_path = "/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmTokensServer/AnthropicAnalysis/OutputAnalysis.md"
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(md_report)
         

@@ -536,12 +536,12 @@ def main():
         service_filename = service.replace(' ', '')
         print(f"  正在生成 SessionAnalysis.md...")
         session_md = generate_session_report(session_analysis)
-        with open(f'/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmHttpAgent/OpenAIAnalysis/{service_filename}_SessionAnalysis.md', 'w', encoding='utf-8') as f:
+        with open(f'/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmTokensServer/OpenAIAnalysis/{service_filename}_SessionAnalysis.md', 'w', encoding='utf-8') as f:
             f.write(session_md)
         
         print(f"  正在生成 TaskAnalysis.md...")
         task_md = generate_task_report(task_analysis, service)
-        with open(f'/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmHttpAgent/OpenAIAnalysis/{service_filename}_TaskAnalysis.md', 'w', encoding='utf-8') as f:
+        with open(f'/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmTokensServer/OpenAIAnalysis/{service_filename}_TaskAnalysis.md', 'w', encoding='utf-8') as f:
             f.write(task_md)
         
         print(f"  ✓ {service} 分析完成")

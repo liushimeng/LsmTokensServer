@@ -5,7 +5,7 @@
 
 ## 1. 工程定位
 
-LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmHttpAgent 迁移重构而来，前后端分离架构。
+LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架构。
 
 - 后端：`ServerGo/`（Go，按业务域分包）
 - 前端：`ClientWeb/`（React + Vite）
@@ -23,10 +23,8 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，由私有项目 LsmH
 ```
 禁止直接 `go build` 或 `nohup ./LsmTokensServer`。
 
-### 2.2 旧服务不得停止
-- **旧服务 `/usr/local/LsmHttpAgent` 必须持续运行**，在 AI 代理端口（29000/29003）全量验证通过并人工确认之前，禁止停止。
+### 2.2 端口规范
 - 端口规范：管理端 `9101`、AI 代理 `29000`（HTTP）/`29003`（HTTPS）、用户端 `29001`、MCP `29002`、爬虫 CDP `9222`。
-- 新旧服务并行期间需保持端口不冲突（旧服务已偏移至 19000 段，新服务占用规范端口）。
 
 ### 2.3 敏感信息严禁提交
 以下文件/目录绝不能提交到 git（已在 `.gitignore` 中）：

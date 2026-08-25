@@ -56,7 +56,7 @@ func TestValidateAndFixConfig_AgentHttpsListenPort(t *testing.T) {
 
 func TestLoadConfig_AgentHttpsListenPortRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "LsmHttpAgent.conf")
+	path := filepath.Join(dir, "LsmTokensServer.conf")
 
 	// 1) 旧配置（无 agentHttpsListenPort 字段）→ 加载后应为默认 29003
 	legacy := map[string]interface{}{

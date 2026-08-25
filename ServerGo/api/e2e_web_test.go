@@ -13,7 +13,7 @@ import (
 //  1. 路由注册对等性：管理端全部接口在 mux 上可解析（ServeMux.Handler 不触达 handler，无需 DB）；
 //  2. 安全红线：上述全部接口未携带 JWT 时被 ManagerAuthMiddleware 统一 401 拦截。
 //
-// 与旧工程 LsmHttpAgent server_web_manager.go 的路由清单一一对应（同源代理前缀由 proxy 包挂载，不在此列）。
+// 与旧工程 LsmTokensServer server_web_manager.go 的路由清单一一对应（同源代理前缀由 proxy 包挂载，不在此列）。
 
 var e2eManagerRoutes = []string{
 	// 对话分析

@@ -567,13 +567,13 @@ def main():
     # 生成 Session 报告
     print("\n正在生成 SessionAnalysis.md...")
     session_md = generate_session_report(session_analysis)
-    with open('/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmHttpAgent/AnthropicAnalysis/SessionAnalysis.md', 'w', encoding='utf-8') as f:
+    with open('/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmTokensServer/AnthropicAnalysis/SessionAnalysis.md', 'w', encoding='utf-8') as f:
         f.write(session_md)
     
     # 生成 Task 报告
     print("正在生成 TaskAnalysis.md...")
     task_md = generate_task_report(task_analysis)
-    with open('/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmHttpAgent/AnthropicAnalysis/TaskAnalysis.md', 'w', encoding='utf-8') as f:
+    with open('/Users/dev02/Desktop/MyLocalGit/lsm-local-project-go/LsmTokensServer/AnthropicAnalysis/TaskAnalysis.md', 'w', encoding='utf-8') as f:
         f.write(task_md)
     
     print("\n" + "=" * 60)

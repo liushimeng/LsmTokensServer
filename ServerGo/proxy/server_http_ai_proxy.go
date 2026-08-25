@@ -65,9 +65,8 @@ func StartAIProxyService(cfg *config.LsmTokensServerConfig) {
 
 	logger.Printf("[PROXY] AI proxy server listening on :%d (HTTP)", port)
 	logger.Printf("[PROXY] =====================================================================")
-	logger.Printf("[PROXY] AI 代理端口迁移提示：旧工程 LsmHttpAgent 监听 29000/29003；")
-	logger.Printf("[PROXY] 本工程 LsmTokensServer 监听 %d(HTTP) / %d(HTTPS)。", port, cfg.AgentHttpsListenPort)
-	logger.Printf("[PROXY] 如果客户端 Claude Code / Cursor / Cline 等仍配置旧端口，请改为 %d。", port)
+	logger.Printf("[PROXY] LsmTokensServer AI 代理监听 %d(HTTP) / %d(HTTPS)。", port, cfg.AgentHttpsListenPort)
+	logger.Printf("[PROXY] 如果客户端 Claude Code / Cursor / Cline 等端口配置有误，请改为 %d。", port)
 	logger.Printf("[PROXY] =====================================================================")
 	go func() {
 		if err := aiProxyServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

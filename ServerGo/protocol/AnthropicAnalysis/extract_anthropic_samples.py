@@ -37,7 +37,7 @@ DB_CONFIG = {
 if not DB_CONFIG['user'] or not DB_CONFIG['password']:
     raise SystemExit('请设置环境变量 LSM_MYSQL_USER / LSM_MYSQL_PASSWORD')
 
-# 分表数量（从 LsmHttpAgent.conf 读取）
+# 分表数量（从 LsmTokensServer.conf 读取）
 SUB_TABLE_NUM = 8
 
 # 协议类型常量
