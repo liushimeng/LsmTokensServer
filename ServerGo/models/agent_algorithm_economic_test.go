@@ -151,9 +151,14 @@ func TestEconomicSelectorFallbackNoSession(t *testing.T) {
 		t.Errorf("expected 100 (first), got %d, ok=%v", id, ok)
 	}
 
-	// 兜底路径不应触发经济型状态初始化（livePool 未被消费）
-	if _, exists := economicStates[400]; exists {
-		t.Errorf("expected no economic state to be initialized on fallback path")
+	// v2.0.75：兜底路径会初始化经济型状态（用于冷却源站检查），但不得消费 livePool
+	if state, exists := economicStates[400]; exists {
+		state.mu.Lock()
+		poolLen := len(state.livePool)
+		state.mu.Unlock()
+		if poolLen != 0 {
+			t.Errorf("fallback path should not consume livePool, got len=%d", poolLen)
+		}
 	}
 }
 
@@ -878,9 +883,14 @@ func TestEconomicSelectForKBRequest_PicksAvailable(t *testing.T) {
 		t.Errorf("expected at least 2 different endpoints over 20 random picks, got %d (seen=%v)", len(seen), seen)
 	}
 
-	// 关键不变量：KB 分支不应初始化经济型状态（livePool 未被消费）
-	if _, exists := economicStates[900]; exists {
-		t.Errorf("SelectForKBRequest should NOT initialize economic state (livePool must stay untouched)")
+	// v2.0.75：KB 分支会初始化经济型状态（用于冷却源站检查），但不得消费 livePool
+	if state, exists := economicStates[900]; exists {
+		state.mu.Lock()
+		poolLen := len(state.livePool)
+		state.mu.Unlock()
+		if poolLen != 0 {
+			t.Errorf("KB branch should not consume livePool, got len=%d", poolLen)
+		}
 	}
 }
 
@@ -963,9 +973,11 @@ func TestIsSyntheticSessionEligibleAgent(t *testing.T) {
 		{"openai/python exact", "openai/python", true},
 		{"openai/python uppercase", "OpenAI/Python", true},
 		{"openai/python with version", "OpenAI/Python 1.0.0", true},
-		{"claude-cli excluded", "claude-cli", false},
-		{"openai/js excluded", "openai/js", false},
-		{"kilo-code excluded", "kilo-code", false},
+		// v2.0.75：这些 Agent 识别不到 session_id 时也会落入固定首源站，
+		// 故纳入合成 session 名单（获得粘性 + TTL 轮换均衡）
+		{"claude-cli eligible (v2.0.75)", "claude-cli", true},
+		{"openai/js eligible (v2.0.75)", "openai/js", true},
+		{"kilo-code eligible (v2.0.75)", "kilo-code", true},
 		{"empty string", "", false},
 		{"unknown agent", "some-other-agent", false},
 	}

@@ -82,8 +82,14 @@ const (
 	EconomicSessionQueueMaxSize = 50
 
 	// EconomicEndpointMaxConsecutiveFailures 单个源站最大连续失败次数
-	// 达到后由调用方触发 RemoveEndpointFromAIRoute 移除该源站
+	// 达到后触发源站冷却摘除（v2.0.75 起为内存级冷却，不再持久化写库删除）
 	EconomicEndpointMaxConsecutiveFailures = 3
+
+	// EconomicEndpointCooldownDuration 源站连续失败达阈值后的内存冷却时长。
+	// 冷却期间该源站被从 livePool 摘除（不参与新 session 分配），
+	// 到期后自动回归 livePool 恢复参与负载均衡；
+	// 路由配置（DstEndPointIDList）不受影响，源站的最终去留仍由管理员在 Web 端决定。
+	EconomicEndpointCooldownDuration = 10 * time.Minute
 )
 
 // hashSessionToEndpoint 使用 FNV-1a 哈希将 session_id 确定性映射到 livePool 中的索引。
@@ -135,6 +141,10 @@ type economicRouteState struct {
 	// knownEndpoints 记录「曾被分配或曾出现在路由配置中的端点 ID」，
 	// 用于 SyncEconomicRouteEndpoints 在 livePool 为空时仍能正确识别被 Web 移除的源站。
 	knownEndpoints map[uint64]bool
+
+	// cooldownEndpoints 记录因连续失败被临时摘除的源站及其冷却截止时间。
+	// 到期后由 recoverCooldownEndpointsLocked 自动回归 livePool。
+	cooldownEndpoints map[uint64]time.Time
 }
 
 // economicStates 按 routeID 维护的经济型算法状态表
@@ -164,6 +174,7 @@ func getEconomicState(routeID uint64) *economicRouteState {
 		sessionIndex:         make(map[string]*sessionMapEntry),
 		endpointFailureCount: make(map[uint64]int),
 		knownEndpoints:       make(map[uint64]bool),
+		cooldownEndpoints:    make(map[uint64]time.Time),
 	}
 	economicStates[routeID] = s
 	return s
@@ -217,12 +228,13 @@ func (s *EconomicAlgorithmSelector) Select(route *CachedAIRoute) (uint64, bool) 
 	if route == nil || len(route.DstEndPointIDs) == 0 {
 		return 0, false
 	}
+	// v2.0.75：兜底路径跳过冷却中的源站（连续失败被摘除的源站不再承接无 session 请求）
 	for i, id := range route.DstEndPointIDs {
-		if i < len(route.DstEndPointIDStatuses) && route.DstEndPointIDStatuses[i] == 1 {
-			return id, true
+		status := 1
+		if i < len(route.DstEndPointIDStatuses) {
+			status = route.DstEndPointIDStatuses[i]
 		}
-		// 兼容：状态列表缺失或长度不足时，默认启用
-		if i >= len(route.DstEndPointIDStatuses) {
+		if status == 1 && !s.IsEndpointCooling(route.ID, id) {
 			return id, true
 		}
 	}
@@ -247,6 +259,9 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
+	// 先回收冷却期已结束的源站（v2.0.75：冷却自动恢复，保持池满载参与负载均衡）
+	recoverCooldownEndpointsLocked(state, route)
+
 	// 命中已有映射
 	if entry, ok := state.sessionIndex[sessionID]; ok {
 		// 验证映射的源站仍在路由配置中且状态为启用
@@ -263,7 +278,10 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 				status = route.DstEndPointIDStatuses[idx]
 			}
 			if status == 1 {
-				return entry.EndPointID, true
+				// 粘性源站正处于冷却期（连续失败被摘除）：清理映射走重新分配
+				if deadline, cooling := state.cooldownEndpoints[entry.EndPointID]; !cooling || time.Now().After(deadline) {
+					return entry.EndPointID, true
+				}
 			}
 		}
 		// 源站已被 Web 移除或状态为禁用：清理旧 session 映射 + 从 livePool 防御性删除
@@ -287,7 +305,7 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 			if i < len(route.DstEndPointIDStatuses) {
 				status = route.DstEndPointIDStatuses[i]
 			}
-			if status == 1 {
+			if status == 1 && !isEndpointCoolingLocked(state, id) {
 				availableIDs = append(availableIDs, id)
 			}
 		}
@@ -365,10 +383,11 @@ func (s *EconomicAlgorithmSelector) OnRequestFailure(routeID uint64, route *Cach
 }
 
 // OnEndpointFailure 指定源站请求失败：递增该源站的连续失败计数
-// 达到阈值时返回 (shouldRemove=true, removedID) 由调用方在循环外调
-// RemoveEndpointFromAIRoute + SyncEconomicRouteEndpoints 完成最终移除。
+// 达到阈值时返回 (shouldCooldown=true, removedID)，由调用方在循环外调
+// CooldownEndpoint 完成「内存级冷却摘除」（v2.0.75 起不再写库删除源站，
+// 冷却到期后源站自动回归 livePool 恢复负载均衡，路由配置保持完整）。
 // 不在算法层直接调 database.DB 函数，避免算法层与 database.DB 层互斥锁交叉持有。
-func (s *EconomicAlgorithmSelector) OnEndpointFailure(routeID uint64, endpointID uint64) (shouldRemove bool, removedID uint64) {
+func (s *EconomicAlgorithmSelector) OnEndpointFailure(routeID uint64, endpointID uint64) (shouldCooldown bool, removedID uint64) {
 	state := getEconomicState(routeID)
 	state.mu.Lock()
 	state.endpointFailureCount[endpointID]++
@@ -381,8 +400,65 @@ func (s *EconomicAlgorithmSelector) OnEndpointFailure(routeID uint64, endpointID
 		return false, 0
 	}
 
-	logger.Printf("[ECONOMIC] Route %d: endpoint %d reached %d consecutive failures, will be removed from route", routeID, endpointID, count)
+	logger.Printf("[ECONOMIC] Route %d: endpoint %d reached %d consecutive failures, will be cooled down for %s", routeID, endpointID, count, EconomicEndpointCooldownDuration)
 	return true, endpointID
+}
+
+// CooldownEndpoint 把指定源站从 livePool 摘除并进入冷却期（默认 EconomicEndpointCooldownDuration）。
+// 冷却为纯内存状态：不写 database.DB、不改路由配置，到期后自动回归 livePool。
+// 同时清零该源站的失败计数，避免恢复后因历史计数被立即再次摘除。
+func (s *EconomicAlgorithmSelector) CooldownEndpoint(routeID uint64, endpointID uint64) {
+	s.cooldownEndpointForDuration(routeID, endpointID, EconomicEndpointCooldownDuration)
+}
+
+// cooldownEndpointForDuration CooldownEndpoint 的可指定时长版本（供测试使用）。
+func (s *EconomicAlgorithmSelector) cooldownEndpointForDuration(routeID uint64, endpointID uint64, duration time.Duration) {
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	state.livePool = removeFromLivePool(state.livePool, endpointID)
+	state.cooldownEndpoints[endpointID] = time.Now().Add(duration)
+	delete(state.endpointFailureCount, endpointID)
+
+	logger.Printf("[ECONOMIC] Route %d: endpoint %d cooled down for %s (in-memory only, route config unchanged)", routeID, endpointID, duration)
+}
+
+// recoverCooldownEndpointsLocked 把冷却期已结束的源站回归 livePool（调用方需持有 state.mu）。
+// 回归时去重，并校验该源站仍在路由配置的 DstEndPointIDs 中（被 Web 移除的不回归）。
+// isEndpointCoolingLocked 判断源站是否处于冷却期（调用方需持有 state.mu）
+func isEndpointCoolingLocked(state *economicRouteState, endpointID uint64) bool {
+	deadline, ok := state.cooldownEndpoints[endpointID]
+	return ok && time.Now().Before(deadline)
+}
+
+func recoverCooldownEndpointsLocked(state *economicRouteState, route *CachedAIRoute) {
+	if len(state.cooldownEndpoints) == 0 {
+		return
+	}
+	now := time.Now()
+	for endpointID, deadline := range state.cooldownEndpoints {
+		if now.Before(deadline) {
+			continue
+		}
+		delete(state.cooldownEndpoints, endpointID)
+		if route == nil || !containsUint64(route.DstEndPointIDs, endpointID) {
+			continue
+		}
+		if containsUint64(state.livePool, endpointID) {
+			continue
+		}
+		state.livePool = append(state.livePool, endpointID)
+		logger.Printf("[ECONOMIC] Route %d: endpoint %d cooldown expired, back to live pool", route.ID, endpointID)
+	}
+}
+
+// IsEndpointCooling 判断指定源站当前是否处于冷却期（供测试与观测使用）。
+func (s *EconomicAlgorithmSelector) IsEndpointCooling(routeID uint64, endpointID uint64) bool {
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return isEndpointCoolingLocked(state, endpointID)
 }
 
 // SyncEconomicRouteEndpoints 把路由的 livePool + session 队列 + 失败计数与新源站列表对齐
@@ -424,10 +500,18 @@ func SyncEconomicRouteEndpoints(routeID uint64, newEndpointIDs []uint64) {
 		removedSet[id] = true
 		delete(state.knownEndpoints, id)
 	}
+	// 冷却表也按新列表清理：不在新列表中的源站（即便从未进过 knownEndpoints）一并清掉冷却
+	for id := range state.cooldownEndpoints {
+		if !newSet[id] {
+			removedSet[id] = true
+			delete(state.cooldownEndpoints, id)
+		}
+	}
 
-	// 2. 从 livePool 移除被删 ID
+	// 2. 从 livePool 与冷却表移除被删 ID
 	for _, id := range removed {
 		state.livePool = removeFromLivePool(state.livePool, id)
+		delete(state.cooldownEndpoints, id)
 	}
 
 	// 3. 统计 added：在新源站列表中但不在 livePool 的 ID
@@ -437,7 +521,8 @@ func SyncEconomicRouteEndpoints(routeID uint64, newEndpointIDs []uint64) {
 	}
 	var added []uint64
 	for _, id := range newEndpointIDs {
-		if !liveSet[id] {
+		// 冷却中的源站不回归 livePool（到期后由 recoverCooldownEndpointsLocked 恢复）
+		if !liveSet[id] && !isEndpointCoolingLocked(state, id) {
 			added = append(added, id)
 		}
 	}
@@ -566,6 +651,14 @@ var EconomicAdvancedAgentWhiteList = map[string]bool{
 	"windsurf":      true, // v2.0.73：Windsurf IDE (Codeium)
 	"cursor":        true, // v2.0.73：Cursor IDE
 	"copilot":       true, // v2.0.73：GitHub Copilot
+	// v2.0.75 扩展：补充实际线上观测到的高阶 Agent UA，避免落入知识问答误判
+	"atomcode":    true, // AtomCode
+	"asyncopenai": true, // AsyncOpenAI SDK（openai-python 并发变体）
+	"amp":         true, // Amp
+	"rovo":        true, // Rovo
+	"longcat":     true, // LongCat
+	"grok-build":  true, // Grok
+	"openclaw":    true, // OpenClaw
 }
 
 // IsAdvancedAgentToolName 判断 Agent 名称是否属于「高阶 Agent 工具白名单」。
@@ -645,6 +738,24 @@ var EconomicSyntheticSessionEligibleAgents = map[string]bool{
 	"aider":         true, // v2.0.73：Aider AI pair programming
 	"continue":      true, // v2.0.73：Continue IDE extension
 	"cline":         true, // v2.0.73：Cline VS Code extension
+	// v2.0.75 扩展：线上观测到这些 Agent 请求未携带可识别 session_id，
+	// 此前落入 Select() 兜底固定打第一个源站，无法参与 Session 级负载均衡。
+	// 加入合成 session（userName+modelName，15 分钟 TTL）后获得粘性 + 轮换均衡。
+	"atomcode":    true,
+	"asyncopenai": true,
+	"claude-cli":  true,
+	"claude-code": true,
+	"kilo-code":   true,
+	"windsurf":    true,
+	"cursor":      true,
+	"copilot":     true,
+	"pi":          true,
+	"amp":         true,
+	"rovo":        true,
+	"longcat":     true,
+	"grok-build":  true,
+	"openclaw":    true,
+	"openai/js":   true,
 }
 
 // syntheticSessionEntry 缓存条目：session_id + 最后使用时间。
@@ -800,14 +911,18 @@ func (s *EconomicAlgorithmSelector) SelectForKBRequest(route *CachedAIRoute) (ui
 	if route == nil || len(route.DstEndPointIDs) == 0 {
 		return 0, false
 	}
-	// 收集可用源站（状态为1或状态列表缺失）
+	// 收集可用源站（状态为1或状态列表缺失；v2.0.75 起跳过冷却中的源站）
+	state := getEconomicState(route.ID)
+	state.mu.Lock()
+	recoverCooldownEndpointsLocked(state, route)
+	state.mu.Unlock()
 	available := make([]uint64, 0, len(route.DstEndPointIDs))
 	for i, id := range route.DstEndPointIDs {
 		status := 1
 		if i < len(route.DstEndPointIDStatuses) {
 			status = route.DstEndPointIDStatuses[i]
 		}
-		if status == 1 {
+		if status == 1 && !s.IsEndpointCooling(route.ID, id) {
 			available = append(available, id)
 		}
 	}

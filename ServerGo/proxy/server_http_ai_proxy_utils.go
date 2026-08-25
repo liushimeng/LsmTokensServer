@@ -316,38 +316,34 @@ func forwardWithRetry(
 		return nil, fmt.Errorf("no destination endpoints configured")
 	}
 
-	// 经济型算法：OnEndpointFailure 返回 shouldRemove 时，
-	// 记录需要移除的 endpoint ID；循环结束后统一调 modelsdb.RemoveEndpointFromAIRoute + modelsdb.SyncEconomicRouteEndpoints。
-	// 这样既避免算法层直接调 database.DB（锁交叉），又保证本次失败请求被中止、由上游 SDK 重试。
-	var economicRemoveID uint64
-	economicShouldRemove := false
+	// 经济型算法：OnEndpointFailure 返回 shouldCooldown 时，
+	// 记录需要冷却摘除的 endpoint ID；循环结束后统一调 economicSelector.CooldownEndpoint。
+	// v2.0.75 起冷却为纯内存状态（默认 10 分钟后自动回归 livePool 恢复负载均衡），
+	// 不再调 modelsdb.RemoveEndpointFromAIRoute 持久化删除源站——
+	// 源站的最终去留由管理员在 Web 端决定，避免偶发 429/503 的源站被永久剔除、
+	// 路由池逐渐缩水到单源站导致 Session 级负载均衡失效。
+	var economicCooldownID uint64
+	economicShouldCooldown := false
 
 	// reportFailure 统一处理一次失败的副作用：调用对应算法的失败回调，
-	// 并在需要时把 economicRemoveID 标记上。返回 true 表示应终止当前 retry 循环。
+	// 并在需要时把 economicCooldownID 标记上。返回 true 表示应终止当前 retry 循环。
 	reportFailure := func(endpointID uint64) bool {
 		if isStable {
 			stableSelector.OnRequestFailure(cachedRoute.ID, cachedRoute)
 		} else if isEconomic {
-			if shouldRemove, removedID := economicSelector.OnEndpointFailure(cachedRoute.ID, endpointID); shouldRemove {
-				economicShouldRemove = true
-				economicRemoveID = removedID
+			if shouldCooldown, cooledID := economicSelector.OnEndpointFailure(cachedRoute.ID, endpointID); shouldCooldown {
+				economicShouldCooldown = true
+				economicCooldownID = cooledID
 				return true
 			}
 		}
 		return false
 	}
 
-	// 循环结束后的收尾：经济型若标记了移除，同步 database.DB 与算法层。
+	// 循环结束后的收尾：经济型若标记了冷却摘除，在锁外执行内存级冷却。
 	defer func() {
-		if economicShouldRemove {
-			if err := modelsdb.RemoveEndpointFromAIRoute(cachedRoute.ID, economicRemoveID); err != nil {
-				logger.Printf("[ECONOMIC] Route %d: failed to remove endpoint %d: %v", cachedRoute.ID, economicRemoveID, err)
-				return
-			}
-			// 重新从缓存读取最新源站列表（modelsdb.updateRouteInCache 已替换对象）
-			if latest, ok := modelsdb.GetCachedRouteByModelIDAndProtocol(cachedRoute.UserModelID, cachedRoute.ProtocolType); ok {
-				modelsdb.SyncEconomicRouteEndpoints(cachedRoute.ID, latest.DstEndPointIDs)
-			}
+		if economicShouldCooldown {
+			economicSelector.CooldownEndpoint(cachedRoute.ID, economicCooldownID)
 		}
 	}()
 
