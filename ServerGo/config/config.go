@@ -186,6 +186,10 @@ type SecurityConfig struct {
 	ManagerPassword string `json:"managerPassword,omitempty"`
 	// TrustProxyHeaders 是否信任 X-Forwarded-For/X-Real-IP（仅部署于可信反向代理后开启）
 	TrustProxyHeaders bool `json:"trustProxyHeaders,omitempty"`
+	// ManagerWebAuthDisabled 是否关闭管理端 Web 登录鉴权（v2.0.58 网关代理部署）：
+	// 管理员 Web 服务部署于已完成 Web 端鉴权的可信网关之后时置 true，
+	// ManagerAuthMiddleware 全量放行（登录页/管理端 JWT 不再要求）。默认 false 保持安全红线。
+	ManagerWebAuthDisabled bool `json:"managerWebAuthDisabled,omitempty"`
 }
 
 // rawLsmTokensServerConfig 用于读取旧版配置格式，实现向后兼容

@@ -1,7 +1,7 @@
 // 统一请求封装：JSON API / 表单 POST / SSE / WebSocket
 // 后端契约：成功返回 {success:true,...}，失败 {success:false,message:"..."}（HTTP 可能仍为 200）
 
-function baseUrl() {
+export function baseUrl() {
   const p = window.location.pathname
   return p.substring(0, p.lastIndexOf('/') + 1)
 }
@@ -20,7 +20,7 @@ export async function request(path, options = {}) {
   if (!res.ok) {
     // 登录态失效 → 按构建角色跳对应登录页（阶段T：角色由 __APP_ROLE__ 构建期决定）
     if (res.status === 401) {
-      if (__APP_ROLE__ === 'manager') { window.location.href = '/ManagerLogin'; }
+      if (__APP_ROLE__ === 'manager') { window.location.href = baseUrl() + 'ManagerLogin'; }
       else { window.location.hash = '#/Login'; window.location.reload(); }
     }
     throw new Error((data && data.message) || `HTTP ${res.status}`)

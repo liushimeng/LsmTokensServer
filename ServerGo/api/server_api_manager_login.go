@@ -183,6 +183,13 @@ func isManagerAPIPath(path string) bool {
 
 // ManagerAuthMiddleware 管理端鉴权中间件（供 webserver 装配）
 func ManagerAuthMiddleware(next http.Handler) http.Handler {
+	// v2.0.58 网关代理部署：security.managerWebAuthDisabled=true 时全量放行。
+	// 适用场景：管理员 Web 服务部署于已完成 Web 端鉴权的可信网关之后，网关侧登录墙
+	// 即为鉴权边界，本服务不再叠加管理端 JWT。默认 false，安全红线不变。
+	if config.G != nil && config.G.Security.ManagerWebAuthDisabled {
+		logger.Printf("[SECURITY] managerWebAuthDisabled=true：管理端 Web 鉴权已关闭（信任网关侧鉴权），全量放行")
+		return next
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 公开路由放行
 		publicPaths := map[string]bool{
@@ -222,9 +229,9 @@ func ManagerAuthMiddleware(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			// 数据接口：页面型伪装请求 302 跳转管理端登录页；API 请求返回 401 JSON
+			// 数据接口：页面型伪装请求 302 跳转管理端登录页（相对 Location，兼容网关子路径代理）；API 请求返回 401 JSON
 			if strings.Contains(r.Header.Get("Accept"), "text/html") {
-				http.Redirect(w, r, "/ManagerLogin", http.StatusFound)
+				http.Redirect(w, r, "ManagerLogin", http.StatusFound)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")

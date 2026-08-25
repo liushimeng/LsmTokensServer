@@ -1,6 +1,8 @@
 // 登录态与本地偏好存储
 // v2 安全加固（20260825）：不再持久化 API Key（旧版 XOR+Base64 伪加密可被离线还原），
 // "记住我"仅保存模型名称；加载时发现旧版记录（含 ak 字段）立即清除。
+import { baseUrl } from './api'
+
 const STORAGE_KEY = 'lsm_agent_creds'
 
 export function saveCredentials(modelName) {
@@ -60,5 +62,5 @@ export async function fetchMyModels() {
 export async function managerLogout() {
   if (__APP_ROLE__ !== 'manager') { return logout() }
   try { await fetch('ManagerLogoutInterface', { credentials: 'include' }) } catch { /* 忽略 */ }
-  window.location.href = '/ManagerLogin'
+  window.location.href = baseUrl() + 'ManagerLogin'
 }

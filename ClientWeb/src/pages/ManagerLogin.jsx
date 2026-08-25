@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { get, post } from '../shared/api'
+import { get, post, baseUrl } from '../shared/api'
 
 // 管理端登录页（v2.0.56 安全加固）：管理员账号 + 密码 + 验证码
 // 凭证在服务端 LsmTokensServer.conf 的 security 段配置，前端不保存任何管理员敏感信息
@@ -33,7 +33,7 @@ export default function ManagerLogin() {
         captcha_id: captchaId, captcha_code: captchaCode,
       })
       if (d.success) {
-        window.location.href = '/Home'
+        window.location.href = baseUrl() + 'Home'
         window.location.reload()
       } else {
         setError(d.message || '登录失败')

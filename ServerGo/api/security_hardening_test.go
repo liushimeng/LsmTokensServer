@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/lishimeng/LsmTokensServer/config"
 )
 
 // v2.0.56 安全加固单元测试
@@ -124,6 +126,27 @@ func TestManagerAuthMiddlewareSPANavigationPassThrough(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 		if called || rec.Code != http.StatusFound {
 			t.Fatalf("数据接口 %s 伪装 text/html 仍应拦截: called=%v code=%d", p, called, rec.Code)
+		}
+	}
+}
+
+// v2.0.58 网关代理部署：managerWebAuthDisabled=true 时管理端中间件全量放行
+func TestManagerAuthMiddlewareDisabledByConfig(t *testing.T) {
+	if config.G == nil {
+		config.G = config.DefaultConfig()
+	}
+	oldVal := config.G.Security.ManagerWebAuthDisabled
+	defer func() { config.G.Security.ManagerWebAuthDisabled = oldVal }()
+
+	config.G.Security.ManagerWebAuthDisabled = true
+	called := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+	handler := ManagerAuthMiddleware(next)
+	for _, p := range []string{"/UserManageInterface", "/ChatAnalysisInterface", "/ChatAnalysis", "/ChatAnalysisTotalWS"} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest("POST", p, nil))
+		if !called || rec.Code != http.StatusOK {
+			t.Fatalf("managerWebAuthDisabled=true 时 %s 应全量放行: called=%v code=%d", p, called, rec.Code)
 		}
 	}
 }

@@ -52,6 +52,7 @@
     "jwtSecret": "<your-random-jwt-secret-at-least-32-chars>",
     "managerUserName": "<your-manager-username>",
     "managerPassword": "<your-strong-manager-password>",
-    "trustProxyHeaders": false
+    "trustProxyHeaders": false,
+    "managerWebAuthDisabled": false
   }
 }
