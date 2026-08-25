@@ -1111,3 +1111,134 @@ func TestGetOrSynthesizeSessionID_Concurrent(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// v2.x: 禁用源站过滤测试 —— 验证禁用源站不会被路由到
+// ============================================================================
+
+// TestSyncEconomicRouteEndpoints_FiltersDisabled 验证 SyncEconomicRouteEndpoints
+// 添加源站到 livePool 时过滤掉禁用状态（DstEndPointIDStatuses = 0）的源站
+// 注意：此测试需要数据库和缓存初始化，使用 initTestEnv
+func TestSyncEconomicRouteEndpoints_FiltersDisabled(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	ResetEconomicRouteState(2000)
+	defer ResetEconomicRouteState(2000)
+
+	// 创建路由 TAgentHttpAIRoute 并写入缓存
+	route := &TAgentHttpAIRoute{
+		ID:                      2000,
+		UserID:                  1,
+		UserModelID:             20000,
+		ProtocolType:            1,
+		DstEndPointIDList:       "2001,2002,2003",
+		DstEndPointIDStatusList: "1,0,1",
+		DstEndPointAlgorithmTypeList: "1,1,1",
+		DstEndPointIDNumber:     3,
+		AlgorithmStrategyType:   AlgorithmStrategyType_Economic,
+	}
+	addRouteToCache(route)
+
+	// 调用 SyncEconomicRouteEndpoints
+	SyncEconomicRouteEndpoints(2000, []uint64{2001, 2002, 2003})
+
+	// 验证 livePool 不包含禁用的 2002
+	info, _, _ := GetEconomicStateInfo(2000)
+	for _, id := range info.LivePool {
+		if id == 2002 {
+			t.Errorf("livePool should not contain disabled endpoint 2002, got %v", info.LivePool)
+		}
+	}
+	// 验证 livePool 只包含启用的 2001 和 2003
+	if info.LivePoolSize != 2 {
+		t.Errorf("expected livePool size 2 (only enabled), got %d (pool=%v)", info.LivePoolSize, info.LivePool)
+	}
+}
+
+// TestSelectForSession_SkipsDisabledInLivePool 验证 SelectForSession
+// 从 livePool 选择时跳过禁用源站
+func TestSelectForSession_SkipsDisabledInLivePool(t *testing.T) {
+	ResetEconomicRouteState(2100)
+	defer ResetEconomicRouteState(2100)
+
+	// 创建路由：3 个源站全部启用
+	route := makeTestRoute(2100, []uint64{2101, 2102, 2103})
+	sel := &EconomicAlgorithmSelector{}
+
+	// 先填充 livePool
+	id1, ok := sel.SelectForSession(route, "session-1")
+	if !ok {
+		t.Fatal("first SelectForSession failed")
+	}
+
+	// 现在修改路由状态，禁用刚才选中的源站
+	for i, id := range route.DstEndPointIDs {
+		if id == id1 {
+			route.DstEndPointIDStatuses[i] = 0
+		}
+	}
+
+	// 继续选择，不应再选到被禁用的源站
+	for i := 0; i < 10; i++ {
+		id, ok := sel.SelectForSession(route, fmt.Sprintf("session-%d", i+10))
+		if !ok {
+			// livePool 可能耗尽，重新填充
+			routeCopy := *route
+			routeCopy.DstEndPointIDStatuses = []int{1, 1, 1}
+			route = &routeCopy
+			continue
+		}
+		if id == id1 {
+			t.Errorf("iteration %d: selected disabled endpoint %d", i, id1)
+		}
+	}
+}
+
+// TestSelectForSession_MappingToDisabledEndpoint 验证 session 映射到禁用源站时
+// 清理映射并重新分配
+func TestSelectForSession_MappingToDisabledEndpoint(t *testing.T) {
+	ResetEconomicRouteState(2200)
+	defer ResetEconomicRouteState(2200)
+
+	// 创建路由：3 个源站全部启用
+	route := makeTestRoute(2200, []uint64{2201, 2202, 2203})
+	sel := &EconomicAlgorithmSelector{}
+
+	// 建立 session 映射
+	sessionID := "test-session"
+	id1, ok := sel.SelectForSession(route, sessionID)
+	if !ok {
+		t.Fatal("first SelectForSession failed")
+	}
+
+	// 禁用该源站（路由内状态）
+	for i, id := range route.DstEndPointIDs {
+		if id == id1 {
+			route.DstEndPointIDStatuses[i] = 0
+		}
+	}
+
+	// 将路由加入缓存（供 GetCachedRouteByID 查找）
+	addRouteToCache(&TAgentHttpAIRoute{
+		ID:                    2200,
+		UserModelID:           22000,
+		DstEndPointIDList:     "2201,2202,2203",
+		DstEndPointIDStatusList: formatStatusList(route.DstEndPointIDStatuses),
+	})
+	defer removeRouteFromCache(22000, 2200)
+
+	// 再次选择，应该清理映射并分配到其他源站
+	id2, ok := sel.SelectForSession(route, sessionID)
+	if !ok {
+		t.Fatal("second SelectForSession failed")
+	}
+	if id2 == id1 {
+		t.Errorf("expected different endpoint after disabling, got same %d", id1)
+	}
+}
+
+// formatStatusList 辅助函数：格式化状态切片为字符串（复用现有函数）
+func formatStatusList(statuses []int) string {
+	return FormatDstEndPointIDStatusList(statuses)
+}

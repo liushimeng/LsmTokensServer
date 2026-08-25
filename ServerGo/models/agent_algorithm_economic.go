@@ -278,8 +278,13 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 				status = route.DstEndPointIDStatuses[idx]
 			}
 			if status == 1 {
-				// 粘性源站正处于冷却期（连续失败被摘除）：清理映射走重新分配
-				if deadline, cooling := state.cooldownEndpoints[entry.EndPointID]; !cooling || time.Now().After(deadline) {
+				// v2.x: 同时检查源站本体状态（TAgentDstEndPoint.Status）
+				if ep, epOK := GetCachedDstEndPointByID(entry.EndPointID); epOK && ep.Status == 0 {
+					// 源站本体被禁用：清理映射走重新分配
+					logger.Printf("[ECONOMIC] Route %d: session %s mapped to disabled endpoint %d (endpoint status=0), clearing mapping",
+						route.ID, sessionID, entry.EndPointID)
+				} else if deadline, cooling := state.cooldownEndpoints[entry.EndPointID]; !cooling || time.Now().After(deadline) {
+					// 粘性源站正处于冷却期（连续失败被摘除）：清理映射走重新分配
 					return entry.EndPointID, true
 				}
 			}
@@ -323,6 +328,23 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 	// 使用确定性哈希计算索引，保证同一 session 在当前服务生命周期内总是分配到同一端点
 	idx := hashSessionToEndpoint(sessionID, route.ID, state.livePool)
 	endpointID := state.livePool[idx]
+
+	// v2.x: 如果选中的源站被禁用（路由内状态或源站本体状态），从 livePool 移除并重新选择
+	if !isEndpointEnabled(route, endpointID) {
+		logger.Printf("[ECONOMIC] Route %d: hash-selected endpoint %d is disabled, removing from livePool and reselecting",
+			route.ID, endpointID)
+		state.livePool = removeFromLivePool(state.livePool, endpointID)
+		if len(state.livePool) == 0 {
+			return 0, false
+		}
+		idx = hashSessionToEndpoint(sessionID, route.ID, state.livePool)
+		endpointID = state.livePool[idx]
+		// 再次检查（防御性）：如果仍然禁用，直接返回失败
+		if !isEndpointEnabled(route, endpointID) {
+			return 0, false
+		}
+	}
+
 	// swap-remove O(1) 弹出：用最后一个元素覆盖被取走的元素
 	state.livePool[idx] = state.livePool[len(state.livePool)-1]
 	state.livePool = state.livePool[:len(state.livePool)-1]
@@ -474,10 +496,14 @@ func (s *EconomicAlgorithmSelector) IsEndpointCooling(routeID uint64, endpointID
 //   - 若 newEndpointIDs 非空：随机重分配到 newEndpointIDs
 //   - 若为空：直接清掉
 //   - 清理被移除 ID 的 endpointFailureCount
+//   - v2.x: 添加源站到 livePool 时过滤禁用状态（DstEndPointIDStatuses = 0 或 TAgentDstEndPoint.Status = 0）
 func SyncEconomicRouteEndpoints(routeID uint64, newEndpointIDs []uint64) {
 	state := getEconomicState(routeID)
 	state.mu.Lock()
 	defer state.mu.Unlock()
+
+	// 获取路由配置，用于检查源站禁用状态
+	cachedRoute, _ := GetCachedRouteByID(routeID)
 
 	newSet := make(map[uint64]bool, len(newEndpointIDs))
 	for _, id := range newEndpointIDs {
@@ -522,7 +548,8 @@ func SyncEconomicRouteEndpoints(routeID uint64, newEndpointIDs []uint64) {
 	var added []uint64
 	for _, id := range newEndpointIDs {
 		// 冷却中的源站不回归 livePool（到期后由 recoverCooldownEndpointsLocked 恢复）
-		if !liveSet[id] && !isEndpointCoolingLocked(state, id) {
+		// v2.x: 禁用的源站不加入 livePool（路由内状态 DstEndPointIDStatuses = 0 或源站本体 Status = 0）
+		if !liveSet[id] && !isEndpointCoolingLocked(state, id) && isEndpointEnabled(cachedRoute, id) {
 			added = append(added, id)
 		}
 	}
@@ -565,6 +592,34 @@ func SyncEconomicRouteEndpoints(routeID uint64, newEndpointIDs []uint64) {
 
 	logger.Printf("[ECONOMIC] Route %d sync: added=%d removed=%d reassignedSessions=%d livePoolSize=%d",
 		routeID, len(added), len(removed), reassigned, len(state.livePool))
+}
+
+// isEndpointEnabled 检查源站是否启用（路由内状态 + 源站本体状态）
+// 用于 SyncEconomicRouteEndpoints 和 SelectForSession 过滤禁用源站
+// 返回 true 当且仅当：
+//   - 路由内状态 DstEndPointIDStatuses 为 1（启用）或状态列表缺失（默认启用）
+//   - 源站本体 TAgentDstEndPoint.Status 为 1（启用）
+func isEndpointEnabled(cachedRoute *CachedAIRoute, endpointID uint64) bool {
+	// 检查路由内状态（DstEndPointIDStatuses）
+	if cachedRoute != nil {
+		for i, id := range cachedRoute.DstEndPointIDs {
+			if id == endpointID {
+				if i < len(cachedRoute.DstEndPointIDStatuses) {
+					if cachedRoute.DstEndPointIDStatuses[i] == 0 {
+						return false // 路由内状态为禁用
+					}
+				}
+				break
+			}
+		}
+	}
+	// 检查源站本体状态（TAgentDstEndPoint.Status）
+	if ep, ok := GetCachedDstEndPointByID(endpointID); ok {
+		if ep.Status == 0 {
+			return false // 源站本体状态为禁用
+		}
+	}
+	return true
 }
 
 // ResetEconomicRouteState 重置指定路由的经济型算法状态

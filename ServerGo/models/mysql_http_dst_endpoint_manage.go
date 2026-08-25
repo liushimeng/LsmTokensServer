@@ -290,6 +290,15 @@ func updateEndpointStatusInRoutes(endpointID uint64, status int) error {
 		updated.DstEndPointIDStatusList = newStatusList
 		updateRouteInCache(&updated)
 
+		// v2.x: 如果路由使用经济型算法，同步更新 livePool（移除被禁用的源站）
+		// 避免禁用源站残留在 livePool 中仍被 SelectForSession 选中
+		if route.AlgorithmStrategyType == AlgorithmStrategyType_Economic {
+			if syncIDs, err := ParseDstEndPointIDList(route.DstEndPointIDList); err == nil {
+				SyncEconomicRouteEndpoints(route.ID, syncIDs)
+				logger.Printf("[database.DB] Synced economic livePool for route %d after endpoint %d status change to %d", route.ID, endpointID, status)
+			}
+		}
+
 		updatedCount++
 		logger.Printf("[database.DB] Updated endpoint %d status to %d in route %d, new status list: %s", endpointID, status, route.ID, newStatusList)
 	}

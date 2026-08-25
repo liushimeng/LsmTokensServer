@@ -445,6 +445,21 @@ func GetCachedRouteByModelIDAndProtocol(modelID uint64, protocolType int) (*Cach
 	return nil, false
 }
 
+// GetCachedRouteByID 根据路由 ID 从缓存查询路由（遍历所有模型桶）
+// 用于经济型算法需要按 routeID 查询路由配置（如 DstEndPointIDStatuses）的场景
+func GetCachedRouteByID(routeID uint64) (*CachedAIRoute, bool) {
+	agentCache.mu.RLock()
+	defer agentCache.mu.RUnlock()
+	for _, routes := range agentCache.routes {
+		for _, r := range routes {
+			if r.ID == routeID {
+				return r, true
+			}
+		}
+	}
+	return nil, false
+}
+
 // invalidateUserCache 从缓存中移除指定用户及其在 modelsByUserModel 中的索引
 func invalidateUserCache(id uint64) {
 	agentCache.mu.Lock()
