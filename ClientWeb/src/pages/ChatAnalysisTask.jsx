@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { post } from '../shared/api'
-import { isAdminRole, fetchMyModels } from '../shared/auth'
-import { useUserModelOptions, modelNamesOf, allModelNames } from '../shared/userModelOptions'
+import { isAdminRole } from '../shared/auth'
+import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/format'
@@ -24,10 +24,10 @@ export default function ChatAnalysisTask({ route }) {
   const [detail, setDetail] = useState(null) // 任务详情弹窗
   // 用户名/模型名级联下拉：管理端用 UserModelOptionsInterface（页面生命周期内缓存一次），用户端用本人模型列表
   const { users: userOptions } = useUserModelOptions()
-  const [myModels, setMyModels] = useState([])
+  const { modelNames: myModelNames } = useMyModelNames()
   const modelOptions = isAdmin
     ? (userName.trim() ? modelNamesOf(userOptions, userName.trim()) : allModelNames(userOptions))
-    : myModels.map((m) => m.model_name).filter(Boolean)
+    : myModelNames
 
   const hasKey = (isAdmin ? userName.trim() !== '' : true) && modelName.trim() !== ''
 
@@ -48,20 +48,16 @@ export default function ChatAnalysisTask({ route }) {
 
   useEffect(() => {
     if (init.userName && init.modelName) { doQuery(); return }
-    // 用户端进入页面：自动取本人第一个模型并查询（对齐旧版重定向逻辑）
-    if (!isAdmin) {
-      fetchMyModels()
-        .then((ms) => {
-          setMyModels(ms || [])
-          const first = ms && ms[0]
-          if (!first) return
-          setModelName(first.model_name || '')
-          doQuery(first.model_name || '')
-        })
-        .catch(() => {})
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 用户端进入页面：本人模型列表（缓存一次）到达后自动选第一个并查询
+  useEffect(() => {
+    if (isAdmin || !myModelNames.length || modelName) return
+    setModelName(myModelNames[0])
+    doQuery(myModelNames[0])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myModelNames])
 
   const tasks = (data && data.tasks) || []
   const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE))

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { openWs, post } from '../shared/api'
-import { isAdminRole, fetchMyModels } from '../shared/auth'
-import { useUserModelOptions, modelNamesOf, allModelNames } from '../shared/userModelOptions'
+import { isAdminRole } from '../shared/auth'
+import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import { fmtNum, fmtMs, pickRouteQuery } from '../shared/format'
 
@@ -56,10 +56,10 @@ export default function ChatAnalysisTotal({ route }) {
   const rangeDoneRef = useRef(false)
   // 用户名/模型名级联下拉：管理端用 UserModelOptionsInterface（页面生命周期内缓存一次），用户端用本人模型列表
   const { users: userOptions } = useUserModelOptions()
-  const [myModels, setMyModels] = useState([])
+  const { modelNames: myModelNames } = useMyModelNames()
   const modelOptions = isAdmin
     ? (userName.trim() ? modelNamesOf(userOptions, userName.trim()) : allModelNames(userOptions))
-    : myModels.map((m) => m.model_name).filter(Boolean)
+    : myModelNames
 
   // 趋势数据到位后，默认区间取趋势首尾日期
   useEffect(() => {
@@ -230,20 +230,16 @@ export default function ChatAnalysisTotal({ route }) {
   }, [])
   useEffect(() => {
     if (init.userName && init.modelName) runQuery(days, init.userName, init.modelName)
-    // 用户端未带模型进入：自动取本人第一个模型并查询（对齐旧版重定向逻辑）
-    else if (!isAdmin && !init.modelName) {
-      fetchMyModels()
-        .then((ms) => {
-          setMyModels(ms || [])
-          const first = ms && ms[0]
-          if (!first) return
-          setModelName(first.model_name || '')
-          runQuery(days, '', first.model_name || '')
-        })
-        .catch(() => {})
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 用户端未带模型进入：本人模型列表（缓存一次）到达后自动选第一个并查询
+  useEffect(() => {
+    if (isAdmin || init.modelName || !myModelNames.length || modelName) return
+    setModelName(myModelNames[0])
+    runQuery(days, '', myModelNames[0])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myModelNames])
 
   const kpi = stages.kpi
   const ts = stages.tokens_summary

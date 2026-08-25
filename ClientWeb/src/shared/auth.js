@@ -47,16 +47,6 @@ export function currentRole() {
 }
 export const isAdminRole = () => currentRole() === 'manager'
 
-// 用户端"我的模型列表"（UserModelListInterface）：返回模型对象数组（含 model_name）
-export async function fetchMyModels() {
-  const res = await fetch('UserModelListInterface', {
-    method: 'POST', credentials: 'include',
-    headers: { 'Content-Type': 'application/json' }, body: '{}',
-  })
-  const d = await res.json().catch(() => null)
-  return (d && d.data) || []
-}
-
 // 管理端登出：清 manager 会话 Cookie 后回管理端登录页
 // 用户端构建经 DCE 裁剪，不携带 ManagerLogoutInterface / /ManagerLogin 字样
 export async function managerLogout() {

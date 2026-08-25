@@ -76,3 +76,18 @@ func TestUserModelOptionsInterface(t *testing.T) {
 		}
 	})
 }
+
+// TestUserModelOptionsNotOnUserRoutes 护栏：全站用户名下拉接口只允许管理端注册，
+// 用户端（29001）路由表不得挂载 UserModelOptionsInterface（避免泄露全站用户名列表）
+func TestUserModelOptionsNotOnUserRoutes(t *testing.T) {
+	clean := initTestEnv(t)
+	defer clean()
+
+	mux := http.NewServeMux()
+	RegisterUserAPIRoutes(mux)
+	// 只做路由匹配不执行 handler（用户端 mux 有代理 "/" 兜底路由，直接 ServeHTTP 会触发代理初始化）
+	_, pattern := mux.Handler(httptest.NewRequest(http.MethodGet, "/UserModelOptionsInterface", nil))
+	if pattern == "/UserModelOptionsInterface" {
+		t.Fatalf("user mux must not register UserModelOptionsInterface (leaks all user names)")
+	}
+}

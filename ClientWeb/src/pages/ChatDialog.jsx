@@ -14,7 +14,7 @@ import { pickRouteQuery } from '../shared/format'
 // {AgentAnthropicListenURL} 与 {AgentOpenAIListenURL} 代理，无 CORS 问题）。
 export default function ChatDialog({ route }) {
   const init = pickRouteQuery(route && route.query)
-  const isAdmin = isAdminRole() // 管理端：用户名下拉选择（页面生命周期内缓存一次）；用户端保持手输本人用户名
+  const isAdmin = isAdminRole() // 管理端：用户名下拉选择（页面生命周期内缓存一次）；用户端登录态即身份，无用户名控件
   const { users: userOptions } = useUserModelOptions()
   const [userName, setUserName] = useState(init.userName)
   const [models, setModels] = useState([]) // [{id, model_name, api_key_masked}]
@@ -45,12 +45,14 @@ export default function ChatDialog({ route }) {
         : `lsm_chat_history_${config.user_name || userName}_${config.model_name}`)
     : ''
 
-  // 拉取用户的模型列表
+  // 拉取用户的模型列表（管理端按选中用户名查询；用户端登录态即身份，不传 user_name）
   const loadModels = async (u = userName) => {
     if (!u.trim() && !userMode) { setError('请先填写用户名'); return }
     setLoadingModels(true); setError('')
     try {
-      const d = await post('ChatDialogInterface', { action: 'models', user_name: u.trim() })
+      const body = { action: 'models' }
+      if (!userMode) body.user_name = u.trim()
+      const d = await post('ChatDialogInterface', body)
       setModels(d.data || [])
       // 默认选中路由带入的模型
       if (init.modelName && (d.data || []).some((m) => m.model_name === init.modelName)) {
@@ -63,12 +65,14 @@ export default function ChatDialog({ route }) {
     } finally { setLoadingModels(false) }
   }
 
-  // 拉取选中模型的对话配置
+  // 拉取选中模型的对话配置（用户端不传 user_name，后端按登录态鉴权）
   const loadConfig = async (u = userName, m = modelName) => {
-    if (!u.trim() || !m) { setError('请先选择模型'); return }
+    if ((!u.trim() && !userMode) || !m) { setError('请先选择模型'); return }
     setLoadingConfig(true); setError(''); setConfig(null); setShowKey(false)
     try {
-      const d = await post('ChatDialogInterface', { action: 'config', user_name: u.trim(), model_name: m })
+      const cfgBody = { action: 'config', model_name: m }
+      if (!userMode) cfgBody.user_name = u.trim()
+      const d = await post('ChatDialogInterface', cfgBody)
       const cfg = d.data || {}
       setConfig(cfg)
       // 恢复协议偏好（仅覆盖协议类型）
@@ -301,15 +305,17 @@ export default function ChatDialog({ route }) {
       <h2 className="page-title">对话</h2>
 
       <div className="toolbar">
-        {isAdmin ? <label>用户名
-          <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName(''); loadModels(e.target.value) }} style={{ width: 150 }}>
-            <option value="">请选择用户</option>
-            {userOptions.map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
-          </select>
-        </label> : <label>用户名 <input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="user_name" style={{ width: 140 }} /></label>}
-        <button className="btn btn-primary" onClick={() => loadModels()} disabled={loadingModels}>
-          {loadingModels ? '加载中…' : '加载模型列表'}
-        </button>
+        {isAdmin ? <>
+          <label>用户名
+            <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName(''); loadModels(e.target.value) }} style={{ width: 150 }}>
+              <option value="">请选择用户</option>
+              {userOptions.map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
+            </select>
+          </label>
+          <button className="btn btn-primary" onClick={() => loadModels()} disabled={loadingModels}>
+            {loadingModels ? '加载中…' : '加载模型列表'}
+          </button>
+        </> : null}
         <label>模型
           <select value={modelName} onChange={(e) => setModelName(e.target.value)}>
             <option value="">请选择模型</option>
