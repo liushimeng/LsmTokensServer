@@ -24,22 +24,22 @@ decode(A) → IR → encode(B)
 
 ### 1.2 模块划分（`crates/switchyard-translation/src/`）
 
-| 文件 | 职责 |
-|---|---|
-| `lib.rs` | crate 入口，re-export IR 类型（`format` / `llm` / `stream` 模块） |
-| `engine.rs` | `FormatRegistry`（格式→codec 注册表）+ `TranslationEngine`（无状态翻译门面） |
-| `policy.rs` | `TranslationPolicy` 策略旋钮（见 §1.4） |
-| `error.rs` | `TranslationError` 枚举（thiserror） |
-| `diagnostic.rs` | `TranslationDiagnostic` 结构化告警（severity/code/message/source/target/path） |
-| `util.rs` | 校验、preservation（无损回放）、tool_use id 清洗等共享工具 |
-| `helpers.rs` | 便捷函数：`decode_request` / `encode_request` / `decode_aggregated_response` / `encode_aggregated_response` / `decode_stream` / `encode_stream` |
-| `sse.rs` | 极简 SSE 帧解析器（`SseFrame::{Empty, Done, Data(Value)}`），不含任何 HTTP 类型 |
-| `codecs/mod.rs` | `FormatCodec` trait + `DecodedRequest/EncodedRequest/DecodedResponse/EncodedResponse` 四元组 |
-| `codecs/common.rs` | 三个 codec 共享的小函数（角色名白名单、文本拼接、未知字段收集） |
-| `codecs/anthropic/{mod,buffered,stream}.rs` | Anthropic Messages codec |
-| `codecs/openai_chat/{mod,buffered,stream}.rs` | OpenAI Chat Completions codec |
-| `codecs/responses/{mod,buffered,stream}.rs` | OpenAI Responses API codec（第三格式） |
-| `codecs/stream.rs` | `StreamCodec` trait + `StreamCodecRegistry` + `StreamTranslationState` 状态机 |
+| 文件                                          | 职责                                                                                                                                            |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib.rs`                                      | crate 入口，re-export IR 类型（`format` / `llm` / `stream` 模块）                                                                               |
+| `engine.rs`                                   | `FormatRegistry`（格式→codec 注册表）+ `TranslationEngine`（无状态翻译门面）                                                                    |
+| `policy.rs`                                   | `TranslationPolicy` 策略旋钮（见 §1.4）                                                                                                         |
+| `error.rs`                                    | `TranslationError` 枚举（thiserror）                                                                                                            |
+| `diagnostic.rs`                               | `TranslationDiagnostic` 结构化告警（severity/code/message/source/target/path）                                                                  |
+| `util.rs`                                     | 校验、preservation（无损回放）、tool_use id 清洗等共享工具                                                                                      |
+| `helpers.rs`                                  | 便捷函数：`decode_request` / `encode_request` / `decode_aggregated_response` / `encode_aggregated_response` / `decode_stream` / `encode_stream` |
+| `sse.rs`                                      | 极简 SSE 帧解析器（`SseFrame::{Empty, Done, Data(Value)}`），不含任何 HTTP 类型                                                                 |
+| `codecs/mod.rs`                               | `FormatCodec` trait + `DecodedRequest/EncodedRequest/DecodedResponse/EncodedResponse` 四元组                                                    |
+| `codecs/common.rs`                            | 三个 codec 共享的小函数（角色名白名单、文本拼接、未知字段收集）                                                                                 |
+| `codecs/anthropic/{mod,buffered,stream}.rs`   | Anthropic Messages codec                                                                                                                        |
+| `codecs/openai_chat/{mod,buffered,stream}.rs` | OpenAI Chat Completions codec                                                                                                                   |
+| `codecs/responses/{mod,buffered,stream}.rs`   | OpenAI Responses API codec（第三格式）                                                                                                          |
+| `codecs/stream.rs`                            | `StreamCodec` trait + `StreamCodecRegistry` + `StreamTranslationState` 状态机                                                                   |
 
 ### 1.3 Codec 抽象
 
@@ -77,13 +77,13 @@ pub trait StreamCodec: Send + Sync {
 
 ### 1.4 policy.rs：TranslationPolicy 五个旋钮
 
-| 字段 | 取值 | 作用 |
-|---|---|---|
-| `unknown_field_policy` | `Preserve` / `DropWithWarning` / `Reject` | 未知 provider 字段如何处理 |
-| `lossy_conversion_policy` | `AllowWithDiagnostics` / `Reject` | 已知有损转换是告警放行还是报错 |
-| `deterministic_ids` | `Preserve` / `GenerateStable{prefix}`（默认前缀 `"sw"`） | 缺失 tool_call id 时生成稳定 id（`sw_00000001`） |
-| `preservation` | `InMemory`（默认）/ `Embed` / `Disabled` | 是否在 IR 保留原始 body 实现同格式无损回放；`Embed` 把原始 body 塞进 `metadata._switchyard_translation` 支持多跳往返 |
-| `target_capabilities` | `TargetCapabilities`（supports_tools/images/audio/...） | 目标端能力声明，`validate_request_capabilities`（`util.rs:124`）据此 fail-fast 或告警 |
+| 字段                      | 取值                                                     | 作用                                                                                                                 |
+| ------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `unknown_field_policy`    | `Preserve` / `DropWithWarning` / `Reject`                | 未知 provider 字段如何处理                                                                                           |
+| `lossy_conversion_policy` | `AllowWithDiagnostics` / `Reject`                        | 已知有损转换是告警放行还是报错                                                                                       |
+| `deterministic_ids`       | `Preserve` / `GenerateStable{prefix}`（默认前缀 `"sw"`） | 缺失 tool_call id 时生成稳定 id（`sw_00000001`）                                                                     |
+| `preservation`            | `InMemory`（默认）/ `Embed` / `Disabled`                 | 是否在 IR 保留原始 body 实现同格式无损回放；`Embed` 把原始 body 塞进 `metadata._switchyard_translation` 支持多跳往返 |
+| `target_capabilities`     | `TargetCapabilities`（supports_tools/images/audio/...）  | 目标端能力声明，`validate_request_capabilities`（`util.rs:124`）据此 fail-fast 或告警                                |
 
 默认值（`policy.rs:80-92`）：Preserve + AllowWithDiagnostics + GenerateStable("sw") + InMemory——即"尽量转换成功、降级留痕"。
 
@@ -182,15 +182,15 @@ StreamError { message } / DecodeError { message }
 
 ### 3.4 参数映射
 
-| 参数 | OpenAI → IR | IR → Anthropic | 备注 |
-|---|---|---|---|
-| model | 透传（空串视为 None） | 透传 | |
-| max_tokens | `max_completion_tokens` 优先，fallback `max_tokens` → `output.max_output_tokens` | 有值写 `max_tokens`；**无值强制写 64000**（`anthropic/buffered.rs:215-219`） | Anthropic `max_tokens` 必填，测试 `openai_request_to_anthropic_adds_required_default_max_tokens` 锁定 64000 |
-| temperature / top_p | 透传 | 透传 | Anthropic 方向额外支持 `top_k`（OpenAI 侧 top_k 恒 None） |
-| stop | OpenAI `stop` 无一等 IR 字段，落入 `extensions.fields["stop"]` | `anthropic_stop_sequences_from_extensions`（:726-732）：字符串包成单元素数组，数组原样 → `stop_sequences` | 反向：Anthropic `stop_sequences` 进 extensions，OpenAI 编码时改名回 `stop`（:834-836） |
-| stream | 透传 bool | 仅 true 时写入 | |
-| reasoning | OpenAI `reasoning_effort` → `reasoning.effort` | 有 effort 时写 `thinking:{"type":"adaptive"}` + `output_config:{"effort":...}`；Anthropic `thinking` 原文进 `reasoning.raw` | reasoning 跨格式**不互相伪造**，只走各自私有通道 |
-| response_format | OpenAI 原文进 `output.response_format` | 仅接受 `json_schema` 类型，写入 `output_config.format`；**递归剥离 Anthropic 不支持的 `minimum/maximum/minLength/maxLength` 约束并告警**（`strip_anthropic_unsupported_constraints`，:403-424） | |
+| 参数                | OpenAI → IR                                                                      | IR → Anthropic                                                                                                                                                                                  | 备注                                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| model               | 透传（空串视为 None）                                                            | 透传                                                                                                                                                                                            |                                                                                                             |
+| max_tokens          | `max_completion_tokens` 优先，fallback `max_tokens` → `output.max_output_tokens` | 有值写 `max_tokens`；**无值强制写 64000**（`anthropic/buffered.rs:215-219`）                                                                                                                    | Anthropic `max_tokens` 必填，测试 `openai_request_to_anthropic_adds_required_default_max_tokens` 锁定 64000 |
+| temperature / top_p | 透传                                                                             | 透传                                                                                                                                                                                            | Anthropic 方向额外支持 `top_k`（OpenAI 侧 top_k 恒 None）                                                   |
+| stop                | OpenAI `stop` 无一等 IR 字段，落入 `extensions.fields["stop"]`                   | `anthropic_stop_sequences_from_extensions`（:726-732）：字符串包成单元素数组，数组原样 → `stop_sequences`                                                                                       | 反向：Anthropic `stop_sequences` 进 extensions，OpenAI 编码时改名回 `stop`（:834-836）                      |
+| stream              | 透传 bool                                                                        | 仅 true 时写入                                                                                                                                                                                  |                                                                                                             |
+| reasoning           | OpenAI `reasoning_effort` → `reasoning.effort`                                   | 有 effort 时写 `thinking:{"type":"adaptive"}` + `output_config:{"effort":...}`；Anthropic `thinking` 原文进 `reasoning.raw`                                                                     | reasoning 跨格式**不互相伪造**，只走各自私有通道                                                            |
+| response_format     | OpenAI 原文进 `output.response_format`                                           | 仅接受 `json_schema` 类型，写入 `output_config.format`；**递归剥离 Anthropic 不支持的 `minimum/maximum/minLength/maxLength` 约束并告警**（`strip_anthropic_unsupported_constraints`，:403-424） |                                                                                                             |
 
 ### 3.5 角色映射与边界情况
 
@@ -313,16 +313,16 @@ IR `Usage.input_tokens` 语义 = **非缓存输入 token**：
 
 ### 6.3 未知/不支持字段总表
 
-| 场景 | 策略 |
-|---|---|
-| 请求顶层未知字段 | 收进 `extensions.fields`，目标格式白名单匹配则带回（如 OpenAI 的 `user`/`service_tier`），否则留在 IR |
-| 未知 content block | `ContentBlock::Unknown{provider, raw}`；跨格式编码时 JSON 字符串化为文本 + lossy 告警 |
-| 未知 tool_choice 形状 | `ToolChoice::Raw` 原样透传 |
-| 未知 role（请求） | 硬错误（模仿 provider invalid_value） |
-| 未知 role（响应） | coerce 为 user（宽松） |
-| 流式未知事件类型 | 跳过（空 vec） |
-| 流中错误帧 | 转 `StreamError` chunk，目标侧发格式对应的 error 事件后终流 |
-| 缺失 tool_call id | `GenerateStable` 策略生成 `sw_00000001` 稳定 id |
+| 场景                           | 策略                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| 请求顶层未知字段               | 收进 `extensions.fields`，目标格式白名单匹配则带回（如 OpenAI 的 `user`/`service_tier`），否则留在 IR        |
+| 未知 content block             | `ContentBlock::Unknown{provider, raw}`；跨格式编码时 JSON 字符串化为文本 + lossy 告警                        |
+| 未知 tool_choice 形状          | `ToolChoice::Raw` 原样透传                                                                                   |
+| 未知 role（请求）              | 硬错误（模仿 provider invalid_value）                                                                        |
+| 未知 role（响应）              | coerce 为 user（宽松）                                                                                       |
+| 流式未知事件类型               | 跳过（空 vec）                                                                                               |
+| 流中错误帧                     | 转 `StreamError` chunk，目标侧发格式对应的 error 事件后终流                                                  |
+| 缺失 tool_call id              | `GenerateStable` 策略生成 `sw_00000001` 稳定 id                                                              |
 | Anthropic tool_use id 非法字符 | `sanitize_anthropic_tool_use_id` 替换为 `_`；冲突时加 FNV-1a 哈希后缀（`mapped_tool_id`，`util.rs:416-443`） |
 
 ---
@@ -352,16 +352,16 @@ IR `Usage.input_tokens` 语义 = **非缓存输入 token**：
 
 ## 附：关键文件索引
 
-| 主题 | 路径 |
-|---|---|
-| IR 类型 | `crates/protocol/src/llm.rs`、`crates/protocol/src/stream.rs`、`crates/protocol/src/format.rs` |
-| 引擎与注册表 | `crates/switchyard-translation/src/engine.rs`、`src/codecs/stream.rs` |
-| 策略 | `crates/switchyard-translation/src/policy.rs` |
-| OpenAI Chat buffered | `crates/switchyard-translation/src/codecs/openai_chat/buffered.rs` |
-| OpenAI Chat stream | `crates/switchyard-translation/src/codecs/openai_chat/stream.rs` |
-| Anthropic buffered | `crates/switchyard-translation/src/codecs/anthropic/buffered.rs` |
-| Anthropic stream | `crates/switchyard-translation/src/codecs/anthropic/stream.rs` |
-| 共享工具 | `crates/switchyard-translation/src/util.rs`（preservation、id 清洗）、`src/codecs/common.rs` |
-| SSE/字节流 | `crates/switchyard-translation/src/sse.rs`、`src/helpers.rs` |
-| 测试 | `crates/switchyard-translation/tests/{request_translation,response_translation,stream_translation,lossless_roundtrip,extension_points}.rs` |
-| 架构文档 | `docs/architecture.md`（53-60 行：decode 到中立类型 → 路由 → encode 到目标格式） |
+| 主题                 | 路径                                                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| IR 类型              | `crates/protocol/src/llm.rs`、`crates/protocol/src/stream.rs`、`crates/protocol/src/format.rs`                                             |
+| 引擎与注册表         | `crates/switchyard-translation/src/engine.rs`、`src/codecs/stream.rs`                                                                      |
+| 策略                 | `crates/switchyard-translation/src/policy.rs`                                                                                              |
+| OpenAI Chat buffered | `crates/switchyard-translation/src/codecs/openai_chat/buffered.rs`                                                                         |
+| OpenAI Chat stream   | `crates/switchyard-translation/src/codecs/openai_chat/stream.rs`                                                                           |
+| Anthropic buffered   | `crates/switchyard-translation/src/codecs/anthropic/buffered.rs`                                                                           |
+| Anthropic stream     | `crates/switchyard-translation/src/codecs/anthropic/stream.rs`                                                                             |
+| 共享工具             | `crates/switchyard-translation/src/util.rs`（preservation、id 清洗）、`src/codecs/common.rs`                                               |
+| SSE/字节流           | `crates/switchyard-translation/src/sse.rs`、`src/helpers.rs`                                                                               |
+| 测试                 | `crates/switchyard-translation/tests/{request_translation,response_translation,stream_translation,lossless_roundtrip,extension_points}.rs` |
+| 架构文档             | `docs/architecture.md`（53-60 行：decode 到中立类型 → 路由 → encode 到目标格式）                                                           |
