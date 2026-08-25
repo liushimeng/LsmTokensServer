@@ -16,7 +16,7 @@ const ALGO_DESC = {
   3: 'Session 级别负载均衡：根据 session_id 将不同会话轮询分配到各源站。仅支持 Anthropic 协议，OpenAI 协议自动降级为稳定型。',
 }
 const DAYS_OPTIONS = [-1, -2, -4, -6, -12, 1, 3, 5, 7, 14, 30, 60, 90, 0]
-const daysLabel = (d) => (d < 0 ? -d + '小时' : d === 0 ? '无限制' : d + '天')
+const daysLabel = (d) => (d < 0 ? '最近' + -d + '小时' : d === 0 ? '全部时间' : '最近' + d + '天')
 
 const protocolName = (t) => (parseInt(t, 10) === 1 ? 'Anthropic' : 'OpenAI')
 // 源站算法：1=协议直连（同协议）2=协议转换器（异协议）
@@ -241,7 +241,7 @@ export default function AIRouteManage() {
   }
 
   const deleteItem = async (route) => {
-    if (!confirm(`确定删除以下路由？\n\n${route.user_name || ''} / ${route.model_name || ''}\n\n此操作不可恢复！`)) return
+    if (!confirm(`确认删除以下路由？\n\n${route.user_name || ''} / ${route.model_name || ''}\n\n此操作不可恢复！`)) return
     try {
       await post('AIRouteManageInterface', { action: 'delete', id: route.id })
       loadRoutes()
@@ -251,7 +251,7 @@ export default function AIRouteManage() {
   const batchDelete = async () => {
     const ids = [...selected]
     if (!ids.length) { alert('请先选择要删除的路由'); return }
-    if (!confirm('确定要删除选中的 ' + ids.length + ' 条路由吗？此操作不可恢复！')) return
+    if (!confirm('确认删除选中的 ' + ids.length + ' 条路由？此操作不可恢复！')) return
     try {
       await post('AIRouteManageInterface', { action: 'batch_delete', ids })
       setSelected(new Set())
@@ -319,15 +319,15 @@ export default function AIRouteManage() {
       render: (_, r) => <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSelect(r.id)} />,
     }] : []),
     { key: 'id', title: 'ID', width: 60 },
-    ...(isAdmin ? [{ key: 'user_name', title: '用户' }] : []),
-    { key: 'model_name', title: '模型列表' },
+    ...(isAdmin ? [{ key: 'user_name', title: '所属用户' }] : []),
+    { key: 'model_name', title: '模型名' },
     { key: 'endpoints', title: '目标源站列表', render: (_, r) => renderEpList(r) },
     { key: 'protocol_type', title: '协议', render: (v) => protocolName(v) },
     { key: 'algorithm_name', title: '算法策略', render: (v, r) => v || ALGO_NAMES[r.algorithm_strategy_type] || '-' },
     {
       key: 'stats', title: (
         <span>
-          时间跨度统计{' '}
+          汇总统计{' '}
           <select value={days} onChange={(e) => setDays(normalizeDays(e.target.value))} style={{ fontSize: 12 }}>
             {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{daysLabel(d)}</option>)}
           </select>
@@ -356,8 +356,8 @@ export default function AIRouteManage() {
         <span>
           <button className="btn btn-sm btn-primary" onClick={() => openEdit(r)}>编辑</button>{' '}
           <a className="btn btn-link" href={`#/ChatDialog?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>对话</a>{' '}
-          <a className="btn btn-link" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>浏览记录</a>{' '}
-          <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days >= 0 ? '&days=' + days : ''}`}>时间跨度统计</a>{' '}
+          <a className="btn btn-link" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>对话明细分析</a>{' '}
+          <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days >= 0 ? '&days=' + days : ''}`}>汇总统计</a>{' '}
           {isAdmin ? <button className="btn btn-sm btn-danger" onClick={() => deleteItem(r)}>删除</button> : null}
         </span>
       ),

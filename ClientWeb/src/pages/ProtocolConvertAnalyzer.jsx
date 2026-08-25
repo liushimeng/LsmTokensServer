@@ -215,7 +215,7 @@ export default function ProtocolConvertAnalyzer() {
       })
     } catch (e) {
       setInputs({ request_headers: '', request_body: '', response_headers: '', response_body: '' })
-      setDetailErr('详情加载失败: ' + e.message)
+      setDetailErr('详情加载失败：' + e.message)
     }
   }
 
@@ -245,8 +245,8 @@ export default function ProtocolConvertAnalyzer() {
   const recordColumns = [
     { key: 'id', title: 'ID', width: 70, render: (v) => <code>{v}</code> },
     { key: 'created_at', title: '时间', render: (v) => fmtTime(v) },
-    { key: 'user_name', title: '用户' },
-    { key: 'model_name', title: '模型' },
+    { key: 'user_name', title: '所属用户' },
+    { key: 'model_name', title: '模型名' },
     { key: 'protocol_type', title: '协议', render: (v) => v === 1 ? 'Anthropic' : 'OpenAI' },
     { key: 'request_url', title: 'URL', render: (v) => (
       <span className="wrap" title={v}>{v && v.length > 50 ? v.slice(0, 50) + '…' : (v || '-')}</span>
@@ -260,7 +260,7 @@ export default function ProtocolConvertAnalyzer() {
 
   return (
     <div className="page">
-      <h2 className="page-title">协议转换分析器（实验性）</h2>
+      <h2 className="page-title">协议分析器（实验性）</h2>
 
       {/* 全局开关 + 状态徽标 */}
       <div className="card">
@@ -298,28 +298,28 @@ export default function ProtocolConvertAnalyzer() {
               <div className="toolbar">
                 {isAdmin && (
                   <>
-                    <label>用户筛选</label>
+                    <label>用户名</label>
                     <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName('') }}>
                       <option value="">全部用户</option>
                       {users.map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
                     </select>
                   </>
                 )}
-                <label>模型筛选</label>
+                <label>模型名</label>
                 <select value={modelName} onChange={(e) => setModelName(e.target.value)}>
                   <option value="">全部模型</option>
                   {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
-                <label>数据来源</label>
+                <label>协议</label>
                 <select value={protocolType} onChange={(e) => setProtocolType(e.target.value)}>
                   <option value="0">全部协议</option>
                   <option value="1">Anthropic</option>
                   <option value="2">OpenAI</option>
                 </select>
-                <label>时间范围</label>
+                <label>时间跨度</label>
                 <select value={days} onChange={(e) => setDays(e.target.value)}>
                   {DAYS_OPTIONS.map((d) => (
-                    <option key={d} value={String(d)}>{d === 0 ? '无限制时间' : `最近${d}天`}</option>
+                    <option key={d} value={String(d)}>{d === 0 ? '全部时间' : `最近${d}天`}</option>
                   ))}
                 </select>
                 <span style={{ color: 'var(--muted)', fontSize: 12 }}>共 {total} 条记录</span>
@@ -327,7 +327,7 @@ export default function ProtocolConvertAnalyzer() {
             )}
             {tab === 'records' && (
               <>
-                <DataTable columns={recordColumns} rows={records || []} loading={!records} empty="暂无记录" rowKey="id" />
+                <DataTable columns={recordColumns} rows={records || []} loading={!records} empty="暂无数据" rowKey="id" />
                 <div className="pager">
                   <button className="btn btn-sm" disabled={page <= 1} onClick={() => loadRecords(page - 1)}>上一页</button>
                   <span>第 {page} / {totalPages} 页</span>

@@ -47,7 +47,7 @@ export default function ChatDialog({ route }) {
 
   // 拉取用户的模型列表（管理端按选中用户名查询；用户端登录态即身份，不传 user_name）
   const loadModels = async (u = userName) => {
-    if (!u.trim() && !userMode) { setError('请先填写用户名'); return }
+    if (!u.trim() && !userMode) { setError('请先选择用户'); return }
     setLoadingModels(true); setError('')
     try {
       const body = { action: 'models' }
@@ -176,7 +176,7 @@ export default function ChatDialog({ route }) {
     setMessages(next); setEditingIndex(-1); setEditText('')
   }
   const deleteMessage = (i) => {
-    if (!window.confirm('确定删除这条消息？')) return
+    if (!window.confirm('确认删除这条消息？')) return
     const next = messages.slice()
     // user 消息连同紧随其后的 assistant 回复成对删除
     if (next[i].role === 'user' && i + 1 < next.length && next[i + 1].role === 'assistant') next.splice(i, 2)
@@ -316,7 +316,7 @@ export default function ChatDialog({ route }) {
             {loadingModels ? '加载中…' : '加载模型列表'}
           </button>
         </> : null}
-        <label>模型
+        <label>模型名
           <select value={modelName} onChange={(e) => setModelName(e.target.value)}>
             <option value="">请选择模型</option>
             {models.map((m) => <option key={m.id} value={m.model_name}>{m.model_name}（{m.api_key_masked}）</option>)}
@@ -335,7 +335,7 @@ export default function ChatDialog({ route }) {
           <DataTable
             columns={[
               { key: 'id', title: 'ID' },
-              { key: 'model_name', title: '模型名称' },
+              { key: 'model_name', title: '模型名' },
               { key: 'api_key_masked', title: 'API Key' },
               { key: 'actions', title: '操作', render: (_, r) => (
                 <button className="btn btn-sm" onClick={() => { setModelName(r.model_name); loadConfig(userName, r.model_name) }}>查看配置</button>
@@ -465,7 +465,7 @@ export default function ChatDialog({ route }) {
                 { key: 'model_name', title: '源站模型' },
                 { key: 'protocol_type', title: '协议', render: (v) => (v === 1 ? 'Anthropic' : v === 2 ? 'OpenAI' : v) },
                 { key: 'status', title: '状态', render: (v) => (
-                  <span><span className={`status-dot ${v === 1 ? 'status-on' : 'status-off'}`} />{v === 1 ? '启用' : '停用'}</span>
+                  <span><span className={`status-dot ${v === 1 ? 'status-on' : 'status-off'}`} />{v === 1 ? '启用' : '禁用'}</span>
                 ) },
               ]}
               rows={config.endpoints || []} rowKey="id" empty="该模型暂无可用源站（或未配置路由）" />

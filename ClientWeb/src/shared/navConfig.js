@@ -9,7 +9,7 @@ export const NAV_TREES = {
     ]},
     { id: 'user-route', label: '用户与路由', icon: '👥', items: [
       { key: 'UserManage', label: '用户管理' },
-      { key: 'DstEndPointManage', label: '端点管理' },
+      { key: 'DstEndPointManage', label: '源站管理' },
       { key: 'AIRouteManage', label: '路由管理' },
     ]},
     { id: 'model-proxy', label: '模型与代理', icon: '🧠', items: [
@@ -19,7 +19,7 @@ export const NAV_TREES = {
     ]},
     // 管理端补齐对话分析组：从用户管理/路由管理跳入分析页后仍有菜单归属与高亮
     { id: 'analysis', label: '对话分析', icon: '💬', items: [
-      { key: 'ChatAnalysis', label: '浏览记录' },
+      { key: 'ChatAnalysis', label: '对话明细分析' },
       { key: 'ChatAnalysisTotal', label: '汇总统计' },
       { key: 'ChatAnalysisSession', label: '会话分析' },
       { key: 'ChatAnalysisTask', label: '任务分析' },
@@ -27,7 +27,7 @@ export const NAV_TREES = {
     ]},
     { id: 'spider', label: '爬虫与数据', icon: '🕷', items: [
       { key: 'SpiderDataSource', label: '爬虫数据源' },
-      { key: 'SpiderDailyInfo', label: '爬虫日报' },
+      { key: 'SpiderDailyInfo', label: '每日 MCP 信息' },
       { key: 'CleanupReport', label: '清理报告' },
     ]},
   ] : [],
@@ -36,7 +36,7 @@ export const NAV_TREES = {
       { key: 'Home', label: '首页' },
     ]},
     { id: 'analysis', label: '对话分析', icon: '💬', items: [
-      { key: 'ChatAnalysis', label: '对话分析' },
+      { key: 'ChatAnalysis', label: '对话明细分析' },
       { key: 'ChatAnalysisTotal', label: '汇总统计' },
       { key: 'ChatAnalysisSession', label: '会话分析' },
       { key: 'ChatAnalysisTask', label: '任务分析' },
@@ -47,11 +47,11 @@ export const NAV_TREES = {
       { key: 'ModelInfo', label: '模型信息' },
       { key: 'AgentInfo', label: 'Agent信息' },
       { key: 'ProtocolConvertAnalyzer', label: '协议分析器' },
-      { key: 'DstEndPointManage', label: '端点管理' },
+      { key: 'DstEndPointManage', label: '源站管理' },
     ]},
     { id: 'spider', label: '爬虫与数据', icon: '🕷', items: [
       { key: 'SpiderDataSource', label: '爬虫数据源' },
-      { key: 'SpiderDailyInfo', label: '爬虫日报' },
+      { key: 'SpiderDailyInfo', label: '每日 MCP 信息' },
       { key: 'CleanupReport', label: '清理报告' },
     ]},
   ],

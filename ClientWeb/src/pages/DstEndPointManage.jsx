@@ -94,7 +94,7 @@ export default function DstEndPointManage() {
 
   const toggleStatus = async (ep) => {
     const status = ep.status == 1 ? 0 : 1 // eslint-disable-line eqeqeq
-    if (!confirm(`确定${status === 1 ? '启用' : '禁用'}以下源站？\n\n${ep.platform_name} / ${ep.model_name}`)) return
+    if (!confirm(`确认${status === 1 ? '启用' : '禁用'}以下源站？\n\n${ep.platform_name} / ${ep.model_name}`)) return
     try {
       await post('DstEndPointManageInterface', { action: 'toggle_status', id: ep.id, status })
       loadData()
@@ -102,7 +102,7 @@ export default function DstEndPointManage() {
   }
 
   const deleteItem = async (ep) => {
-    if (!confirm(`确定删除以下源站？\n\n${ep.platform_name} / ${ep.model_name}\n\n将同步清理所有智能路由中对该源站的引用（仅剩该源站的路由会被级联删除），此操作不可恢复！`)) return
+    if (!confirm(`确认删除以下源站？\n\n${ep.platform_name} / ${ep.model_name}\n\n将同步清理所有智能路由中对该源站的引用（仅剩该源站的路由会被级联删除），此操作不可恢复！`)) return
     try {
       await post('DstEndPointManageInterface', { action: 'delete', id: ep.id })
       loadData()
@@ -124,7 +124,7 @@ export default function DstEndPointManage() {
     if (ids.length === 0) { alert('请先选择要操作的源站'); return }
     if (ids.length > 500) { alert('单次最多操作 500 条，当前已选 ' + ids.length + ' 条'); return }
     const label = { batch_enable: '启用', batch_disable: '禁用', batch_delete: '删除' }[actionName]
-    if (!confirm(`确定要${label}选中的 ${ids.length} 条源站吗？` + (actionName === 'batch_delete' ? '此操作不可恢复！' : ''))) return
+    if (!confirm(`确认${label}选中的 ${ids.length} 条源站？` + (actionName === 'batch_delete' ? '此操作不可恢复！' : ''))) return
     try {
       await post('DstEndPointManageInterface', { action: actionName, ids })
       setSelected(new Set())
@@ -209,7 +209,7 @@ export default function DstEndPointManage() {
           <label className="field"><span>平台名称</span>
             <input value={form.platform_name} placeholder="如: Anthropic, OpenAI" onChange={(e) => setForm({ ...form, platform_name: e.target.value })} />
           </label>
-          <label className="field"><span>模型名称</span>
+          <label className="field"><span>模型名</span>
             <input value={form.model_name} placeholder="如: claude-3-5-sonnet" onChange={(e) => setForm({ ...form, model_name: e.target.value })} />
           </label>
           <label className="field"><span>协议类型</span>

@@ -9,7 +9,7 @@ import DataTable from '../components/DataTable'
 // 无第三方图表库：用纯 div 进度条 / 表格替代 echarts
 
 const DAYS_OPTIONS = [1, 3, 5, 7, 14, 30, 60, 90, 0]
-const daysLabel = (d) => (d === 0 ? '无限制' : d + '天')
+const daysLabel = (d) => (d === 0 ? '全部时间' : '最近' + d + '天')
 
 function fmt(n) {
   n = Number(n) || 0
@@ -92,11 +92,11 @@ export default function ModelInfo(props) {
         <select value={days} onChange={(e) => setDays(normalizeDays(e.target.value))}>
           {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{daysLabel(d)}</option>)}
         </select>
-        <button className="btn btn-primary" disabled={loading} onClick={() => loadStats(days)}>{loading ? '刷新中…' : '刷新统计'}</button>
+        <button className="btn btn-primary" disabled={loading} onClick={() => loadStats(days)}>{loading ? '加载中…' : '刷新'}</button>
         <span style={{ color: '#888', fontSize: 13 }}>{isAdmin ? '按全站真实模型维度统计 Token 与调用量' : '按本人模型维度统计 Token 与调用量'}</span>
       </div>
       {error ? <div className="alert alert-error">加载失败：{error}</div> : null}
-      {loading ? <div className="table-loading">正在加载模型统计…</div> : !models.length && !error ? <div className="table-empty">暂无模型调用数据。系统产生请求后将自动展示模型统计。</div> : null}
+      {loading ? <div className="table-loading">加载中…</div> : !models.length && !error ? <div className="table-empty">暂无模型调用数据。系统产生请求后将自动展示模型统计。</div> : null}
 
       {models.length || dstModels.length || (myModels && myModels.length) ? (
         <>
@@ -141,7 +141,7 @@ export default function ModelInfo(props) {
               rows={models}
               columns={[
                 { key: 'rank', title: '排名', width: 60, render: (_, m) => models.indexOf(m) + 1 },
-                { key: 'model_name', title: '模型名称', render: (v) => <b>{v || '未知模型'}</b> },
+                { key: 'model_name', title: '模型名', render: (v) => <b>{v || '未知模型'}</b> },
                 { key: 'call_count', title: '调用次数', render: (v, m) => <span title={'占比 ' + pct(m.call_share)}>{fmt(v)}</span> },
                 { key: 'call_share', title: '调用占比', render: (v) => <b style={{ color: '#2563eb' }}>{pct(v)}</b> },
                 { key: 'tokens_input_size', title: '输入 Tokens', render: fmt },
@@ -169,7 +169,7 @@ export default function ModelInfo(props) {
                   empty="暂无目标模型数据"
                   columns={[
                     { key: 'rank', title: '排名', width: 60, render: (_, m) => dstModels.indexOf(m) + 1 },
-                    { key: 'model_name', title: '目标模型名称', render: (v) => <b>{v || '未知模型'}</b> },
+                    { key: 'model_name', title: '目标模型名', render: (v) => <b>{v || '未知模型'}</b> },
                     { key: 'call_count', title: '调用次数', render: (v, m) => <span title={'占比 ' + pct(m.call_share)}>{fmt(v)}</span> },
                     { key: 'call_share', title: '调用占比', render: (v) => <b style={{ color: '#059669' }}>{pct(v)}</b> },
                     { key: 'tokens_all_size', title: '总 Tokens', render: (v, m) => <b title={'占比 ' + pct(m.token_share)}>{fmt(v)}</b> },
@@ -188,7 +188,7 @@ export default function ModelInfo(props) {
                 rows={myModels}
                 empty="暂无模型信息"
                 columns={[
-                  { key: 'model_name', title: '模型名称', render: (v) => <b>{v || '-'}</b> },
+                  { key: 'model_name', title: '模型名', render: (v) => <b>{v || '-'}</b> },
                   { key: 'description', title: '描述', render: (v) => v || '-' },
                   { key: 'cost', title: '成本（元/100万 Tokens 输入/输出）', render: (_, m) => `${Number(m.cost_per_100w_input || 0).toFixed(2)} / ${Number(m.cost_per_100w_output || 0).toFixed(2)}` },
                   { key: 'max_context_length', title: '能力（上下文）', render: (v) => (v ? fmt(v) + ' Tokens' : '-') },

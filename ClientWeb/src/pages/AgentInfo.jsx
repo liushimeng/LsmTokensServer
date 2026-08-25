@@ -7,7 +7,7 @@ import DataTable from '../components/DataTable'
 // 无第三方图表库：纯 div 进度条 + 表格替代 echarts
 
 const DAYS_OPTIONS = [1, 3, 5, 7, 14, 30, 60, 90, 0]
-const daysLabel = (d) => (d === 0 ? '无限制' : d + '天')
+const daysLabel = (d) => (d === 0 ? '全部时间' : '最近' + d + '天')
 
 function fmt(n) {
   n = Number(n) || 0
@@ -77,11 +77,11 @@ export default function AgentInfo(props) {
         <select value={days} onChange={(e) => setDays(normalizeDays(e.target.value))}>
           {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{daysLabel(d)}</option>)}
         </select>
-        <button className="btn btn-primary" disabled={loading} onClick={() => loadStats(days)}>{loading ? '刷新中…' : '刷新统计'}</button>
+        <button className="btn btn-primary" disabled={loading} onClick={() => loadStats(days)}>{loading ? '加载中…' : '刷新'}</button>
         <span style={{ color: '#888', fontSize: 13 }}>按 AI Agent 工具维度统计 Token 与调用量</span>
       </div>
       {error ? <div className="alert alert-error">加载失败：{error}</div> : null}
-      {loading ? <div className="table-loading">正在加载 Agent 统计…</div> : !agents.length && !error ? <div className="table-empty">暂无 Agent 调用数据。系统产生请求后将自动展示 Agent 统计。</div> : null}
+      {loading ? <div className="table-loading">加载中…</div> : !agents.length && !error ? <div className="table-empty">暂无 Agent 调用数据。系统产生请求后将自动展示 Agent 统计。</div> : null}
 
       {agents.length ? (
         <>

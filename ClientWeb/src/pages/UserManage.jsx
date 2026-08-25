@@ -8,10 +8,10 @@ import Modal from '../components/Modal'
 // 分析页跳转：#/ChatAnalysis?user_name=..&model_name=.. 等（对照旧版 nav）
 
 const ANALYSIS_PAGES = [
-  { page: 'ChatAnalysis', label: '浏览记录' },
-  { page: 'ChatAnalysisTotal', label: '统计' },
-  { page: 'ChatAnalysisSession', label: 'Session' },
-  { page: 'ChatAnalysisTask', label: 'Task' },
+  { page: 'ChatAnalysis', label: '对话明细分析' },
+  { page: 'ChatAnalysisTotal', label: '汇总统计' },
+  { page: 'ChatAnalysisSession', label: '会话分析' },
+  { page: 'ChatAnalysisTask', label: '任务分析' },
   { page: 'ChatDialog', label: '对话' },
 ]
 
@@ -81,7 +81,7 @@ export default function UserManage() {
   const toggleUserStatus = async (u) => {
     const status = u.status === 2 ? 1 : 2
     const label = status === 2 ? '禁用' : '启用'
-    if (!confirm(`确定${label}该用户？已登录的用户将会被强制退出。`)) return
+    if (!confirm(`确认${label}该用户？已登录的用户将会被强制退出。`)) return
     try {
       await post('UserManageInterface', { action: 'update_status', id: u.id, status })
       loadUsers()
@@ -89,7 +89,7 @@ export default function UserManage() {
   }
 
   const deleteUser = async (u) => {
-    if (!confirm('确定删除该用户？其所有模型也会被删除。')) return
+    if (!confirm('确认删除该用户？其所有模型也会被删除。')) return
     try {
       await post('UserManageInterface', { action: 'delete', id: u.id })
       clearUserModelOptionsCache()
@@ -120,7 +120,7 @@ export default function UserManage() {
   }
 
   const deleteModel = async (m, userId) => {
-    if (!confirm('确定删除该模型？')) return
+    if (!confirm('确认删除该模型？')) return
     try {
       await post('UserModelManageInterface', { action: 'delete', id: m.id })
       clearUserModelOptionsCache()
@@ -189,7 +189,7 @@ export default function UserManage() {
               rows={models}
               columns={[
                 { key: 'id', title: 'ID', width: 60 },
-                { key: 'model_name', title: '模型名称' },
+                { key: 'model_name', title: '模型名' },
                 { key: 'api_key', title: 'API Key', render: (v) => (v ? v.substring(0, 8) + '****' : '-') },
                 { key: 'status', title: '状态', render: (v) => <span><span className={`status-dot ${v === 2 ? 'status-off' : 'status-on'}`} />{v === 2 ? '禁用' : '启用'}</span> },
                 {
@@ -266,7 +266,7 @@ export default function UserManage() {
           }
         >
           <label className="field"><span>所属用户</span><input value={modelForm.user_name} disabled /></label>
-          <label className="field"><span>模型名称</span>
+          <label className="field"><span>模型名</span>
             <input value={modelForm.model_name} placeholder="8-64位" onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} />
           </label>
         </Modal>

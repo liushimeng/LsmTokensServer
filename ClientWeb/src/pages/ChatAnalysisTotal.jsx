@@ -219,7 +219,7 @@ export default function ChatAnalysisTotal({ route }) {
       })
       setDoneInfo({ elapsed_ms: null, http_fallback: true })
     } catch (e) {
-      setError(e.message || '统计查询失败')
+      setError(e.message || '查询失败')
     } finally { setRunning(false); setProgress('') }
   }
 
@@ -261,7 +261,7 @@ export default function ChatAnalysisTotal({ route }) {
 
   return (
     <div className="page">
-      <h2 className="page-title">对话汇总统计</h2>
+      <h2 className="page-title">汇总统计</h2>
 
       <div className="toolbar">
         {isAdmin ? <label>用户名
@@ -278,10 +278,10 @@ export default function ChatAnalysisTotal({ route }) {
         </label>
         <label>时间跨度
           <select value={days} onChange={(e) => { const d = Number(e.target.value); setDays(d); setStages({}); setDoneInfo(null); if (!running) runQuery(d) }}>
-            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近 ${d} 天`}</option>)}
+            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近${d}天`}</option>)}
           </select>
         </label>
-        <button className="btn btn-primary" onClick={() => runQuery()} disabled={running}>查询统计</button>
+        <button className="btn btn-primary" onClick={() => runQuery()} disabled={running}>查询</button>
         {running ? <button className="btn" onClick={() => { stopQuery(); setRunning(false); setProgress('') }}>取消</button> : null}
         {running || progress ? <span style={{ color: 'var(--muted)', fontSize: 13 }}>{running ? (progress || '统计中…') : progress}</span> : null}
       </div>
@@ -333,14 +333,14 @@ export default function ChatAnalysisTotal({ route }) {
               columns={[
                 { key: 'date', title: '日期' },
                 { key: 'count', title: '次数', render: fmtNum },
-                { key: 'tokens_input', title: '输入', render: fmtNum },
-                { key: 'tokens_output', title: '输出', render: fmtNum },
-                { key: 'tokens_total', title: '合计', render: fmtNum },
+                { key: 'tokens_input', title: '输入 Tokens', render: fmtNum },
+                { key: 'tokens_output', title: '输出 Tokens', render: fmtNum },
+                { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
                 { key: 'avg_elapsed_ms', title: '平均耗时', render: fmtMs },
               ]}
               rows={ts.buckets || []} empty="暂无数据" />
           </>
-        ) : <div className="table-empty">等待数据…</div>}
+        ) : <div className="table-empty">暂无数据</div>}
       </div>
 
       {/* 维度 4：源站模型分布 */}
@@ -351,14 +351,14 @@ export default function ChatAnalysisTotal({ route }) {
             { key: 'model_name', title: '源站模型' },
             { key: 'call_count', title: '调用次数', render: fmtNum },
             { key: 'call_share', title: '调用占比', render: (v) => (v != null ? (v * 100).toFixed(2) + '%' : '-') },
-            { key: 'tokens_input', title: '输入Tok', render: fmtNum },
-            { key: 'tokens_output', title: '输出Tok', render: fmtNum },
-            { key: 'tokens_total', title: '总Tok', render: fmtNum },
-            { key: 'token_share', title: 'Tok占比', render: (v) => (v != null ? (v * 100).toFixed(2) + '%' : '-') },
+            { key: 'tokens_input', title: '输入 Tokens', render: fmtNum },
+            { key: 'tokens_output', title: '输出 Tokens', render: fmtNum },
+            { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
+            { key: 'token_share', title: 'Token 占比', render: (v) => (v != null ? (v * 100).toFixed(2) + '%' : '-') },
             { key: 'dst_endpoint_count', title: '源站数', render: (v) => fmtNum(v) },
             { key: 'top_dst_endpoints', title: 'Top 源站', render: (v) => (v || []).map((e) => `#${e.dst_endpoint_id}(${fmtNum(e.call_count)})`).join('、') || '-' },
           ]}
-          rows={modelDist} empty="等待数据…" />
+          rows={modelDist} empty="暂无数据" />
       </div>
 
       {/* 维度 2：时间分布 */}
@@ -371,7 +371,7 @@ export default function ChatAnalysisTotal({ route }) {
               <span title={fmtNum(v)}>{v > 0 ? '█'.repeat(Math.min(30, Math.max(1, Math.round(v / Math.max(1, Math.max(...timeStats.map((x) => x.count))) * 30)))) + ' ' + fmtNum(v) : fmtNum(v)}</span>
             ) },
           ]}
-          rows={timeStats} empty="等待数据…" />
+          rows={timeStats} empty="暂无数据" />
       </div>
 
       {/* 维度 5：用量趋势 */}
@@ -381,11 +381,11 @@ export default function ChatAnalysisTotal({ route }) {
           columns={[
             { key: 'date', title: '日期' },
             { key: 'count', title: '次数', render: fmtNum },
-            { key: 'tokens_input', title: '输入Tok', render: fmtNum },
-            { key: 'tokens_output', title: '输出Tok', render: fmtNum },
-            { key: 'tokens_total', title: '总Tok', render: fmtNum },
+            { key: 'tokens_input', title: '输入 Tokens', render: fmtNum },
+            { key: 'tokens_output', title: '输出 Tokens', render: fmtNum },
+            { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
           ]}
-          rows={trend} empty="等待数据…" />
+          rows={trend} empty="暂无数据" />
       </div>
 
       {/* 区间报告（v2.0.46：ChatAnalysisTotalRangeInterface?stream=1 SSE 流式） */}
@@ -442,9 +442,9 @@ export default function ChatAnalysisTotal({ route }) {
                     columns={[
                       { key: 'date', title: '时间' },
                       { key: 'count', title: '次数', render: fmtNum },
-                      { key: 'tokens_input', title: '输入Tok', render: fmtNum },
-                      { key: 'tokens_output', title: '输出Tok', render: fmtNum },
-                      { key: 'tokens_total', title: '总Tok', render: fmtNum },
+                      { key: 'tokens_input', title: '输入 Tokens', render: fmtNum },
+                      { key: 'tokens_output', title: '输出 Tokens', render: fmtNum },
+                      { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
                     ]}
                     rows={r.series || []} empty="暂无数据" />
                   <h4 style={{ margin: '10px 0 6px' }}>模型分布</h4>
@@ -452,7 +452,7 @@ export default function ChatAnalysisTotal({ route }) {
                     columns={[
                       { key: 'model_name', title: '模型' },
                       { key: 'call_count', title: '调用次数', render: fmtNum },
-                      { key: 'tokens_total', title: '总Tok', render: fmtNum },
+                      { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
                     ]}
                     rows={r.model_dist || []} empty="暂无数据" />
                   <h4 style={{ margin: '10px 0 6px' }}>延迟分布</h4>
@@ -505,7 +505,7 @@ export default function ChatAnalysisTotal({ route }) {
             <DataTable columns={[{ key: 'k', title: '状态码' }, { key: 'v', title: '次数', render: fmtNum }]}
                        rows={Object.entries(proto.status_stats || {}).map(([k, v]) => ({ k, v }))} empty="暂无数据" />
           </>
-        ) : <div className="table-empty">等待数据…</div>}
+        ) : <div className="table-empty">暂无数据</div>}
       </div>
 
       {/* 维度 7：Agent 工具统计 */}
@@ -527,7 +527,7 @@ export default function ChatAnalysisTotal({ route }) {
               ]}
               rows={agent.tool_stats || []} empty="暂无数据" />
           </>
-        ) : <div className="table-empty">等待数据…</div>}
+        ) : <div className="table-empty">暂无数据</div>}
       </div>
     </div>
   )

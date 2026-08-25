@@ -9,11 +9,11 @@ import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/form
 // 对话明细查询页（管理端 /ChatAnalysisInterface）
 // 支持多条件筛选 + 分页 + 单条详情（按需拉取大字段）+ 批量删除
 const DAYS_OPTIONS = [
-  { v: 0, t: '全部时间' }, { v: -1, t: '最近 1 小时' }, { v: -2, t: '最近 2 小时' },
-  { v: -4, t: '最近 4 小时' }, { v: -6, t: '最近 6 小时' }, { v: -12, t: '最近 12 小时' },
-  { v: 1, t: '最近 1 天' }, { v: 3, t: '最近 3 天' }, { v: 5, t: '最近 5 天' },
-  { v: 7, t: '最近 7 天' }, { v: 14, t: '最近 14 天' }, { v: 30, t: '最近 30 天' },
-  { v: 60, t: '最近 60 天' }, { v: 90, t: '最近 90 天' },
+  { v: 0, t: '全部时间' }, { v: -1, t: '最近1小时' }, { v: -2, t: '最近2小时' },
+  { v: -4, t: '最近4小时' }, { v: -6, t: '最近6小时' }, { v: -12, t: '最近12小时' },
+  { v: 1, t: '最近1天' }, { v: 3, t: '最近3天' }, { v: 5, t: '最近5天' },
+  { v: 7, t: '最近7天' }, { v: 14, t: '最近14天' }, { v: 30, t: '最近30天' },
+  { v: 60, t: '最近60天' }, { v: 90, t: '最近90天' },
 ]
 const PAGE_SIZES = [3, 5, 10, 15, 20, 50, 100]
 // 详情字段白名单（服务端 chatAnalysisDetailFieldColumns 一致）
@@ -158,8 +158,8 @@ export default function ChatAnalysis({ route }) {
   // 查询（modelOverride 用于自动查询时规避 setState 异步）
   const doQuery = async (p = page, modelOverride) => {
     const mn = (modelOverride !== undefined ? modelOverride : modelName).trim()
-    if (!isAdmin && !mn) { setError('请先填写模型名'); return }
-    if (isAdmin && (userName.trim() === '' || mn === '')) { setError('请先填写用户名和模型名'); return }
+    if (!isAdmin && !mn) { setError('请先选择模型'); return }
+    if (isAdmin && (userName.trim() === '' || mn === '')) { setError('请先选择用户名和模型名'); return }
     setLoading(true); setError(''); setOkMsg(''); setSelected([])
     try {
       const d = await post('ChatAnalysisInterface', {
@@ -204,7 +204,7 @@ export default function ChatAnalysis({ route }) {
   // 批量删除（最多 500 条/次，服务端限制）
   const batchDelete = async () => {
     if (!selected.length) return
-    if (!window.confirm(`确认删除选中的 ${selected.length} 条对话记录？删除后不可恢复。`)) return
+    if (!window.confirm(`确认删除选中的 ${selected.length} 条对话记录？此操作不可恢复！`)) return
     setDeleting(true); setError(''); setOkMsg('')
     try {
       const d = await post('ChatAnalysisBatchDeleteInterface', {
@@ -238,8 +238,8 @@ export default function ChatAnalysis({ route }) {
       return <span style={{ color: ok ? 'var(--ok)' : 'var(--danger)' }}>{v || '-'}</span>
     } },
     { key: 'dst_model_name', title: '目标模型' },
-    { key: 'tokens_input_size', title: '输入Tok', render: (v) => fmtNum(v) },
-    { key: 'tokens_output_size', title: '输出Tok', render: (v) => fmtNum(v) },
+    { key: 'tokens_input_size', title: '输入 Tokens', render: (v) => fmtNum(v) },
+    { key: 'tokens_output_size', title: '输出 Tokens', render: (v) => fmtNum(v) },
     { key: 'elapsed_ms', title: '耗时', render: (v) => fmtMs(v) },
     { key: 'agent_tool_name', title: 'Agent工具', render: (v) => v || '-' },
     { key: 'actions', title: '操作', render: (_, r) => (
@@ -298,12 +298,12 @@ export default function ChatAnalysis({ route }) {
         <label className="field-check" style={{ margin: 0 }}>
           <input type="checkbox" checked={filterStatusNot} onChange={(e) => setFilterStatusNot(e.target.checked)} />取反
         </label>
-        <label>输入Tok
+        <label>输入 Tokens
           <select value={filterInTok} onChange={(e) => setFilterInTok(Number(e.target.value))}>
             <option value={0}>全部</option><option value={1}>非零</option><option value={2}>为零</option>
           </select>
         </label>
-        <label>输出Tok
+        <label>输出 Tokens
           <select value={filterOutTok} onChange={(e) => setFilterOutTok(Number(e.target.value))}>
             <option value={0}>全部</option><option value={1}>非零</option><option value={2}>为零</option>
           </select>
@@ -319,11 +319,11 @@ export default function ChatAnalysis({ route }) {
       {error ? <div className="alert alert-error">{error}</div> : null}
       {okMsg ? <div className="alert alert-ok">{okMsg}</div> : null}
 
-      <DataTable columns={columns} rows={rows} loading={loading} rowKey="id" empty="暂无对话记录（需填写用户名 + 模型名后查询）" />
+      <DataTable columns={columns} rows={rows} loading={loading} rowKey="id" empty="暂无数据（需选择用户名 + 模型名后查询）" />
 
       {totalPages > 0 ? (
         <div className="pager">
-          <span>共 {fmtNum(total)} 条 / {totalPages} 页</span>
+          <span>共 {fmtNum(total)} 条 · 第 {page} / {totalPages} 页</span>
           <button className="btn btn-sm" disabled={page <= 1 || loading} onClick={() => doQuery(page - 1)}>上一页</button>
           <span>第 {page} / {totalPages} 页</span>
           <button className="btn btn-sm" disabled={page >= totalPages || loading} onClick={() => doQuery(page + 1)}>下一页</button>

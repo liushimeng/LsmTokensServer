@@ -33,8 +33,8 @@ export default function ChatAnalysisTask({ route }) {
 
   const doQuery = async (modelOverride) => {
     const mn = (modelOverride !== undefined ? modelOverride : modelName).trim()
-    if (isAdmin && userName.trim() === '') { setError('请先填写用户名'); return }
-    if (!mn) { setError('请先填写模型名'); return }
+    if (isAdmin && userName.trim() === '') { setError('请先选择用户'); return }
+    if (!mn) { setError('请先选择模型'); return }
     setLoading(true); setError(''); setPage(1)
     try {
       const d = await post('ChatAnalysisTaskInterface', {
@@ -42,7 +42,7 @@ export default function ChatAnalysisTask({ route }) {
       })
       setData(d.data || {})
     } catch (e) {
-      setError(e.message || '分析失败')
+      setError(e.message || '查询失败')
     } finally { setLoading(false) }
   }
 
@@ -88,7 +88,7 @@ export default function ChatAnalysisTask({ route }) {
 
   return (
     <div className="page">
-      <h2 className="page-title">任务 / 工具调用分析</h2>
+      <h2 className="page-title">任务分析</h2>
 
       <div className="toolbar">
         {isAdmin ? <label>用户名
@@ -105,10 +105,10 @@ export default function ChatAnalysisTask({ route }) {
         </label>
         <label>时间跨度
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近 ${d} 天`}</option>)}
+            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近${d}天`}</option>)}
           </select>
         </label>
-        <button className="btn btn-primary" onClick={doQuery} disabled={loading}>分析</button>
+        <button className="btn btn-primary" onClick={doQuery} disabled={loading}>查询</button>
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
@@ -138,13 +138,12 @@ export default function ChatAnalysisTask({ route }) {
       ) : null}
 
       <DataTable columns={columns} rows={pageRows} loading={loading} rowKey="id"
-                 empty="暂无任务数据（需填写用户名 + 模型名后分析）" />
+                 empty="暂无数据（需选择用户名 + 模型名后查询）" />
 
       {tasks.length > 0 ? (
         <div className="pager">
-          <span>共 {fmtNum(tasks.length)} 个任务 / {totalPages} 页</span>
+          <span>共 {fmtNum(tasks.length)} 条 · 第 {page} / {totalPages} 页</span>
           <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
-          <span>第 {page} / {totalPages} 页</span>
           <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
         </div>
       ) : null}

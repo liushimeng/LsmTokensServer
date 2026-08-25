@@ -96,7 +96,7 @@ export default function SpiderDailyInfo(props) {
   }
 
   const deleteInfo = async (id) => {
-    if (!confirm('确定要删除这条记录吗？')) return
+    if (!confirm('确认删除这条记录？此操作不可恢复！')) return
     try {
       await post('SpiderDailyInfoInterface', { action: 'delete', id })
       setSelected((s) => { const n = new Set(s); n.delete(id); return n })
@@ -106,7 +106,7 @@ export default function SpiderDailyInfo(props) {
 
   const batchDelete = async () => {
     if (!selected.size) { alert('请先选择要删除的记录'); return }
-    if (!confirm('确定要删除选中的 ' + selected.size + ' 条记录吗？')) return
+    if (!confirm('确认删除选中的 ' + selected.size + ' 条记录？此操作不可恢复！')) return
     try {
       await post('SpiderDailyInfoInterface', { action: 'batch_delete', items: [...selected].map((id) => ({ id })) })
       setSelected(new Set())

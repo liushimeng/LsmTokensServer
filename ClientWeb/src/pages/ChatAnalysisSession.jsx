@@ -33,8 +33,8 @@ export default function ChatAnalysisSession({ route }) {
 
   const doQuery = async (modelOverride) => {
     const mn = (modelOverride !== undefined ? modelOverride : modelName).trim()
-    if (isAdmin && userName.trim() === '') { setError('请先填写用户名'); return }
-    if (!mn) { setError('请先填写模型名'); return }
+    if (isAdmin && userName.trim() === '') { setError('请先选择用户'); return }
+    if (!mn) { setError('请先选择模型'); return }
     setLoading(true); setError(''); setPage(1)
     try {
       const d = await post('ChatAnalysisSessionInterface', {
@@ -42,7 +42,7 @@ export default function ChatAnalysisSession({ route }) {
       })
       setData(d.data || {})
     } catch (e) {
-      setError(e.message || '分析失败')
+      setError(e.message || '查询失败')
     } finally { setLoading(false) }
   }
 
@@ -71,9 +71,9 @@ export default function ChatAnalysisSession({ route }) {
     { key: 'duration_min', title: '时长(分)', render: (v) => Number(v || 0).toFixed(1) },
     { key: 'request_count', title: '请求数', render: fmtNum },
     { key: 'task_count', title: '任务数', render: fmtNum },
-    { key: 'tokens_input_size', title: '输入Tok', render: fmtNum },
-    { key: 'tokens_output_size', title: '输出Tok', render: fmtNum },
-    { key: 'tokens_all_size', title: '总Tok', render: fmtNum },
+    { key: 'tokens_input_size', title: '输入 Tokens', render: fmtNum },
+    { key: 'tokens_output_size', title: '输出 Tokens', render: fmtNum },
+    { key: 'tokens_all_size', title: '总 Tokens', render: fmtNum },
     { key: 'models', title: '模型', render: (v) => (v || []).join('、') || '-' },
     { key: 'is_stream', title: '流式', render: (v) => (v ? '是' : '否') },
     { key: 'has_tool_call', title: '工具调用', render: (v) => (v ? '有' : '无') },
@@ -102,10 +102,10 @@ export default function ChatAnalysisSession({ route }) {
         </label>
         <label>时间跨度
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近 ${d} 天`}</option>)}
+            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近${d}天`}</option>)}
           </select>
         </label>
-        <button className="btn btn-primary" onClick={doQuery} disabled={loading}>分析</button>
+        <button className="btn btn-primary" onClick={doQuery} disabled={loading}>查询</button>
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
@@ -121,13 +121,12 @@ export default function ChatAnalysisSession({ route }) {
       ) : null}
 
       <DataTable columns={columns} rows={pageRows} loading={loading} rowKey="session_id"
-                 empty="暂无会话数据（需填写用户名 + 模型名后分析）" />
+                 empty="暂无数据（需选择用户名 + 模型名后查询）" />
 
       {sessions.length > 0 ? (
         <div className="pager">
-          <span>共 {fmtNum(sessions.length)} 个会话 / {totalPages} 页</span>
+          <span>共 {fmtNum(sessions.length)} 条 · 第 {page} / {totalPages} 页</span>
           <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
-          <span>第 {page} / {totalPages} 页</span>
           <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
         </div>
       ) : null}
@@ -140,7 +139,7 @@ export default function ChatAnalysisSession({ route }) {
             <dt>请求数 / 任务数</dt><dd>{fmtNum(detail.request_count)} / {fmtNum(detail.task_count)}</dd>
             <dt>平均耗时</dt><dd>{fmtMs(detail.avg_elapsed_ms)}（总 {fmtMs(detail.total_elapsed_ms)}）</dd>
             <dt>流量</dt><dd>请求 {fmtBytes(detail.total_req_size)} / 响应 {fmtBytes(detail.total_resp_size)}</dd>
-            <dt>Tokens</dt><dd>输入 {fmtNum(detail.tokens_input_size)} / 输出 {fmtNum(detail.tokens_output_size)} / 合计 {fmtNum(detail.tokens_all_size)}</dd>
+            <dt>Tokens</dt><dd>输入 Tokens {fmtNum(detail.tokens_input_size)} / 输出 Tokens {fmtNum(detail.tokens_output_size)} / 总 Tokens {fmtNum(detail.tokens_all_size)}</dd>
             <dt>使用模型</dt><dd>{(detail.models || []).join('、') || '-'}</dd>
             <dt>特征</dt><dd>{detail.has_system_prompt ? '含系统提示词 ' : ''}{detail.has_tool_call ? '含工具调用 ' : ''}{detail.is_stream ? '流式' : '非流式'}</dd>
             <dt>来源地址</dt><dd>{detail.remote_addr || '-'}</dd>

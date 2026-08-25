@@ -7,7 +7,7 @@ import DataTable from '../components/DataTable'
 
 const PAGE_SIZE = 20
 const DAYS_OPTIONS = [7, 30, 90, 0]
-const daysLabel = (d) => (d === 0 ? '无限制' : '最近' + d + '天')
+const daysLabel = (d) => (d === 0 ? '全部时间' : '最近' + d + '天')
 function normalizeDays(v) {
   const n = parseInt(v, 10)
   return DAYS_OPTIONS.includes(n) ? n : 30
@@ -141,7 +141,7 @@ export default function CleanupReport() {
           {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{daysLabel(d)}</option>)}
         </select>
         <button className="btn btn-primary" disabled={loading} onClick={() => { setPage(1); loadData(1, days); loadState(); loadTables() }}>
-          {loading ? '加载中…' : '刷新报告'}
+          {loading ? '加载中…' : '刷新'}
         </button>
         {state ? (
           <span>
@@ -155,7 +155,7 @@ export default function CleanupReport() {
         <span>保留天数：{retention}</span>
       </div>
       {error ? <div className="alert alert-error">加载失败：{error}</div> : null}
-      {loading ? <div className="table-loading">正在加载清理报告…</div> : null}
+      {loading ? <div className="table-loading">加载中…</div> : null}
 
       {!loading && !error ? (
         <>
@@ -163,7 +163,7 @@ export default function CleanupReport() {
             <div className="card"><h3>累计删除条数</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.total_deleted_rows)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>所有清理任务累计</div></div>
             <div className="card"><h3>累计释放磁盘空间</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtBytes(summary.total_freed_bytes)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>来自 information_schema.DATA_FREE</div></div>
             <div className="card"><h3>累计回收 Tokens</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.total_tokens_all)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>输入 + 输出 累计</div></div>
-            <div className="card"><h3>当前保留天数配置</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{retention}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>超过该天数的浏览记录将被自动删除</div></div>
+            <div className="card"><h3>当前保留天数配置</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{retention}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>超过该天数的对话记录将被自动删除</div></div>
           </div>
 
           {daily.length ? (

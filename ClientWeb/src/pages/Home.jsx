@@ -56,12 +56,12 @@ export default function Home() {
                   Key: {maskKey(m.api_key || m.key)}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  <a className="btn btn-sm" href={`#/ChatAnalysis?model_name=${encodeURIComponent(mn)}`}>浏览记录</a>
-                  <a className="btn btn-sm" href={`#/ChatAnalysisTotal?model_name=${encodeURIComponent(mn)}`}>统计</a>
-                  <a className="btn btn-sm" href={`#/ChatAnalysisSession?model_name=${encodeURIComponent(mn)}`}>Session</a>
-                  <a className="btn btn-sm" href={`#/ChatAnalysisTask?model_name=${encodeURIComponent(mn)}`}>Task</a>
+                  <a className="btn btn-sm" href={`#/ChatAnalysis?model_name=${encodeURIComponent(mn)}`}>对话明细分析</a>
+                  <a className="btn btn-sm" href={`#/ChatAnalysisTotal?model_name=${encodeURIComponent(mn)}`}>汇总统计</a>
+                  <a className="btn btn-sm" href={`#/ChatAnalysisSession?model_name=${encodeURIComponent(mn)}`}>会话分析</a>
+                  <a className="btn btn-sm" href={`#/ChatAnalysisTask?model_name=${encodeURIComponent(mn)}`}>任务分析</a>
                   <a className="btn btn-sm" href={`#/ChatDialog?model_name=${encodeURIComponent(mn)}`}>对话</a>
-                  <a className="btn btn-sm" href="#/AIRouteManage">智能路由</a>
+                  <a className="btn btn-sm" href="#/AIRouteManage">路由管理</a>
                 </div>
               </div>
             )

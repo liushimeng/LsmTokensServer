@@ -42,7 +42,7 @@ export default function SpiderDataSource() {
       setRows(d.data || [])
     } catch (e) {
       setRows([])
-      setErr('加载失败: ' + e.message)
+      setErr('加载失败：' + e.message)
     }
   }
 
@@ -160,7 +160,7 @@ export default function SpiderDataSource() {
     <div className="page">
       <h2 className="page-title">爬虫数据源管理</h2>
       <div className="toolbar">
-        <button className="btn btn-primary" onClick={() => setEditing({ ...EMPTY_FORM })}>新增数据源</button>
+        <button className="btn btn-primary" onClick={() => setEditing({ ...EMPTY_FORM })}>+ 添加数据源</button>
         <button className="btn" onClick={load}>刷新</button>
         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
           爬取通过 OpenClaw AI 多轮交互完成，最长 15 分钟；同一用户同时仅允许一个任务。
@@ -172,7 +172,7 @@ export default function SpiderDataSource() {
 
       {/* 新增/编辑弹窗 */}
       {editing && (
-        <Modal title={editing.id ? `编辑数据源 #${editing.id}` : '新增数据源'}
+        <Modal title={editing.id ? `编辑数据源 #${editing.id}` : '添加数据源'}
                onClose={() => setEditing(null)}
                footer={<>
                  <button className="btn" onClick={() => setEditing(null)}>取消</button>

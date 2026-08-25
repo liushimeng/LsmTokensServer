@@ -81,15 +81,15 @@ function UserLogDialog({ onClose }) {
              <button className="btn btn-sm" disabled={!data || !data.has_more} onClick={() => setPage(page + 1)}>下一页</button>
            </>}>
       <div className="toolbar">
-        <input style={{ flex: 1 }} value={input} placeholder="关键词搜索…"
+        <input style={{ flex: 1 }} value={input} placeholder="关键词查询…"
                onChange={(e) => setInput(e.target.value)}
                onKeyDown={(e) => { if (e.key === 'Enter') { setKeyword(input); setPage(1) } }} />
-        <button className="btn btn-sm btn-primary" onClick={() => { setKeyword(input); setPage(1) }}>搜索</button>
-        {keyword ? <button className="btn btn-sm" onClick={() => { setKeyword(''); setInput(''); setPage(1) }}>清除</button> : null}
+        <button className="btn btn-sm btn-primary" onClick={() => { setKeyword(input); setPage(1) }}>查询</button>
+        {keyword ? <button className="btn btn-sm" onClick={() => { setKeyword(''); setInput(''); setPage(1) }}>重置</button> : null}
       </div>
       {err ? <div className="alert alert-error">{err}</div> : null}
       {data && data.is_search && (
-        <p style={{ fontSize: 12, color: 'var(--muted)' }}>搜索「{data.search_keyword}」匹配 {data.match_count} 条（总 {data.count} 条）</p>
+        <p style={{ fontSize: 12, color: 'var(--muted)' }}>查询「{data.search_keyword}」匹配 {data.match_count} 条（总 {data.count} 条）</p>
       )}
       {data && data.lines && data.lines.length ? (
         <div className="log-box">{data.lines.join('\n')}</div>
