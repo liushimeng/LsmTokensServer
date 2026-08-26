@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { get, post } from '../shared/api'
 import { saveCredentials, loadCredentials, clearCredentials } from '../shared/auth'
 
@@ -13,21 +13,27 @@ export default function Login() {
   const [error, setError] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [busy, setBusy] = useState(false)
+  // 阶段AO：组件卸载后 setState 静默丢弃，避免 React StrictMode 双调用或路由切换时的
+  // "Can't perform a React state update on an unmounted component" warning。
+  const aliveRef = useRef(true)
 
   const refreshCaptcha = async () => {
     try {
       const d = await get('CaptchaGenerate')
+      if (!aliveRef.current) return
       if (d.success) { setCaptchaId(d.captcha_id); setCaptchaUrl(d.image_url) }
     } catch { /* 忽略 */ }
   }
 
   useEffect(() => {
+    aliveRef.current = true
     refreshCaptcha()
     // v2 安全加固：记住我只回填模型名称，API Key 不再本地存储
     const creds = loadCredentials()
     if (creds && creds.modelName) {
       setModelName(creds.modelName); setRemember(true)
     }
+    return () => { aliveRef.current = false }
   }, [])
 
   const submit = async (e) => {

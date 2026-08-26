@@ -67,9 +67,12 @@ export default function App() {
         if (!alive) return
         setUserInfo({ ...((d && d.data) || d), loaded: true, isAdmin: __APP_ROLE__ === 'manager' })
       })
-      .catch(() => {
+      .catch((err) => {
         if (!alive) return
-        // 登录态失效：401 时 api.js 已按构建角色跳转，这里兜底处理其他失败（含网络超时）
+        // 阶段AO：401 时 api.js 已按构建角色跳转（详见 shared/api.js），这里不重复跳转避免竞态；
+        // 仅兜底处理 401 之外的失败（网络错误、超时、服务异常、5xx 等）。
+        const is401 = err && typeof err.message === 'string' && /^HTTP 401\b/.test(err.message)
+        if (is401) return
         if (__APP_ROLE__ === 'manager') { window.location.href = baseUrl() + 'ManagerLogin'; return }
         // 强制完整跳转 + reload，避免仅改 hash 导致页面残留破损状态
         window.location.hash = '#/Login'

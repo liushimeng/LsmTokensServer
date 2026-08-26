@@ -11,6 +11,7 @@ package api
 // 未配置时所有管理端业务接口默认拒绝（不提供任何默认账号，避免默认口令后门）。
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lishimeng/LsmTokensServer/config"
 	"github.com/lishimeng/LsmTokensServer/logger"
+	"github.com/lishimeng/LsmTokensServer/websocket"
 )
 
 const (
@@ -180,7 +182,7 @@ func isManagerAPIPath(path string) bool {
 	if strings.HasSuffix(path, "Interface") || strings.HasSuffix(path, "WS") {
 		return true
 	}
-	if path == "/CaptchaGenerate" || path == "/CaptchaAudio" {
+	if path == "/CaptchaGenerate" {
 		return true
 	}
 	if strings.HasPrefix(path, "/ProtocolConvertAnalyzer") {
@@ -196,7 +198,14 @@ func ManagerAuthMiddleware(next http.Handler) http.Handler {
 	// 即为鉴权边界，本服务不再叠加管理端 JWT。默认 false，安全红线不变。
 	if config.G != nil && config.G.Security.ManagerWebAuthDisabled {
 		logger.Printf("[SECURITY] managerWebAuthDisabled=true：管理端 Web 鉴权已关闭（信任网关侧鉴权），全量放行")
-		return next
+		// 阶段AO：网关代理模式仍须向 WS handler 写入 manager 角色 context，否则 WS 升级会 401 拒绝。
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r = r.WithContext(context.WithValue(r.Context(), websocket.AuthClaimsContextKey{}, &websocket.AuthClaims{
+				Role:      websocket.WsRoleManager,
+				LoginType: "manager",
+			}))
+			next.ServeHTTP(w, r)
+		})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// v2.0.74 阶段AL：超级管理员禁用态 → 数据接口直接 503。
@@ -258,6 +267,14 @@ func ManagerAuthMiddleware(next http.Handler) http.Handler {
 			json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: "未登录或登录已过期"})
 			return
 		}
+
+		// 阶段AO：把管理员鉴权结果写入 r.Context()，供 WebSocket handler 识别调用者角色。
+		// 与 userAuthMiddleware 对称，避免 WS 升级握手时反查 JWT 引入循环依赖。
+		r = r.WithContext(context.WithValue(r.Context(), websocket.AuthClaimsContextKey{}, &websocket.AuthClaims{
+			Role:        websocket.WsRoleManager,
+			ManagerName: claims.ManagerName,
+			LoginType:   claims.LoginType,
+		}))
 
 		next.ServeHTTP(w, r)
 	})

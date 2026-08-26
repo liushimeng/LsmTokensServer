@@ -47,6 +47,47 @@ type wsConn struct {
 	// 切换本平台模型时 stage 4 数据必须随之变化（用户反馈的核心痛点）。
 	ctxUserName  string
 	ctxModelName string
+	// 阶段AO：WS 升级握手阶段解析出的角色（user / manager / none），
+	// 供 runChatStatsQuery 在用户端限定「仅本人数据」，管理端保持全站聚合语义。
+	ctxRole wsRole
+}
+
+// wsRole WS 鉴权角色（升级握手阶段解析）
+type wsRole int
+
+// 导出常量供 api 鉴权中间件构造 *AuthClaims 写入 context。
+const (
+	WsRoleNone    wsRole = 0 // 未登录/拒绝
+	WsRoleUser    wsRole = 1 // 用户端 JWT（lsm_user_token）
+	WsRoleManager wsRole = 2 // 管理端 JWT（lsm_manager_token）
+)
+
+// AuthClaimsContextKey 阶段AO：暴露给 api 鉴权中间件的 context key——
+// userAuthMiddleware / ManagerAuthMiddleware 在通过鉴权后把 claims 写入
+// r.Context()，WS handler 直接读出，无须重复解析 JWT。导出类型用于跨包 context.Value。
+type AuthClaimsContextKey struct{}
+
+// AuthClaims 跨包传递的鉴权 claims（由 api 包构造，写入 context，WS handler 读出）。
+// api → websocket 是合法的单向依赖（routes.go 已 import websocket），故本结构可暴露给 api。
+type AuthClaims struct {
+	Role        wsRole
+	UserID      uint64
+	UserName    string
+	ManagerName string
+	ModelName   string // 模型登录时填充
+	LoginType   string // "user" / "model" / "manager"
+}
+
+// authClaimsFromCtx 从 ctx 取出鉴权 claims。api 中间件不写入则返回 nil。
+func authClaimsFromCtx(ctx context.Context) *AuthClaims {
+	if ctx == nil {
+		return nil
+	}
+	v := ctx.Value(AuthClaimsContextKey{})
+	if c, ok := v.(*AuthClaims); ok {
+		return c
+	}
+	return nil
 }
 
 // chatStatsHub /ChatAnalysisTotalWS 全局 Hub

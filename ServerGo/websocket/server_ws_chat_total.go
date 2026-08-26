@@ -94,6 +94,26 @@ type wsPongFrame struct {
 
 // ChatAnalysisTotalWSHandle HTTP handler 入口；注册到 /ChatAnalysisTotalWS
 func ChatAnalysisTotalWSHandle(w http.ResponseWriter, r *http.Request) {
+	// 阶段AO：WS 升级握手阶段读取鉴权结果（由 userAuthMiddleware / ManagerAuthMiddleware 提前写入 context）。
+	// userAuthMiddleware / ManagerAuthMiddleware 已在外层校验 JWT 并把 *AuthClaims 写入
+	// websocket.AuthClaimsContextKey；未登录/失败请求会被中间件提前 401 拒绝，根本不会到这里。
+	// 这里再读一次做"防御性校验"——若新部署忘记挂中间件或新增 mux 漏挂，WS 不会暴露全站数据。
+	// 例外：security.managerWebAuthDisabled=true 时 ManagerAuthMiddleware 直通 next 不会写 context，
+	// 该模式下网关侧已鉴权，本端全放行；运行时按 header X-Forwarded-* 判定为 manager 角色。
+	auth := authClaimsFromCtx(r.Context())
+	if auth == nil {
+		// 中间件未写 context：仅当 managerWebAuthDisabled 网关代理模式才允许放行（按 URL 端口/路径前缀判定）。
+		// 这里采用更严格的策略——默认拒绝并要求中间件必须挂上。若管理员 Web 部署在网关后，
+		// 网关侧须自行保证鉴权 + 本工程保持 401 即可保证 WS 不暴露。
+		// 注：生产环境 managerWebAuthDisabled 模式通常用于纯内网网关+本服务全放行的场景，
+		// 不存在中间件写 context 但 WS 需要识别角色的需求，因此默认拒绝是更安全的语义。
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if auth.Role == WsRoleNone {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	// Hub 超限 → 503；upgrader 自身失败也会写响应（400/426 等），我们直接 return
 	if chatStatsHub.count() >= int64(config.CHAT_STATS_MAX_CONNS) {
 		http.Error(w, "chat stats hub is full", http.StatusServiceUnavailable)
@@ -105,6 +125,11 @@ func ChatAnalysisTotalWSHandle(w http.ResponseWriter, r *http.Request) {
 	// 模型时数据完全不变（用户反馈的现象）。
 	wsUserName := strings.TrimSpace(r.URL.Query().Get("user_name"))
 	wsModelName := strings.TrimSpace(r.URL.Query().Get("model_name"))
+	// 阶段AO：用户端连接必须用 JWT claims 中的 user_name 覆盖 URL 参数，避免横向越权（用户改 URL 即可查他人数据）。
+	if auth.Role == WsRoleUser {
+		wsUserName = auth.UserName
+		// model_name 用户端可选（按本人某模型聚合），不做强制——保留 URL 参数以便页面按模型切换。
+	}
 	conn, err := chatStatsHub.upgrade(w, r)
 	if err != nil {
 		// upgrade 失败（Hub 满或握手失败）已写响应
@@ -119,6 +144,7 @@ func ChatAnalysisTotalWSHandle(w http.ResponseWriter, r *http.Request) {
 		remoteAddr:   r.RemoteAddr,
 		ctxUserName:  wsUserName,
 		ctxModelName: wsModelName,
+		ctxRole:      auth.Role,
 	}
 	chatStatsHub.register(wc)
 

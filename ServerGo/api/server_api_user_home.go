@@ -12,12 +12,8 @@ func userInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	setNoCacheHeaders(w)
 
-	claims := getUserToken(r)
-	if claims.UserID == 0 {
-		json.NewEncoder(w).Encode(userLoginResp{
-			Success: false,
-			Message: "未登录",
-		})
+	claims, ok := requireUserClaimsOr401(w, r)
+	if !ok {
 		return
 	}
 
@@ -45,12 +41,8 @@ func userModelListInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims := getUserToken(r)
-	if claims.UserID == 0 {
-		json.NewEncoder(w).Encode(userLoginResp{
-			Success: false,
-			Message: "未登录",
-		})
+	claims, ok := requireUserClaimsOr401(w, r)
+	if !ok {
 		return
 	}
 

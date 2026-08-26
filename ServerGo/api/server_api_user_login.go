@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/dchest/captcha"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/lishimeng/LsmTokensServer/websocket"
 )
 
 // ========== 常量定义 ==========
@@ -406,6 +408,9 @@ func userLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 // doModelLogin 模型登录验证
+// 阶段AO：模型登录错误信息统一为"模型名称或 API Key 错误"，消除"模型名称不匹配 / API Key 无效 /
+// 模型已被禁用"等细分提示带来的枚举探测（攻击者可借此识别哪些模型名存在但被禁用）。
+// 安全语义对齐 doUserLogin（用户名/密码错误合并为统一提示）。
 func doModelLogin(req userLoginReq) (*modelsdb.TAgentHttpUserInfo, error) {
 	if req.ModelName == "" || req.APIKey == "" {
 		return nil, fmt.Errorf("模型名称和 API Key 不能为空")
@@ -414,17 +419,17 @@ func doModelLogin(req userLoginReq) (*modelsdb.TAgentHttpUserInfo, error) {
 	// 通过 API Key 查找模型（复用缓存+数据库查询）
 	model, err := modelsdb.GetUserModelByAPIKey(req.APIKey)
 	if err != nil {
-		return nil, fmt.Errorf("API Key 无效")
+		return nil, fmt.Errorf("模型名称或 API Key 错误")
 	}
 
 	// 校验模型名称是否匹配
 	if model.ModelName != strings.TrimSpace(req.ModelName) {
-		return nil, fmt.Errorf("模型名称不匹配")
+		return nil, fmt.Errorf("模型名称或 API Key 错误")
 	}
 
-	// 检查模型是否被禁用
+	// 检查模型是否被禁用（合并为统一提示，避免枚举）
 	if model.Status == modelsdb.UserModelStatus_Disabled {
-		return nil, fmt.Errorf("模型已被禁用")
+		return nil, fmt.Errorf("模型名称或 API Key 错误")
 	}
 
 	// 通过 UserID 获取用户信息（优先缓存）
@@ -433,13 +438,13 @@ func doModelLogin(req userLoginReq) (*modelsdb.TAgentHttpUserInfo, error) {
 		// 缓存未命中，从数据库查询
 		user, err = modelsdb.GetUserByID(model.UserID)
 		if err != nil {
-			return nil, fmt.Errorf("用户不存在")
+			return nil, fmt.Errorf("模型名称或 API Key 错误")
 		}
 	}
 
-	// 检查用户状态
+	// 检查用户状态（用户被禁用也合并为同一提示，避免通过用户端登录探测用户存在性）
 	if user.Status == modelsdb.UserStatus_Disabled {
-		return nil, fmt.Errorf("用户已被禁用")
+		return nil, fmt.Errorf("模型名称或 API Key 错误")
 	}
 
 	return user, nil
@@ -622,7 +627,7 @@ func isUserAPIPath(path string) bool {
 	if strings.HasSuffix(path, "Interface") || strings.HasSuffix(path, "WS") {
 		return true
 	}
-	if path == "/CaptchaGenerate" || path == "/CaptchaAudio" || path == "/SpiderDataSourceCrawl" {
+	if path == "/CaptchaGenerate" || path == "/SpiderDataSourceCrawl" {
 		return true
 	}
 	if strings.HasPrefix(path, "/ProtocolConvertAnalyzer") {
@@ -638,6 +643,23 @@ func writeUserAuthFail(w http.ResponseWriter, message string) {
 	_ = json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: message})
 }
 
+// requireUserClaimsOr401 业务 handler 内部纵深防御：解析 JWT，失败/无登录态 → 直接 401 JSON，
+// 行为与 userAuthMiddleware 一致。返回 (claims, true) 表示已登录可继续；返回 (nil, false) 表示
+// 已写 401 响应，调用方应 return。
+//
+// 设计动机：userAuthMiddleware 是第一道防线（路由级），理论上请求进入 handler 时 claims 必非空；
+// 但 handler 内部仍做二次校验是为了纵深防御——若未来新增 mux 路径忘记挂中间件、或中间件被旁路，
+// 业务接口仍能正确拒绝未登录请求。本次把所有"claims.UserID == 0"分支统一为 401 JSON，
+// 与 userAuthMiddleware 行为对齐，避免出现"中间件漏拦的请求返回 HTTP 200 success:false 误导前端"的死角。
+func requireUserClaimsOr401(w http.ResponseWriter, r *http.Request) (*UserTokenClaims, bool) {
+	claims := getUserToken(r)
+	if claims == nil || claims.UserID == 0 {
+		writeUserAuthFail(w, "未登录或登录已过期")
+		return nil, false
+	}
+	return claims, true
+}
+
 // userAuthMiddleware 用户认证中间件
 func userAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -646,11 +668,14 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 		if n := strings.TrimSuffix(path, "/"); n != "" {
 			path = n
 		}
+		// 阶段AO：公开路由精确匹配前做大小写归一化（防御反向代理改写路径大小写的极端情况）；
+		// 仅用于 map 查询，不改写 r.URL.Path。
+		lookupPath := strings.ToLower(path)
 		// 公开路由放行
 		publicPaths := map[string]bool{
-			"/UserLogin":          true,
-			"/CaptchaGenerate":    true,
-			"/UserLoginInterface": true,
+			"/userlogin":          true,
+			"/captchagenerate":    true,
+			"/userlogininterface": true,
 		}
 		// 放行静态资源（旧版 /static/ + Vite 构建产物 /assets/ + 根目录静态文件）
 		if len(path) > 8 && (path[:8] == "/static/" || path[:8] == "/assets/") {
@@ -661,7 +686,7 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if publicPaths[path] {
+		if publicPaths[lookupPath] {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -708,6 +733,17 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 			}
 			return
 		}
+
+		// 阶段AO：把鉴权结果写入 r.Context()，供后续 handler（特别是 WebSocket 升级）识别调用者角色。
+		// userAuthMiddleware 不会拦截 WS upgrade（upgrader 是 Hijacker），但 middleware 仍会运行；
+		// 把 claims 透传给 WS handler 即可，无需 WS 自行重复解析 JWT（也避开了"api ↔ websocket 循环依赖"）。
+		r = r.WithContext(context.WithValue(r.Context(), websocket.AuthClaimsContextKey{}, &websocket.AuthClaims{
+			Role:      websocket.WsRoleUser, // 由 authWSUpgrade 解读；外部包见 server_ws_hub.go
+			UserID:    claims.UserID,
+			UserName:  claims.UserName,
+			ModelName: claims.ModelName,
+			LoginType: claims.LoginType,
+		}))
 
 		next.ServeHTTP(w, r)
 	})
