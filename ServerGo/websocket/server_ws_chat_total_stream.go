@@ -162,10 +162,27 @@ type dayBucket struct {
 	elapsedMs int64
 }
 
+// displayDays 把统一 span 编码换算成「展示用天数」：span>0 取天数；span<0（小时窗口）
+// 向上取整天数（至少 1，语义为「今天至今」）；0 保持 0（无限制）。
+func (a *chatStatsAggregator) displayDays() int {
+	if a.days > 0 {
+		return a.days
+	}
+	if a.days < 0 {
+		d := (modelsdb.SpanHours(a.days) + 23) / 24
+		if d < 1 {
+			d = 1
+		}
+		return d
+	}
+	return 0
+}
+
 // newChatStatsAggregator 构造累加器；timeIsHour 决定 time_stats 桶粒度（与旧 models.GetTimeRangeStatsAll 对齐）。
+// 20260826：days 为统一 span 编码（负值=最近 N 小时）。
 func newChatStatsAggregator(days int) *chatStatsAggregator {
 	timeIsHour := true
-	if days > modelsdb.TimeStatsMaxDays {
+	if modelsdb.SpanHours(days) > modelsdb.TimeStatsMaxDays*24 {
 		timeIsHour = false
 	}
 	timeFmt := "2006-01-02 15:04"
@@ -321,7 +338,7 @@ func (a *chatStatsAggregator) snapshotKPI(modelName string) map[string]interface
 		"total_tokens":    a.totalTokens,
 		"active_models":   activeModels,
 		"active_days":     len(a.activeDays),
-		"window_days":     a.days,
+		"window_days":     a.displayDays(),
 		"model_name":      modelName,
 		"warnings":        []string{},
 		"generated_at_ms": nowUnixMilliSafe(),
@@ -333,17 +350,17 @@ func (a *chatStatsAggregator) snapshotTimeStats() []models.TimeRangeStat {
 	var stats []models.TimeRangeStat
 	now := time.Now()
 	if a.timeIsHour {
-		spanDays := a.days
-		if spanDays <= 0 {
-			spanDays = 1
+		fillHours := modelsdb.SpanHours(a.days)
+		if fillHours <= 0 {
+			fillHours = 24 // span=0 时按当天 24 小时
 		}
-		startTime := now.Add(-time.Duration(spanDays) * 24 * time.Hour).Truncate(time.Hour)
+		startTime := now.Add(-time.Duration(fillHours) * time.Hour).Truncate(time.Hour)
 		for t := startTime; !t.After(now); t = t.Add(time.Hour) {
 			key := t.Format(a.timeFmt)
 			stats = append(stats, models.TimeRangeStat{Date: key, Count: a.timeBuckets[key]})
 		}
 	} else {
-		spanDays := a.days
+		spanDays := a.displayDays()
 		if spanDays <= 0 {
 			spanDays = 30
 		}
@@ -370,14 +387,14 @@ func (a *chatStatsAggregator) snapshotTokensSummary() map[string]interface{} {
 		"total_input":     a.totalInput,
 		"total_output":    a.totalOutput,
 		"total_tokens":    a.totalTokens,
-		"window_days":     a.days,
+		"window_days":     a.displayDays(),
 		"generated_at_ms": nowUnixMilliSafe(),
 	}
 }
 
 // snapshotDaily 补齐天槽位的通用 helper
 func (a *chatStatsAggregator) snapshotDaily(conv func(*dayBucket, string) models.TokensRangeStat) []models.TokensRangeStat {
-	spanDays := a.days
+	spanDays := a.displayDays()
 	if spanDays <= 0 {
 		spanDays = 30
 	}
@@ -397,7 +414,7 @@ func (a *chatStatsAggregator) snapshotDaily(conv func(*dayBucket, string) models
 
 // snapshotTrend 时序折线（models.DailyStat，补齐天槽位）
 func (a *chatStatsAggregator) snapshotTrend() []models.DailyStat {
-	spanDays := a.days
+	spanDays := a.displayDays()
 	if spanDays <= 0 {
 		spanDays = 30
 	}
@@ -611,11 +628,11 @@ func streamChatStats(
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
 
+	// 20260826：days 升级为统一 span 编码（负值=最近 N 小时），cutoff 统一走 models.SpanCutoffTime
 	var cutoff time.Time
 	filterTime := false
-	if agg.days > 0 {
-		cutoff = time.Now().AddDate(0, 0, -agg.days)
-		filterTime = true
+	if agg.days != 0 {
+		cutoff, filterTime = modelsdb.SpanCutoffTime(agg.days)
 	}
 
 	// v2.0.68 校正：用户端模式下 userName 取自 claims，不能从 URL 拿（用户端永远携带）。

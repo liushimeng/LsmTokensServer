@@ -84,7 +84,8 @@ func cleanupReportInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	if req.PageSize > 100 {
 		req.PageSize = 100
 	}
-	if req.Days < 0 {
+	// 20260826：days 升级为统一 span 编码（负值=最近 N 小时）；范围外回落 30
+	if req.Days < -720 || req.Days > 365 {
 		req.Days = 30
 	}
 

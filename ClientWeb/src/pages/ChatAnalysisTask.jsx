@@ -5,11 +5,14 @@ import { isAdminRole } from '../shared/auth'
 import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import TimeRangeSelector from '../components/TimeRangeSelector'
+import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
+import { nearestSpan } from '../shared/timeSpan'
 import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/format'
 
 // 任务/工具调用分析页（/ChatAnalysisTaskInterface）
 // 按 Task 维度（is_parsed 预解析特征）聚合：任务数 / 模型分布 / 流式占比等 + 任务明细表
-const DAYS_OPTIONS = [0, 1, 3, 5, 7, 14, 30, 60, 90]
+// 20260826：时间跨度为动态档位（1 小时 ~ transactionRetentionDays+1 天，统一 span 编码）
 const PAGE_SIZE = 20
 
 export default function ChatAnalysisTask({ route }) {
@@ -18,7 +21,8 @@ export default function ChatAnalysisTask({ route }) {
   const isAdmin = isAdminRole() // 用户端：服务端强制 claims.UserName
   const [userName, setUserName] = useState(isAdmin ? init.userName : '')
   const [modelName, setModelName] = useState(init.modelName)
-  const [days, setDays] = useState(3)
+  const { levels, loading: levelsLoading } = useTimeSpanLevels()
+  const [days, setDays] = useState(null) // 档位加载后初始化（默认就近 3 天档）
   const [data, setData] = useState(null) // TaskAnalysisResult
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -40,7 +44,7 @@ export default function ChatAnalysisTask({ route }) {
     setLoading(true); setError(''); setPage(1)
     try {
       const d = await post('ChatAnalysisTaskInterface', {
-        user_name: isAdmin ? userName.trim() : '', model_name: mn, days,
+        user_name: isAdmin ? userName.trim() : '', model_name: mn, days: days ?? 3,
       })
       setData(d.data || {})
     } catch (e) {
@@ -48,18 +52,28 @@ export default function ChatAnalysisTask({ route }) {
     } finally { setLoading(false) }
   }
 
+  // 动态档位到达后初始化 span（默认 3 天就近档）
   useEffect(() => {
+    if (!levels.length || days !== null) return
+    setDays(nearestSpan(levels, 3))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels])
+
+  // 路由带参进入时自动查询（等待档位就绪）
+  useEffect(() => {
+    if (days === null) return
     if (init.userName && init.modelName) { doQuery(); return }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [days])
 
   // 用户端进入页面：本人模型列表（缓存一次）到达后自动选第一个并查询
   useEffect(() => {
+    if (days === null) return
     if (isAdmin || !myModelNames.length || modelName) return
     setModelName(myModelNames[0])
     doQuery(myModelNames[0])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myModelNames])
+  }, [myModelNames, days])
 
   const tasks = (data && data.tasks) || []
   const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE))
@@ -106,9 +120,7 @@ export default function ChatAnalysisTask({ route }) {
           </select>
         </label>
         <label>{t('chatAnalysisTask.timeRange')}
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? t('chatAnalysisTask.allTime') : t('chatAnalysisTask.lastNDays', { days: d })}</option>)}
-          </select>
+          <TimeRangeSelector span={days ?? 3} onChange={setDays} levels={levels} loading={levelsLoading} />
         </label>
         <button className="btn btn-primary" onClick={doQuery} disabled={loading}>{t('common.search')}</button>
       </div>

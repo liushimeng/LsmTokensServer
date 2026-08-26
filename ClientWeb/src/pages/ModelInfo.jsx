@@ -3,6 +3,9 @@ import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import HourlyTrendPanel from '../components/HourlyTrendPanel'
+import TimeRangeSelector from '../components/TimeRangeSelector'
+import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
+import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
 
 // 模型信息（统计页）：ModelInfoInterface
@@ -10,8 +13,6 @@ import { useI18n } from '../i18n'
 //   - action='list' 用户端「我的模型信息列表」（成本/能力/动态性能标签/源站数）
 //   - action='trend'（新增）小时级 K 线图：调用次数 + Tokens 数（小时桶/天桶自适应）
 // 无第三方图表库：K 线图用自研 SVG HourlyTrendPanel + KLineTrendChart 组件。
-
-const DAYS_OPTIONS = [1, 3, 5, 7, 14, 30, 60, 90, 0]
 
 function fmt(n) {
   n = Number(n) || 0
@@ -21,24 +22,19 @@ function pct(v) {
   v = Number(v) || 0
   return Math.min(Math.max(v, 0), 100).toFixed(2) + '%'
 }
-function normalizeDays(v) {
-  const n = parseInt(v, 10)
-  return DAYS_OPTIONS.includes(n) ? n : 3
-}
-
 export default function ModelInfo(props) {
   const { t } = useI18n()
   const q = props?.route?.query
   const isAdmin = isAdminRole()
   // 记忆 key 按角色隔离（用户端与管理端不复用同一天数偏好）
   const storageKey = `lsm:modelInfo:days:v1:${isAdmin ? 'admin:__all__' : 'user'}`
-  const [days, setDays] = useState(() => normalizeDays(q?.get('days') || localStorage.getItem(storageKey)))
+  const { levels, loading: levelsLoading } = useTimeSpanLevels()
+  // 20260826 动态档位：span 统一编码（负值=小时）；档位加载后按旧 localStorage/URL 值就近迁移
+  const [span, setSpan] = useState(null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [myModels, setMyModels] = useState(null) // 用户端"我的模型信息列表"（action=list）
-
-  const daysLabel = (d) => (d === 0 ? t('modelInfo.daysAll', { days: d }) : t('modelInfo.daysDay', { days: d }))
 
   const loadStats = useCallback((d) => {
     setLoading(true)
@@ -50,8 +46,15 @@ export default function ModelInfo(props) {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(storageKey, String(days))
-    loadStats(days)
+    if (!levels.length) return
+    setSpan((cur) => cur ?? nearestSpan(levels, q?.get('days') || localStorage.getItem(storageKey) || 3))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels])
+
+  useEffect(() => {
+    if (span === null) return
+    localStorage.setItem(storageKey, String(span))
+    loadStats(span)
     if (!isAdmin && myModels === null) {
       // 用户端独有：我的模型信息列表（成本/能力/动态性能标签/源站数）
       post('ModelInfoInterface', { action: 'list' })
@@ -59,7 +62,7 @@ export default function ModelInfo(props) {
         .catch(() => setMyModels([]))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days, loadStats])
+  }, [span, loadStats])
 
   const summary = (data && data.summary) || {}
   const models = (data && data.models) || []
@@ -92,9 +95,7 @@ export default function ModelInfo(props) {
       <h2 className="page-title">{t('modelInfo.title2')}</h2>
       <div className="toolbar">
         <span>{t('modelInfo.timeSpan')}</span>
-        <select value={days} onChange={(e) => setDays(normalizeDays(e.target.value))}>
-          {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{daysLabel(d)}</option>)}
-        </select>
+        <TimeRangeSelector span={span ?? 3} onChange={setSpan} levels={levels} loading={levelsLoading} />
         <button className="btn btn-primary" disabled={loading} onClick={() => loadStats(days)}>{loading ? t('modelInfo.loading') : t('modelInfo.refresh')}</button>
         <span style={{ color: '#888', fontSize: 13 }}>{isAdmin ? t('modelInfo.adminStats') : t('modelInfo.userStats')}</span>
       </div>
@@ -117,10 +118,6 @@ export default function ModelInfo(props) {
                 api="ModelInfoInterface"
                 storageKey={`lsm:modelInfo:trend:v1:${isAdmin ? 'admin' : 'user'}`}
                 labels={{
-                  '1d': t('modelInfo.trendWindow1d'),
-                  '3d': t('modelInfo.trendWindow3d'),
-                  '7d': t('modelInfo.trendWindow7d'),
-                  '30d': t('modelInfo.trendWindow30d'),
                   loading: t('modelInfo.trendLoading'),
                   empty: t('modelInfo.trendEmpty'),
                   call: t('modelInfo.trendCallSeries'),

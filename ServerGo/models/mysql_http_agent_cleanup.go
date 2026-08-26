@@ -1121,9 +1121,9 @@ func QueryCleanupReports(page, pageSize, days int) ([]TAgentHttpTransactionClean
 		pageSize = 100
 	}
 
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
 	query := database.DB.Table(CleanupReportTableName)
-	if days > 0 {
-		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	if cutoff, ok := SpanCutoffTime(days); ok {
 		query = query.Where("created_at >= ?", cutoff)
 	}
 
@@ -1178,8 +1178,8 @@ func GetCleanupReportsDailySummary(days int) ([]CleanupReportsDailySummary, erro
 			COUNT(*) AS report_count
 		`)
 
-	if days > 0 {
-		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
+	if cutoff, ok := SpanCutoffTime(days); ok {
 		query = query.Where("created_at >= ?", cutoff)
 	}
 

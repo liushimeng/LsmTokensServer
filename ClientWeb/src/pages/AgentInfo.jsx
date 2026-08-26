@@ -3,14 +3,15 @@ import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import HourlyTrendPanel from '../components/HourlyTrendPanel'
+import TimeRangeSelector from '../components/TimeRangeSelector'
+import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
+import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
 
 // Agent 信息（统计页）：AgentInfoInterface
 //   - action='stats' 返回 summary/agents/trend（管理员端）
 //   - action='trend'（新增）小时级 K 线图：调用次数 + Tokens 数
 // 无第三方图表库：K 线图用自研 SVG HourlyTrendPanel + KLineTrendChart 组件。
-
-const DAYS_OPTIONS = [1, 3, 5, 7, 14, 30, 60, 90, 0]
 
 function fmt(n) {
   n = Number(n) || 0
@@ -20,22 +21,17 @@ function pct(v) {
   v = Number(v) || 0
   return Math.min(Math.max(v, 0), 100).toFixed(2) + '%'
 }
-function normalizeDays(v) {
-  const n = parseInt(v, 10)
-  return DAYS_OPTIONS.includes(n) ? n : 3
-}
-
 export default function AgentInfo(props) {
   const { t } = useI18n()
   const q = props?.route?.query
   const isAdmin = isAdminRole()
   const storageKey = `lsm:agentInfo:days:v1:${isAdmin ? 'admin:__all__' : 'user'}`
-  const [days, setDays] = useState(() => normalizeDays(q?.get('days') || localStorage.getItem(storageKey)))
+  const { levels, loading: levelsLoading } = useTimeSpanLevels()
+  // 20260826 动态档位：span 统一编码（负值=小时）；档位加载后按旧 localStorage/URL 值就近迁移
+  const [span, setSpan] = useState(null)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-
-  const daysLabel = (d) => (d === 0 ? t('agentInfo.daysAll', { days: d }) : t('agentInfo.daysDay', { days: d }))
 
   const loadStats = useCallback((d) => {
     setLoading(true)
@@ -47,9 +43,16 @@ export default function AgentInfo(props) {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem(storageKey, String(days))
-    loadStats(days)
-  }, [days, loadStats])
+    if (!levels.length) return
+    setSpan((cur) => cur ?? nearestSpan(levels, q?.get('days') || localStorage.getItem(storageKey) || 3))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels])
+
+  useEffect(() => {
+    if (span === null) return
+    localStorage.setItem(storageKey, String(span))
+    loadStats(span)
+  }, [span, loadStats])
 
   const summary = (data && data.summary) || {}
   const agents = (data && data.agents) || []
@@ -78,9 +81,7 @@ export default function AgentInfo(props) {
       <h2 className="page-title">{t('agentInfo.title2')}</h2>
       <div className="toolbar">
         <span>{t('agentInfo.timeSpan')}</span>
-        <select value={days} onChange={(e) => setDays(normalizeDays(e.target.value))}>
-          {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{daysLabel(d)}</option>)}
-        </select>
+        <TimeRangeSelector span={span ?? 3} onChange={setSpan} levels={levels} loading={levelsLoading} />
         <button className="btn btn-primary" disabled={loading} onClick={() => loadStats(days)}>{loading ? t('agentInfo.loading') : t('agentInfo.refresh')}</button>
         <span style={{ color: '#888', fontSize: 13 }}>{t('agentInfo.agentStats')}</span>
       </div>
@@ -103,10 +104,6 @@ export default function AgentInfo(props) {
                 api="AgentInfoInterface"
                 storageKey={`lsm:agentInfo:trend:v1:${isAdmin ? 'admin' : 'user'}`}
                 labels={{
-                  '1d': t('agentInfo.trendWindow1d'),
-                  '3d': t('agentInfo.trendWindow3d'),
-                  '7d': t('agentInfo.trendWindow7d'),
-                  '30d': t('agentInfo.trendWindow30d'),
                   loading: t('agentInfo.trendLoading'),
                   empty: t('agentInfo.trendEmpty'),
                   call: t('agentInfo.trendCallSeries'),

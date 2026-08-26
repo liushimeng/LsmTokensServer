@@ -68,7 +68,8 @@ type shardScanRow struct {
 // selectCols：本次需要读取的列（逗号分隔，必须含 id 供 keyset 游标）。
 //   - 禁含 8 个 longtext 字段（v2.0.42 白名单契约）。
 //
-// days<=0 省略 created_at 过滤；days>0 加 created_at >= cutoff（Go 端计算，避免 SQL 方言差异）。
+// days 参数为统一 span 编码（20260826）：0 省略 created_at 过滤；>0 最近 N 天；<0 最近 |N| 小时。
+// 过滤统一加 created_at >= cutoff（Go 端计算，避免 SQL 方言差异）。
 //
 // 终止条件：某批返回行数 < StatsShardScanBatch，或 ctx 取消。
 // ctx.Canceled / DeadlineExceeded 直接返回该 err（调用方按现有约定 break 返回部分结果）。
@@ -80,12 +81,7 @@ func scanShardPaged(sdb *gorm.DB, tableName, selectCols string, days int, fn fun
 	if sdb == nil {
 		return nil
 	}
-	var cutoff time.Time
-	filterTime := false
-	if days > 0 {
-		cutoff = time.Now().AddDate(0, 0, -days)
-		filterTime = true
-	}
+	cutoff, filterTime := resolveStatsSpanCutoff(ClampStatsSpan(days))
 
 	var lastID uint64
 	for {
@@ -121,9 +117,9 @@ func GetTimeRangeStatsAll(subTableNum int, days int) ([]TimeRangeStat, error) {
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
+	days = ClampStatsSpan(days)
+	spanHours := SpanHours(days)
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -132,7 +128,7 @@ func GetTimeRangeStatsAll(subTableNum int, days int) ([]TimeRangeStat, error) {
 	}
 
 	granularity := "hour"
-	if days > TimeStatsMaxDays {
+	if spanHours > TimeStatsMaxDays*24 {
 		granularity = "day"
 	}
 	goFmt := "2006-01-02 15:04"
@@ -161,23 +157,23 @@ func GetTimeRangeStatsAll(subTableNum int, days int) ([]TimeRangeStat, error) {
 		}
 	}
 
-	// 补齐空槽位（与原 GetTimeRangeStats 行为一致）
+	// 补齐空槽位（与原 GetTimeRangeStats 行为一致；span=0 沿用旧默认窗口）
 	var stats []TimeRangeStat
 	now := time.Now()
 	if granularity == "hour" {
-		spanDays := days
-		if spanDays <= 0 {
-			spanDays = 1 // days=0 时按当天 24 小时
+		fillHours := spanHours
+		if fillHours <= 0 {
+			fillHours = 24 // span=0 时按当天 24 小时
 		}
-		startTime := now.Add(-time.Duration(spanDays) * 24 * time.Hour).Truncate(time.Hour)
+		startTime := now.Add(-time.Duration(fillHours) * time.Hour).Truncate(time.Hour)
 		for t := startTime; !t.After(now); t = t.Add(time.Hour) {
 			key := t.Format(goFmt)
 			stats = append(stats, TimeRangeStat{Date: key, Count: bucketCounts[key]})
 		}
 	} else {
-		spanDays := days
+		spanDays := (spanHours + 23) / 24
 		if spanDays <= 0 {
-			spanDays = 30 // days=0 时按最近 30 天
+			spanDays = 30 // span=0 时按最近 30 天
 		}
 		for i := spanDays - 1; i >= 0; i-- {
 			key := now.AddDate(0, 0, -i).Format(goFmt)
@@ -198,9 +194,8 @@ func GetTokensRangeStatsAll(subTableNum int, days int) ([]TokensRangeStat, error
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
+	days = ClampStatsSpan(days)
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -249,8 +244,8 @@ func GetTokensRangeStatsAll(subTableNum int, days int) ([]TokensRangeStat, error
 		}
 	}
 
-	// 补齐空槽位（最近 N 天，跨 days=0 默认 30 天）
-	spanDays := days
+	// 补齐空槽位（最近 N 天；小时窗口按覆盖天数补槽，span=0 默认 30 天）
+	spanDays := (SpanHours(days) + 23) / 24
 	if spanDays <= 0 {
 		spanDays = 30
 	}
@@ -414,13 +409,12 @@ func GetProtocolAnalysisStatsAll(subTableNum int, limit int) (*ProtocolAnalysisS
 
 // GetAgentToolStatsByRangeAll 全站遍历 8 张分表按 agent_tool_name 聚合。
 // 与原 GetAgentToolStatsByRange 同结构，但不带 user/model WHERE。
+// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）。
 func GetAgentToolStatsByRangeAll(subTableNum int, days int) (*AgentToolStatsResponse, error) {
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	days = ClampStatsSpan(days)
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -517,9 +511,8 @@ func CountAgentHttpTransactionsAll(subTableNum int, days int) (int64, error) {
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
+	days = ClampStatsSpan(days)
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -535,10 +528,7 @@ func CountAgentHttpTransactionsAll(subTableNum int, days int) (int64, error) {
 		}
 
 		var count int64
-		query := sdb.Table(tableName)
-		if days > 0 {
-			query = query.Where("created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)", days)
-		}
+		query := applyStatsSpanWhere(sdb.Table(tableName), days)
 		if err := query.Count(&count).Error; err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				break
@@ -567,9 +557,8 @@ func GetAllStatsKPISummary(subTableNum int, days int) (int64, uint64, int, error
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
+	days = ClampStatsSpan(days)
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -592,11 +581,8 @@ func GetAllStatsKPISummary(subTableNum int, days int) (int64, uint64, int, error
 			Sum   uint64 `gorm:"column:agg_sum"`
 		}
 		var row aggRow
-		query := sdb.Table(tableName).
-			Select("COUNT(*) as agg_count, COALESCE(SUM(tokens_all_size), 0) as agg_sum")
-		if days > 0 {
-			query = query.Where("created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)", days)
-		}
+		query := applyStatsSpanWhere(sdb.Table(tableName).
+			Select("COUNT(*) as agg_count, COALESCE(SUM(tokens_all_size), 0) as agg_sum"), days)
 		if err := query.Scan(&row).Error; err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				break
@@ -615,10 +601,7 @@ func GetAllStatsKPISummary(subTableNum int, days int) (int64, uint64, int, error
 			continue
 		}
 		var dateStrs []string
-		query := sdb.Table(tableName).Select("DISTINCT DATE(created_at) as d")
-		if days > 0 {
-			query = query.Where("created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)", days)
-		}
+		query := applyStatsSpanWhere(sdb.Table(tableName).Select("DISTINCT DATE(created_at) as d"), days)
 		if err := query.Pluck("d", &dateStrs).Error; err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				break

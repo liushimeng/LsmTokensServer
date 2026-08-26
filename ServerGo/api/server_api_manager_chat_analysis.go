@@ -47,21 +47,30 @@ type ChatAnalysisInterfaceResponse struct {
 	Data    *AgentHttpQueryResult `json:"data,omitempty"`
 }
 
-// normalizeChatAnalysisDays 把 /ChatAnalysis 接口的 days 参数限制到合法白名单。
+// normalizeChatAnalysisDays 把 /ChatAnalysis 接口的 days 参数限制到合法范围。
 //
 // v2.0.41：与 /AIRouteManage 对齐，单一 int 编码时间跨度（span）。
 //   - days == 0：无限制（不过滤 created_at）
-//   - days  > 0：最近 days 天（白名单内的固定粒度）
+//   - days  > 0：最近 days 天
 //   - days  < 0：最近 (-days) 小时，例如 -1=1小时、-12=12小时
 //
-// 白名单外的值统一回落到 3（保持与旧实现一致的默认值）。
+// 20260826 时间跨度动态档位：白名单改为范围校验（小时 ≤720、天 ≤365），
+// 配合前端动态 10 档（1 小时 ~ transactionRetentionDays+1 天）。
+// 范围外的值统一回落到 3（保持与旧实现一致的默认值）。
 func normalizeChatAnalysisDays(days int) int {
-	switch days {
-	case -12, -6, -4, -2, -1, 0, 1, 3, 5, 7, 14, 30, 60, 90:
+	if days == 0 {
+		return 0
+	}
+	if days > 0 {
+		if days > 365 {
+			return 3
+		}
 		return days
-	default:
+	}
+	if days < -720 {
 		return 3
 	}
+	return days
 }
 
 // chatAnalysisInterfaceHandle 处理 /ChatAnalysisInterface API 查询请求

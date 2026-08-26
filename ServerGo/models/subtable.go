@@ -1033,16 +1033,16 @@ func GetTimeRangeStats(userName, modelName string, subTableNum int, days int) ([
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时），滚动窗口语义不变
+	span := ClampStatsSpan(days)
+	spanHours := SpanHours(span)
 
 	// 按实际颗粒度拼缓存 key，避免小时/天不同颗粒度碰撞
 	granularity := "hour"
-	if days > TimeStatsMaxDays {
+	if spanHours > TimeStatsMaxDays*24 {
 		granularity = "day"
 	}
-	cacheKey := makeStatsCacheKey("GetTimeRangeStats", userName, modelName, subTableNum, days, granularity)
+	cacheKey := makeStatsCacheKey("GetTimeRangeStats", userName, modelName, subTableNum, span, granularity)
 	if cached, ok := getStatsFromCache(cacheKey); ok {
 		if stats, valid := cached.([]TimeRangeStat); valid {
 			return stats, nil
@@ -1070,9 +1070,7 @@ func GetTimeRangeStats(userName, modelName string, subTableNum int, days int) ([
 	query := sdb.Table(tableName).
 		Select("created_at").
 		Where("user_name = ? AND model_name = ?", userName, modelName)
-	if days > 0 {
-		query = query.Where("created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)", days)
-	}
+	query = applyStatsSpanWhere(query, span)
 
 	if err := query.Find(&createdAts).Error; err != nil {
 		return nil, fmt.Errorf("failed to get time range stats rows: %w", err)
@@ -1085,17 +1083,24 @@ func GetTimeRangeStats(userName, modelName string, subTableNum int, days int) ([
 		bucketCounts[key]++
 	}
 
-	// 补齐空槽位
+	// 补齐空槽位（小时桶从 cutoff 起逐小时；天桶按覆盖天数，span<24h 至少给当天 1 桶）
 	var stats []TimeRangeStat
 	now := time.Now()
 	if granularity == "hour" {
-		startTime := now.Add(-time.Duration(days) * 24 * time.Hour).Truncate(time.Hour)
+		startTime := now.Add(-time.Duration(spanHours) * time.Hour).Truncate(time.Hour)
+		if span == 0 {
+			startTime = now.Truncate(time.Hour)
+		}
 		for t := startTime; !t.After(now); t = t.Add(time.Hour) {
 			key := t.Format(goFmt)
 			stats = append(stats, TimeRangeStat{Date: key, Count: bucketCounts[key]})
 		}
 	} else {
-		for i := days - 1; i >= 0; i-- {
+		dayCount := (spanHours + 23) / 24
+		if dayCount < 1 {
+			dayCount = 1
+		}
+		for i := dayCount - 1; i >= 0; i-- {
 			key := now.AddDate(0, 0, -i).Format(goFmt)
 			stats = append(stats, TimeRangeStat{Date: key, Count: bucketCounts[key]})
 		}
@@ -1433,7 +1438,7 @@ func finalizeModelInfoUsageStats(acc map[string]*modelInfoUsageAccumulator) (*Mo
 	return summary, stats
 }
 
-// clampStatsDays 把 days 限制到合法范围（0=无限制；>0 限制到 365）
+// ClampStatsDays 把 days 限制到合法范围（0=无限制；>0 限制到 365）
 func ClampStatsDays(days int) int {
 	if days < 0 {
 		return 0
@@ -1442,6 +1447,44 @@ func ClampStatsDays(days int) int {
 		return 365
 	}
 	return days
+}
+
+// ClampStatsSpan（20260826 时间跨度动态档位）把统一 span 编码限制到合法范围：
+//   - span == 0：无限制（透传，兼容旧「全部」语义）
+//   - span  > 0：最近 span 天，上限 365（与 ClampStatsDays 一致）
+//   - span  < 0：最近 (-span) 小时，下限 -720（与 maxStatsSpanHours 一致）
+//
+// 与 ClampStatsDays 的区别：负值不再折叠为 0，而是保留小时语义并裁剪到安全下限。
+func ClampStatsSpan(span int) int {
+	if span == 0 {
+		return 0
+	}
+	if span > 365 {
+		return 365
+	}
+	if span < -maxStatsSpanHours {
+		return -maxStatsSpanHours
+	}
+	return span
+}
+
+// SpanCutoffTime 解释统一 span 编码，返回 (cutoff, 是否需要时间过滤)。
+// 需要过滤时只统计 created_at >= cutoff 的记录。resolveStatsSpanCutoff 的导出包装，
+// 供 websocket 等外部包复用同一套 span 语义。
+func SpanCutoffTime(span int) (time.Time, bool) {
+	return resolveStatsSpanCutoff(ClampStatsSpan(span))
+}
+
+// SpanHours 把统一 span 编码换算成小时数（span==0 返回 0）。用于桶粒度选择与展示窗口计算。
+func SpanHours(span int) int {
+	if span > 0 {
+		return ClampStatsDays(span) * 24
+	}
+	if span < 0 {
+		h := -ClampStatsSpan(span)
+		return h
+	}
+	return 0
 }
 
 // v2.0.40：时间跨度统一编码为单个 int（span）。
@@ -1505,6 +1548,16 @@ func applyStatsDaysWhere(tx *gorm.DB, days int) *gorm.DB {
 	return tx
 }
 
+// applyStatsSpanWhere（20260826）applyStatsDaysWhere 的统一 span 版本：
+// span==0 不加过滤；span>0 最近 N 天；span<0 最近 |span| 小时。全部走 Go 端 cutoff
+// 参数化，消除 DATE_SUB 方言差异（MySQL / SQLite），并统一为「滚动窗口」语义。
+func applyStatsSpanWhere(tx *gorm.DB, span int) *gorm.DB {
+	if cutoff, ok := resolveStatsSpanCutoff(ClampStatsSpan(span)); ok {
+		return tx.Where("created_at >= ?", cutoff)
+	}
+	return tx
+}
+
 // DailyStat 全站单日汇总（调用次数 + Tokens），用于 ModelInfo / AgentInfo 时序折线图。
 // 聚合范围为全站所有分表，不按模型/用户/Agent 维度拆分。
 type DailyStat struct {
@@ -1516,7 +1569,7 @@ type DailyStat struct {
 }
 
 // GetDailyStatsAll 全站维度按天聚合调用次数与 Tokens，用于时序折线图。
-// days<=0 表示无限制；days>0 仅统计 created_at 在最近 N 天内的记录（最大 365）。
+// days 参数为统一 span 编码（20260826）：0 无限制；>0 最近 N 天（≤365）；<0 最近 |N| 小时（≤720）。
 // 使用 Go 端按 created_at 日期分组，避免 SQL 方言差异（MySQL DATE_FORMAT / SQLite strftime），
 // 与 GetModelInfoUsageStatsAll 一致的全表扫描 + Go 聚合模式。
 func GetDailyStatsAll(subTableNum int, days int) ([]DailyStat, error) {
@@ -1530,7 +1583,7 @@ func GetDailyStatsAll(subTableNum int, days int) ([]DailyStat, error) {
 		return []DailyStat{}, nil
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = ClampStatsDays(days)
+	days = ClampStatsSpan(days)
 
 	acc := make(map[string]*DailyStat)
 	for i := 0; i < subTableNum; i++ {
@@ -1575,9 +1628,14 @@ func GetDailyStatsAll(subTableNum int, days int) ([]DailyStat, error) {
 	}
 
 	results := make([]DailyStat, 0, len(acc))
-	if days > 0 {
+	if days != 0 {
+		// 小时窗口按覆盖天数补槽（至少当天 1 桶，语义为「今天至今」）
+		dayCount := (SpanHours(days) + 23) / 24
+		if dayCount < 1 {
+			dayCount = 1
+		}
 		now := time.Now()
-		for i := days - 1; i >= 0; i-- {
+		for i := dayCount - 1; i >= 0; i-- {
 			date := now.AddDate(0, 0, -i).Format("2006-01-02")
 			if stat, ok := acc[date]; ok {
 				results = append(results, *stat)
@@ -1596,13 +1654,13 @@ func GetDailyStatsAll(subTableNum int, days int) ([]DailyStat, error) {
 }
 
 // GetModelInfoUsageStatsAll 管理员模型信息页统计：按全站目标模型(dst_model_name)聚合调用次数和 Tokens。
-// days<=0 表示无限制；days>0 仅统计 created_at 在最近 N 天内的记录（最大 365）。
+// days 参数为统一 span 编码：0 无限制；>0 最近 N 天（≤365）；<0 最近 |N| 小时（≤720）。
 func GetModelInfoUsageStatsAll(subTableNum int, days int) (*ModelInfoUsageSummary, []ModelInfoUsageStat, error) {
 	if database.DB == nil {
 		return nil, nil, fmt.Errorf("database not initialized")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = ClampStatsDays(days)
+	days = ClampStatsSpan(days)
 
 	acc := make(map[string]*modelInfoUsageAccumulator)
 	for i := 0; i < subTableNum; i++ {
@@ -1620,7 +1678,7 @@ func GetModelInfoUsageStatsAll(subTableNum int, days int) (*ModelInfoUsageSummar
 			TokensOutputSize uint64 `gorm:"column:tokens_output_size"`
 		}
 
-		err := applyStatsDaysWhere(database.DB.Table(tableName), days).
+		err := applyStatsSpanWhere(database.DB.Table(tableName), days).
 			Select("dst_model_name as model_name, user_name, COUNT(*) as call_count, COALESCE(SUM(tokens_all_size), 0) as tokens_all_size, COALESCE(SUM(tokens_input_size), 0) as tokens_input_size, COALESCE(SUM(tokens_output_size), 0) as tokens_output_size").
 			Where("dst_model_name <> ''").
 			Group("dst_model_name, user_name").
@@ -1657,7 +1715,7 @@ func GetModelInfoUsageStatsAll(subTableNum int, days int) (*ModelInfoUsageSummar
 }
 
 // GetModelInfoUsageStatsByUser 用户模型信息页统计：按当前用户的平台模型(model_name)聚合调用次数和 Tokens。
-// days<=0 表示无限制；days>0 仅统计 created_at 在最近 N 天内的记录（最大 365）。
+// days 参数为统一 span 编码：0 无限制；>0 最近 N 天（≤365）；<0 最近 |N| 小时（≤720）。
 func GetModelInfoUsageStatsByUser(userName string, modelNames []string, subTableNum int, days int) (*ModelInfoUsageSummary, []ModelInfoUsageStat, error) {
 	if database.DB == nil {
 		return nil, nil, fmt.Errorf("database not initialized")
@@ -1667,7 +1725,7 @@ func GetModelInfoUsageStatsByUser(userName string, modelNames []string, subTable
 		return nil, nil, fmt.Errorf("user_name is required")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = ClampStatsDays(days)
+	days = ClampStatsSpan(days)
 
 	seen := make(map[string]struct{})
 	acc := make(map[string]*modelInfoUsageAccumulator)
@@ -1692,7 +1750,7 @@ func GetModelInfoUsageStatsByUser(userName string, modelNames []string, subTable
 			TokensInputSize  uint64 `gorm:"column:tokens_input_size"`
 			TokensOutputSize uint64 `gorm:"column:tokens_output_size"`
 		}
-		err := applyStatsDaysWhere(database.DB.Table(tableName), days).
+		err := applyStatsSpanWhere(database.DB.Table(tableName), days).
 			Select("COUNT(*) as call_count, COALESCE(SUM(tokens_all_size), 0) as tokens_all_size, COALESCE(SUM(tokens_input_size), 0) as tokens_input_size, COALESCE(SUM(tokens_output_size), 0) as tokens_output_size").
 			Where("user_name = ? AND model_name = ?", userName, modelName).
 			Scan(&row).Error
@@ -1721,7 +1779,7 @@ func GetModelInfoUsageStatsByUser(userName string, modelNames []string, subTable
 }
 
 // GetModelInfoUsageStatsByUserDstModel 用户模型信息页目标模型统计：按当前用户的目标源站模型(dst_model_name)聚合调用次数和 Tokens。
-// days<=0 表示无限制；days>0 仅统计 created_at 在最近 N 天内的记录（最大 365）。
+// days 参数为统一 span 编码：0 无限制；>0 最近 N 天（≤365）；<0 最近 |N| 小时（≤720）。
 func GetModelInfoUsageStatsByUserDstModel(userName string, modelNames []string, subTableNum int, days int) (*ModelInfoUsageSummary, []ModelInfoUsageStat, error) {
 	if database.DB == nil {
 		return nil, nil, fmt.Errorf("database not initialized")
@@ -1731,7 +1789,7 @@ func GetModelInfoUsageStatsByUserDstModel(userName string, modelNames []string, 
 		return nil, nil, fmt.Errorf("user_name is required")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = ClampStatsDays(days)
+	days = ClampStatsSpan(days)
 
 	seen := make(map[string]struct{})
 	acc := make(map[string]*modelInfoUsageAccumulator)
@@ -1757,7 +1815,7 @@ func GetModelInfoUsageStatsByUserDstModel(userName string, modelNames []string, 
 			TokensInputSize  uint64 `gorm:"column:tokens_input_size"`
 			TokensOutputSize uint64 `gorm:"column:tokens_output_size"`
 		}
-		err := applyStatsDaysWhere(database.DB.Table(tableName), days).
+		err := applyStatsSpanWhere(database.DB.Table(tableName), days).
 			Select("dst_model_name as model_name, COUNT(*) as call_count, COALESCE(SUM(tokens_all_size), 0) as tokens_all_size, COALESCE(SUM(tokens_input_size), 0) as tokens_input_size, COALESCE(SUM(tokens_output_size), 0) as tokens_output_size").
 			Where("user_name = ? AND model_name = ? AND dst_model_name <> ''", userName, modelName).
 			Group("dst_model_name").

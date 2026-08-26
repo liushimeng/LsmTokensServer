@@ -56,6 +56,9 @@ func RegisterManagerAPIRoutes(mux *http.ServeMux) {
 	// 用户名+模型名下拉选项（管理端各查询页面级联下拉共用，页面生命周期内前端只调用一次）
 	mux.HandleFunc("/UserModelOptionsInterface", userModelOptionsInterfaceHandle)
 
+	// 20260826 时间跨度动态档位：下发 transactionRetentionDays 推导的查询跨度上限
+	mux.HandleFunc("/TimeSpanConfigInterface", timeSpanConfigInterfaceHandle)
+
 	// Agent 代理路径挂载（同进程转发，让 JS 可以用相对 URL 同源访问，
 	// 解决跨端口 CORS / Mixed Content 导致 fetch 被浏览器静默阻止的问题）
 	proxy.MountAIProxyHandlers(mux)
@@ -125,6 +128,9 @@ func RegisterUserAPIRoutes(mux *http.ServeMux) {
 
 	// 对话页面数据接口
 	mux.HandleFunc("/ChatDialogInterface", userChatDialogInterfaceHandle)
+
+	// 20260826 时间跨度动态档位：下发 transactionRetentionDays 推导的查询跨度上限
+	mux.HandleFunc("/TimeSpanConfigInterface", timeSpanConfigInterfaceHandle)
 
 	// Agent 代理路径挂载（同进程转发，同上）
 	proxy.MountAIProxyHandlers(mux)

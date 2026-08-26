@@ -114,13 +114,13 @@ func GetTokensRangeStats(userName, modelName string, subTableNum int, days int) 
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
+	days = ClampStatsSpan(days)
+	spanHours := SpanHours(days)
 
 	// 尝试从缓存获取（按实际颗粒度拼 key，避免天/周不同颗粒度碰撞）
 	granularity := "day"
-	if days > tokensStatsMaxDays {
+	if spanHours > tokensStatsMaxDays*24 {
 		granularity = "week"
 	}
 	cacheKey := makeStatsCacheKey("GetTokensRangeStats", userName, modelName, subTableNum, days, granularity)
@@ -157,9 +157,7 @@ func GetTokensRangeStats(userName, modelName string, subTableNum int, days int) 
 	query := sdb.Table(tableName).
 		Select("created_at, tokens_input_size, tokens_output_size, tokens_all_size, elapsed_ms, request_start_at, response_start_at, response_end_at").
 		Where("user_name = ? AND model_name = ?", userName, modelName)
-	if days > 0 {
-		query = query.Where("created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)", days)
-	}
+	query = applyStatsSpanWhere(query, days)
 
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("failed to get tokens range stats rows: %w", err)
@@ -249,8 +247,8 @@ func GetTokensRangeStats(userName, modelName string, subTableNum int, days int) 
 		}
 	}
 
-	// 边界：days<=0 或无数据 直接返回
-	if len(results) == 0 || days <= 0 {
+	// 边界：span==0（无限制）或无数据 直接返回
+	if len(results) == 0 || days == 0 {
 		setStatsToCache(cacheKey, results)
 		return results, nil
 	}
@@ -267,9 +265,14 @@ func GetTokensRangeStats(userName, modelName string, subTableNum int, days int) 
 		resultMap[r.Date] = r
 	}
 
+	// 小时窗口按覆盖天数补槽（至少当天 1 桶，语义为「今天至今」）
+	dayCount := (spanHours + 23) / 24
+	if dayCount < 1 {
+		dayCount = 1
+	}
 	now := time.Now()
-	filled := make([]TokensRangeStat, 0, days)
-	for i := days - 1; i >= 0; i-- {
+	filled := make([]TokensRangeStat, 0, dayCount)
+	for i := dayCount - 1; i >= 0; i-- {
 		date := now.AddDate(0, 0, -i).Format("2006-01-02")
 		if stat, ok := resultMap[date]; ok {
 			filled = append(filled, stat)
@@ -704,9 +707,8 @@ func GetTokensModelStats(userName, modelName string, subTableNum int, days int) 
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
+	days = ClampStatsSpan(days)
 
 	// 尝试从缓存获取
 	cacheKey := makeStatsCacheKey("GetTokensModelStats", userName, modelName, subTableNum, days, "")
@@ -739,9 +741,7 @@ func GetTokensModelStats(userName, modelName string, subTableNum int, days int) 
 	query := sdb.Table(tableName).
 		Select("dst_model_name, tokens_input_size, tokens_output_size, tokens_all_size").
 		Where("user_name = ? AND model_name = ? AND dst_model_name != ''", userName, modelName)
-	if days > 0 {
-		query = query.Where("created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)", days)
-	}
+	query = applyStatsSpanWhere(query, days)
 
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("failed to get tokens model stats rows: %w", err)
@@ -820,9 +820,8 @@ func GetTokensLatencyStats(userName, modelName string, subTableNum int, days int
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
+	days = ClampStatsSpan(days)
 
 	// 尝试从缓存获取
 	cacheKey := makeStatsCacheKey("GetTokensLatencyStats", userName, modelName, subTableNum, days, "")
@@ -853,9 +852,7 @@ func GetTokensLatencyStats(userName, modelName string, subTableNum int, days int
 	query := sdb.Table(tableName).
 		Select("elapsed_ms, tokens_all_size").
 		Where("user_name = ? AND model_name = ?", userName, modelName)
-	if days > 0 {
-		query = query.Where("created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)", days)
-	}
+	query = applyStatsSpanWhere(query, days)
 
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("failed to get tokens latency stats rows: %w", err)

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { post } from '../shared/api'
 import DataTable from '../components/DataTable'
+import TimeRangeSelector from '../components/TimeRangeSelector'
+import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
+import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
 
 // 过期数据清理报告：CleanupReportInterface（POST JSON）
 // action: list {page,page_size,days} / state / tables [table=精确计数]
+// 20260826：时间跨度为动态档位（1 小时 ~ transactionRetentionDays+1 天，统一 span 编码）
 
 const PAGE_SIZE = 20
-const DAYS_OPTIONS = [7, 30, 90, 0]
 
 function fmt(n) {
   n = Number(n) || 0
@@ -33,8 +36,6 @@ function fmtTime(v) {
 export default function CleanupReport() {
   const { t } = useI18n()
 
-  const daysLabel = (d) => (d === 0 ? t('cleanup.allTime') : t('cleanup.lastNDays', { days: d }))
-
   function statusTag(status, errMsg) {
     const s = String(status || 'unknown')
     const lowDisk = String(errMsg || '').indexOf(t('cleanup.diskSpaceLow')) >= 0
@@ -51,7 +52,8 @@ export default function CleanupReport() {
     return <span>{s}</span>
   }
 
-  const [days, setDays] = useState(() => normalizeDays(localStorage.getItem('lsm:cleanupReport:days:v1')))
+  const { levels, loading: levelsLoading } = useTimeSpanLevels()
+  const [days, setDays] = useState(null) // 档位加载后按旧 localStorage 值就近迁移
   const [page, setPage] = useState(1)
   const [reports, setReports] = useState([])
   const [total, setTotal] = useState(0)
@@ -90,6 +92,13 @@ export default function CleanupReport() {
   }, [])
 
   useEffect(() => {
+    if (!levels.length || days !== null) return
+    setDays(nearestSpan(levels, localStorage.getItem('lsm:cleanupReport:days:v1') || 30))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels])
+
+  useEffect(() => {
+    if (days === null) return
     localStorage.setItem('lsm:cleanupReport:days:v1', String(days))
     loadData(1, days)
     loadState()
@@ -106,10 +115,6 @@ export default function CleanupReport() {
     } catch (e) { alert(t('cleanup.exactCountFailed') + e.message) }
   }
 
-  function normalizeDays(v) {
-    const n = parseInt(v, 10)
-    return DAYS_OPTIONS.includes(n) ? n : 30
-  }
 
   const totalPages = Math.ceil(total / PAGE_SIZE) || 1
   const retention = state && typeof state.retention_days === 'number'
@@ -142,9 +147,7 @@ export default function CleanupReport() {
       <h2 className="page-title">{t('cleanup.title')}</h2>
       <div className="toolbar">
         <span>{t('cleanup.timeRange')}</span>
-        <select value={days} onChange={(e) => { setDays(normalizeDays(e.target.value)); setPage(1) }}>
-          {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{daysLabel(d)}</option>)}
-        </select>
+        <TimeRangeSelector span={days ?? 30} onChange={(v) => { setDays(v); setPage(1) }} levels={levels} loading={levelsLoading} />
         <button className="btn btn-primary" disabled={loading} onClick={() => { setPage(1); loadData(1, days); loadState(); loadTables() }}>
           {loading ? t('cleanup.refreshing') : t('common.refresh')}
         </button>

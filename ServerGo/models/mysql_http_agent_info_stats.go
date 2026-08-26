@@ -86,13 +86,13 @@ func finalizeAgentInfoUsageStats(acc map[string]*agentInfoUsageAccumulator) (*Ag
 // GetAgentInfoUsageStatsAll 管理员 Agent 信息页统计：扫描所有分表，按 agent_tool_name 聚合
 // 调用次数和 Tokens（全站维度）。数据源为交易分表 agent_tool_name 列，确保不丢失
 // TAgentHttpAgentInfo 未记录（如 unknown）或未含 Tokens 的统计信息。
-// days<=0 表示无限制；days>0 仅统计 created_at 在最近 N 天内的记录（最大 365）。
+// days 参数为统一 span 编码（20260826）：0 无限制；>0 最近 N 天（≤365）；<0 最近 |N| 小时（≤720）。
 func GetAgentInfoUsageStatsAll(subTableNum int, days int) (*AgentInfoUsageSummary, []AgentInfoUsageStat, error) {
 	if database.DB == nil {
 		return nil, nil, fmt.Errorf("database not initialized")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = ClampStatsDays(days)
+	days = ClampStatsSpan(days)
 
 	acc := make(map[string]*agentInfoUsageAccumulator)
 	for i := 0; i < subTableNum; i++ {
@@ -110,7 +110,7 @@ func GetAgentInfoUsageStatsAll(subTableNum int, days int) (*AgentInfoUsageSummar
 			TokensOutputSize uint64 `gorm:"column:tokens_output_size"`
 		}
 
-		err := applyStatsDaysWhere(database.DB.Table(tableName), days).
+		err := applyStatsSpanWhere(database.DB.Table(tableName), days).
 			Select("agent_tool_name, user_name, COUNT(*) as call_count, COALESCE(SUM(tokens_all_size), 0) as tokens_all_size, COALESCE(SUM(tokens_input_size), 0) as tokens_input_size, COALESCE(SUM(tokens_output_size), 0) as tokens_output_size").
 			Group("agent_tool_name, user_name").
 			Scan(&rows).Error
@@ -144,7 +144,7 @@ func GetAgentInfoUsageStatsAll(subTableNum int, days int) (*AgentInfoUsageSummar
 
 // GetAgentInfoUsageStatsByUser 用户 Agent 信息页统计：仅统计当前用户的平台模型分表，
 // 按 agent_tool_name 聚合调用次数和 Tokens（用户维度）。
-// days<=0 表示无限制；days>0 仅统计 created_at 在最近 N 天内的记录（最大 365）。
+// days 参数为统一 span 编码（20260826）：0 无限制；>0 最近 N 天（≤365）；<0 最近 |N| 小时（≤720）。
 func GetAgentInfoUsageStatsByUser(userName string, modelNames []string, subTableNum int, days int) (*AgentInfoUsageSummary, []AgentInfoUsageStat, error) {
 	if database.DB == nil {
 		return nil, nil, fmt.Errorf("database not initialized")
@@ -154,7 +154,7 @@ func GetAgentInfoUsageStatsByUser(userName string, modelNames []string, subTable
 		return nil, nil, fmt.Errorf("user_name is required")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = ClampStatsDays(days)
+	days = ClampStatsSpan(days)
 
 	// 一个用户的多个模型可能落在同一张分表，需对 (表名) 去重，避免重复累加。
 	seenTable := make(map[string]struct{})
@@ -181,7 +181,7 @@ func GetAgentInfoUsageStatsByUser(userName string, modelNames []string, subTable
 			TokensInputSize  uint64 `gorm:"column:tokens_input_size"`
 			TokensOutputSize uint64 `gorm:"column:tokens_output_size"`
 		}
-		err := applyStatsDaysWhere(database.DB.Table(tableName), days).
+		err := applyStatsSpanWhere(database.DB.Table(tableName), days).
 			Select("agent_tool_name, COUNT(*) as call_count, COALESCE(SUM(tokens_all_size), 0) as tokens_all_size, COALESCE(SUM(tokens_input_size), 0) as tokens_input_size, COALESCE(SUM(tokens_output_size), 0) as tokens_output_size").
 			Where("user_name = ?", userName).
 			Group("agent_tool_name").

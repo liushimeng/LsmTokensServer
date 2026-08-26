@@ -100,20 +100,22 @@ func GetSessionAnalysis(userName, modelName string, subTableNum int, days int) (
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时），cutoff 参数化（原 DATE_SUB(CURDATE())
+	// 自然日语义废弃，统一为滚动窗口，与 stats 页一致）
+	span := ClampStatsSpan(days)
 
 	tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
 
 	var records []TAgentHttpTransactionDataItem
 	// 使用预解析字段，完全排除 request_body/response_body 等大字段
-	err := database.DB.Table(tableName).
+	query := database.DB.Table(tableName).
 		Select("id", "created_at", "request_method", "request_url", "request_remote_addr",
 			"request_content_length", "response_content_length", "elapsed_ms",
 			"tokens_input_size", "tokens_output_size", "tokens_all_size",
 			"is_parsed", "is_task", "task_model", "is_stream", "has_system_prompt", "has_tool_call", "message_count").
-		Where("user_name = ? AND model_name = ? AND created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)", userName, modelName, days).
+		Where("user_name = ? AND model_name = ?", userName, modelName)
+	query = applyStatsSpanWhere(query, span)
+	err := query.
 		Order("created_at ASC").
 		Limit(SessionAnalysisLimit).
 		Find(&records).Error
@@ -234,6 +236,7 @@ func aggregateSessions(records []TAgentHttpTransactionDataItem, serviceName stri
 }
 
 // GetTaskAnalysis 获取 Task 分析数据
+// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）；0 保持旧行为回落 30 天。
 func GetTaskAnalysis(userName, modelName string, subTableNum int, days int) (*TaskAnalysisResult, error) {
 	if database.DB == nil {
 		return nil, fmt.Errorf("database not initialized")
@@ -241,23 +244,23 @@ func GetTaskAnalysis(userName, modelName string, subTableNum int, days int) (*Ta
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days <= 0 {
-		days = 30
+	if days == 0 {
+		days = 30 // 旧默认（新 UI 的最大档已覆盖全部保留期，0 仅来自旧客户端）
 	}
-	if days > 365 {
-		days = 365
-	}
+	span := ClampStatsSpan(days)
 
 	tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
 
 	var records []TAgentHttpTransactionDataItem
 	// 使用预解析字段，完全排除 request_body/response_body 等大字段
-	err := database.DB.Table(tableName).
+	query := database.DB.Table(tableName).
 		Select("id", "created_at", "request_method", "request_url", "response_status",
 			"request_remote_addr", "request_content_length", "response_content_length",
 			"elapsed_ms",
 			"is_parsed", "is_task", "task_model", "is_stream", "has_system_prompt", "has_tool_call", "message_count").
-		Where("user_name = ? AND model_name = ? AND created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)", userName, modelName, days).
+		Where("user_name = ? AND model_name = ?", userName, modelName)
+	query = applyStatsSpanWhere(query, span)
+	err := query.
 		Order("created_at DESC").
 		Limit(TaskAnalysisLimit).
 		Find(&records).Error
@@ -879,9 +882,8 @@ func GetAgentToolStatsByRange(userName, modelName string, subTableNum int, days 
 	if subTableNum <= 0 {
 		subTableNum = config.DEFAULT_SUB_TABLE_NUM
 	}
-	if days > 365 {
-		days = 365
-	}
+	// 20260826：days 参数升级为统一 span 编码（负值=最近 N 小时）
+	days = ClampStatsSpan(days)
 
 	// 尝试从缓存获取
 	cacheKey := makeStatsCacheKey("GetAgentToolStatsByRange", userName, modelName, subTableNum, days, "")
@@ -912,9 +914,7 @@ func GetAgentToolStatsByRange(userName, modelName string, subTableNum int, days 
 	query := sdb.Table(tableName).
 		Select("agent_tool_name, created_at").
 		Where("user_name = ? AND model_name = ? AND agent_tool_name != '' AND agent_tool_name != 'unknown'", userName, modelName)
-	if days > 0 {
-		query = query.Where("created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)", days)
-	}
+	query = applyStatsSpanWhere(query, days)
 
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("failed to query agent tool stats rows: %w", err)

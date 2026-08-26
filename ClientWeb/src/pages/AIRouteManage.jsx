@@ -3,6 +3,9 @@ import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import TimeRangeSelector from '../components/TimeRangeSelector'
+import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
+import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
 
 // 折叠/分页 localStorage 工具（带容错）
@@ -15,8 +18,6 @@ const DEFAULT_PAGE_SIZE = 50
 // action: list / list_models / list_endpoints / add / update / delete / batch_delete / batch_update / batch_stats
 // 用户端（29001）：UserAIRouteInterface（action: list / list_endpoints / count_record_by_protocol / update），
 // 仅限本人路由的受限编辑，无新增/删除/批量。
-
-const DAYS_OPTIONS = [-1, -2, -4, -6, -12, 1, 3, 5, 7, 14, 30, 60, 90, 0]
 
 const protocolName = (t) => (parseInt(t, 10) === 1 ? 'Anthropic' : 'OpenAI')
 const protocolSlug = (t) => (parseInt(t, 10) === 1 ? 'anthropic' : 'openai')
@@ -50,7 +51,8 @@ export default function AIRouteManage() {
   const [userRoutes, setUserRoutes] = useState([])
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
-  const [days, setDays] = useState(3)
+  const { levels, loading: levelsLoading } = useTimeSpanLevels()
+  const [days, setDays] = useState(null) // 档位加载后初始化（默认就近 3 天档；span 编码负值=小时）
   const [stats, setStats] = useState({}) // route_id -> {anthropic_count, openai_count}
 
   // 算法名称/描述（需 t() 内联，因为含变量）
@@ -62,7 +64,6 @@ export default function AIRouteManage() {
   }
 
   // 天数标签（需 t() 内联，因为含变量）
-  const daysLabel = (d) => (d < 0 ? t('aiRouteManage.daysHour', { hours: -d }) : d === 0 ? t('aiRouteManage.daysAll') : t('aiRouteManage.daysDay', { days: d }))
 
   // 折叠/展开状态（按角色隔离 localStorage）
   const collapseKey = `lsm:airoute:collapsed:${isAdmin ? 'manager' : 'user'}`
@@ -110,8 +111,16 @@ export default function AIRouteManage() {
       .catch(() => {})
   }, [isAdmin])
 
+  // 动态档位到达后初始化 span（默认 3 天就近档）
+  useEffect(() => {
+    if (!levels.length || days !== null) return
+    setDays(nearestSpan(levels, 3))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels])
+
   // 时间跨度统计：管理端 batch_stats 批量聚合；用户端 count_record_by_protocol 按模型逐条
   useEffect(() => {
+    if (days === null) return // 等待动态档位加载
     if (!routes.length) { setStats({}); return }
     if (isAdmin) {
       const items = routes
@@ -376,9 +385,7 @@ export default function AIRouteManage() {
       key: 'stats', title: (
         <span>
           {t('aiRouteManage.summaryStats')}{' '}
-          <select value={days} onChange={(e) => setDays(normalizeDays(e.target.value))} style={{ fontSize: 12 }}>
-            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{daysLabel(d)}</option>)}
-          </select>
+          <TimeRangeSelector span={days ?? 3} onChange={setDays} levels={levels} loading={levelsLoading} style={{ fontSize: 12 }} />
         </span>
       ),
       render: (_, r) => {
@@ -405,7 +412,7 @@ export default function AIRouteManage() {
           <button className="btn btn-sm btn-primary" onClick={() => openEdit(r)}>{t('aiRouteManage.editRoute')}</button>
           <a className="btn btn-link" href={`#/ChatDialog?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>{t('aiRouteManage.dialog')}</a>
           <a className="btn btn-link" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>{t('aiRouteManage.dialogAnalysis')}</a>
-          <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days >= 0 ? '&days=' + days : ''}`}>{t('aiRouteManage.summaryStats')}</a>
+          <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days !== null ? '&days=' + days : ''}`}>{t('aiRouteManage.summaryStats')}</a>
           {isAdmin ? <button className="btn btn-sm btn-danger" onClick={() => deleteItem(r)}>{t('aiRouteManage.deleteRoute')}</button> : null}
         </span>
       ),
@@ -566,9 +573,4 @@ export default function AIRouteManage() {
       ) : null}
     </div>
   )
-}
-
-function normalizeDays(v) {
-  const n = parseInt(v, 10)
-  return DAYS_OPTIONS.includes(n) ? n : 3
 }

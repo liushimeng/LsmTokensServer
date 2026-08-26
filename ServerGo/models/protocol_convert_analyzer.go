@@ -48,17 +48,12 @@ type ProtocolConvertAnalyzerRecordDetail struct {
 	IsStream                   bool      `json:"is_stream"`
 }
 
-// analyzerDaysFilter days 参数语义：
-//   days = 0 或 days = -1  → 查询全部数据（无时间限制）
-//   days > 0                → 查询最近 days 天（最大 90 天）
+// analyzerDaysFilter days 参数语义（20260826 升级为统一 span 编码）：
+//   days = 0  → 查询全部数据（无时间限制；旧注释中的 days=-1 实为笔误，前端从未传过 -1）
+//   days > 0  → 查询最近 days 天（最大 365 天）
+//   days < 0  → 查询最近 (-days) 小时（最大 720 小时）
 func analyzerDaysFilter(days int) (time.Time, bool) {
-	if days <= 0 {
-		return time.Time{}, false
-	}
-	if days > 90 {
-		days = 90
-	}
-	return time.Now().AddDate(0, 0, -days), true
+	return SpanCutoffTime(days)
 }
 
 // GetProtocolConvertAnalyzerRecordDetailByID 根据用户+模型定位分表并加载单条大字段详情。

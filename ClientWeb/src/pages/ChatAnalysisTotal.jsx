@@ -3,6 +3,9 @@ import { openWs, post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
+import TimeRangeSelector from '../components/TimeRangeSelector'
+import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
+import { nearestSpan } from '../shared/timeSpan'
 import { fmtNum, fmtMs, pickRouteQuery } from '../shared/format'
 import { useI18n } from '../i18n'
 
@@ -10,7 +13,7 @@ import { useI18n } from '../i18n'
 // 协议：连接后首条消息 {type:'query',days,model_name,request_id(12hex)}；
 //       服务端按 7 个 stage 串行推 chunk 快照，结束推 done；错误推 error 帧。
 // WS 不可用（网关不支持 Upgrade）时 fallback 到 action=full_http 的 HTTP 接口。
-const DAYS_OPTIONS = [0, 1, 3, 5, 7, 14, 30, 60, 90]
+// 20260826：时间跨度为动态档位（1 小时 ~ transactionRetentionDays+1 天，统一 span 编码）。
 
 // 生成 12 位小写十六进制 request_id（服务端 sanitizeRequestID 强校验）
 function genRequestId() {
@@ -41,7 +44,8 @@ export default function ChatAnalysisTotal({ route }) {
   const isAdmin = isAdminRole() // 用户端：服务端强制本人数据，隐藏用户名输入
   const [userName, setUserName] = useState(isAdmin ? init.userName : '')
   const [modelName, setModelName] = useState(init.modelName)
-  const [days, setDays] = useState(7)
+  const { levels, loading: levelsLoading } = useTimeSpanLevels()
+  const [days, setDays] = useState(null) // 档位加载后初始化（默认就近 7 天档）
   // 各 stage 累计快照
   const [stages, setStages] = useState({})
   const [running, setRunning] = useState(false)
@@ -171,7 +175,7 @@ export default function ChatAnalysisTotal({ route }) {
   }
 
   // WS 查询主流程
-  const runQuery = (d = days, u = userName, m = modelName) => {
+  const runQuery = (d = days ?? 7, u = userName, m = modelName) => {
     stopQuery()
     setStages({}); setError(''); setDoneInfo(null); setRunning(true); setProgress(t('chatAnalysisTotal.connecting'))
     const rid = genRequestId()
@@ -236,18 +240,28 @@ export default function ChatAnalysisTotal({ route }) {
     return () => stopQuery() // 离开页面时关闭 WS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // 动态档位到达后初始化 span（默认 7 天就近档）
   useEffect(() => {
+    if (!levels.length || days !== null) return
+    setDays(nearestSpan(levels, 7))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels])
+
+  // 首次进入：若路由带了 user/model 则自动查询（等待档位就绪）
+  useEffect(() => {
+    if (days === null) return
     if (init.userName && init.modelName) runQuery(days, init.userName, init.modelName)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [days])
 
   // 用户端未带模型进入：本人模型列表（缓存一次）到达后自动选第一个并查询
   useEffect(() => {
+    if (days === null) return
     if (isAdmin || init.modelName || !myModelNames.length || modelName) return
     setModelName(myModelNames[0])
     runQuery(days, '', myModelNames[0])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myModelNames])
+  }, [myModelNames, days])
 
   const kpi = stages.kpi
   const ts = stages.tokens_summary
@@ -285,9 +299,7 @@ export default function ChatAnalysisTotal({ route }) {
           </select>
         </label>
         <label>{t('chatAnalysisTotal.timeRange')}
-          <select value={days} onChange={(e) => { const d = Number(e.target.value); setDays(d); setStages({}); setDoneInfo(null); if (!running) runQuery(d) }}>
-            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? t('chatAnalysisTotal.allTime') : t('chatAnalysisTotal.daysDay', { days: d })}</option>)}
-          </select>
+          <TimeRangeSelector span={days ?? 7} onChange={(d) => { setDays(d); setStages({}); setDoneInfo(null); if (!running) runQuery(d) }} levels={levels} loading={levelsLoading} />
         </label>
         <button className="btn btn-primary" onClick={() => runQuery()} disabled={running}>{t('chatAnalysisTotal.query')}</button>
         {running ? <button className="btn" onClick={() => { stopQuery(); setRunning(false); setProgress('') }}>{t('chatAnalysisTotal.cancel')}</button> : null}

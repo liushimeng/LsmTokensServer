@@ -367,15 +367,23 @@ func (c *wsConn) attachScanned(kpi map[string]interface{}, scanned int64, final 
 	return kpi
 }
 
-// normalizeChatStatsDays 把 days 限制到 ChatAnalysisTotal 白名单 [0,1,3,5,7,14,30,60,90]，
-// 不在白名单（含负值、>90）回落 7。
+// normalizeChatStatsDays 把 days 限制到合法范围。
+// 20260826 时间跨度动态档位：白名单 [0,1,3,5,7,14,30,60,90] 改为范围校验的统一 span 编码
+// （0 无限制；>0 最近 N 天 ≤365；<0 最近 |N| 小时 ≤720），范围外回落 7。
 func normalizeChatStatsDays(d int) int {
-	for _, x := range []int{0, 1, 3, 5, 7, 14, 30, 60, 90} {
-		if d == x {
-			return d
-		}
+	if d == 0 {
+		return 0
 	}
-	return 7
+	if d > 0 {
+		if d > 365 {
+			return 7
+		}
+		return d
+	}
+	if d < -720 {
+		return 7
+	}
+	return d
 }
 
 // sanitizeRequestID 校验客户端 request_id 必须是 12 个小写十六进制字符
@@ -448,12 +456,20 @@ func lsmBuildChatStatsKPI(ctx context.Context, days int, modelName string, getMo
 		activeModels = res.activeDays // 粗略估算（每天至少 1 个模型）
 	}
 
+	// 20260826：days 为统一 span 编码（负值=小时窗口），window_days 输出换算后的展示天数
+	displayDays := days
+	if days < 0 {
+		displayDays = (models.SpanHours(days) + 23) / 24
+		if displayDays < 1 {
+			displayDays = 1
+		}
+	}
 	kpi := map[string]interface{}{
 		"total_calls":     res.totalCalls,
 		"total_tokens":    res.totalTokens,
 		"active_models":   activeModels,
 		"active_days":     res.activeDays,
-		"window_days":     days,
+		"window_days":     displayDays,
 		"model_name":      modelName,
 		"warnings":        warnings,
 		"generated_at_ms": time.Now().UnixMilli(),
@@ -483,13 +499,21 @@ func lsmBuildChatStatsTokensSummary(ctx context.Context, days int) (interface{},
 		totalOutput += s.TokensOutput
 		totalAll += s.TokensTotal
 	}
+	// 20260826：days 为统一 span 编码（负值=小时窗口），window_days 输出换算后的展示天数
+	displayDays := days
+	if days < 0 {
+		displayDays = (models.SpanHours(days) + 23) / 24
+		if displayDays < 1 {
+			displayDays = 1
+		}
+	}
 	return map[string]interface{}{
 		"buckets":         stats,
 		"total_count":     totalCount,
 		"total_input":     totalInput,
 		"total_output":    totalOutput,
 		"total_tokens":    totalAll,
-		"window_days":     days,
+		"window_days":     displayDays,
 		"generated_at_ms": time.Now().UnixMilli(),
 	}, nil
 }

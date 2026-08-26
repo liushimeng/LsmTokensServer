@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { get, post } from '../shared/api'
 import { fmtTime } from '../shared/format'
 import DataTable from '../components/DataTable'
+import TimeRangeSelector from '../components/TimeRangeSelector'
+import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
+import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
 
 // 协议转换分析器（实验性页面，迁移自旧 server_web_manager_protocol_converter*.go）
@@ -27,7 +30,7 @@ const KB_GROUPS = [
   ['response_header_fields', 'protocolConvert.responseHeaderMapping'],
 ]
 
-const DAYS_OPTIONS = [0, 1, 3, 7, 15, 30, 60, 90]
+// 20260826：时间跨度为动态档位（1 小时 ~ transactionRetentionDays+1 天，统一 span 编码）
 
 // 单段转换：复刻旧页面 convertOneSection 逻辑（headers/sse 走 text_input，其余走 input）
 async function convertOneSection(input, direction, section, isStream, t) {
@@ -127,7 +130,8 @@ export default function ProtocolConvertAnalyzer() {
   const [userName, setUserName] = useState('')
   const [modelName, setModelName] = useState('')
   const [protocolType, setProtocolType] = useState('0')
-  const [days, setDays] = useState('3')
+  const { levels, loading: levelsLoading } = useTimeSpanLevels()
+  const [days, setDays] = useState(null) // 档位加载后初始化（默认就近 3 天档；span 编码负值=小时）
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [records, setRecords] = useState(null) // null=加载中
@@ -174,11 +178,18 @@ export default function ProtocolConvertAnalyzer() {
     return Array.from(set).sort()
   }, [users, userName])
 
+  // 动态档位到达后初始化 span（默认 3 天就近档）
+  useEffect(() => {
+    if (!levels.length || days !== null) return
+    setDays(String(nearestSpan(levels, 3)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels])
+
   // 加载记录列表
   const loadRecords = useCallback((p) => {
     setPage(p)
     setRecords(null)
-    const params = new URLSearchParams({ page: p, page_size: 10, protocol_type: protocolType, days })
+    const params = new URLSearchParams({ page: p, page_size: 10, protocol_type: protocolType, days: days ?? 3 })
     if (userName) params.set('user_name', userName)
     if (modelName) params.set('model_name', modelName)
     get('ProtocolConvertAnalyzerRecords?' + params.toString())
@@ -186,7 +197,8 @@ export default function ProtocolConvertAnalyzer() {
       .catch(() => setRecords([]))
   }, [protocolType, userName, modelName, days])
 
-  useEffect(() => { loadRecords(1) }, [loadRecords])
+  const daysReady = days !== null
+  useEffect(() => { if (daysReady) loadRecords(1) }, [loadRecords, daysReady])
 
   // 切换全局开关
   const toggle = async () => {
@@ -246,7 +258,6 @@ export default function ProtocolConvertAnalyzer() {
 
   const totalPages = Math.max(1, Math.ceil(total / 10))
 
-  const daysLabel = (d) => (d === 0 ? t('protocolConvert.allTime') : t('protocolConvert.lastNDays', { n: d }))
 
   const recordColumns = [
     { key: 'id', title: 'ID', width: 70, render: (v) => <code>{v}</code> },
@@ -323,11 +334,7 @@ export default function ProtocolConvertAnalyzer() {
                   <option value="2">{t('chatAnalysis.openai')}</option>
                 </select>
                 <label>{t('protocolConvert.timeRange')}</label>
-                <select value={days} onChange={(e) => setDays(e.target.value)}>
-                  {DAYS_OPTIONS.map((d) => (
-                    <option key={d} value={String(d)}>{daysLabel(d)}</option>
-                  ))}
-                </select>
+                <TimeRangeSelector span={days === null ? 3 : Number(days)} onChange={(v) => setDays(String(v))} levels={levels} loading={levelsLoading} />
                 <span style={{ color: 'var(--muted)', fontSize: 12 }}>{t('protocolConvert.totalRecords', { count })}</span>
               </div>
             )}

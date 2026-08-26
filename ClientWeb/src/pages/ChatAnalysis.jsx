@@ -10,18 +10,14 @@ import JsonTree from '../components/JsonTree'
 import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/format'
 import { parseSSEEvents, aggregateSSE, aggregateToText, sseEventsToText } from '../shared/sse'
 import { prettyJSON } from '../shared/json'
+import TimeRangeSelector from '../components/TimeRangeSelector'
+import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
+import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
 
 // 对话明细查询页（管理端 /ChatAnalysisInterface）
 // 支持多条件筛选 + 分页 + 单条详情（按需拉取大字段）+ 批量删除
 // v2.0.7x 阶段AM：新增「转发类型」徽标与筛选；详情 Modal 重构支持 JSON/SSE/聚合多视图。
-const DAYS_OPTIONS = [
-  { v: 0, t: 'allTime' }, { v: -1, t: 'lastNHours', vars: { n: 1 } }, { v: -2, t: 'lastNHours', vars: { n: 2 } },
-  { v: -4, t: 'lastNHours', vars: { n: 4 } }, { v: -6, t: 'lastNHours', vars: { n: 6 } }, { v: -12, t: 'lastNHours', vars: { n: 12 } },
-  { v: 1, t: 'lastNDays', vars: { n: 1 } }, { v: 3, t: 'lastNDays', vars: { n: 3 } }, { v: 5, t: 'lastNDays', vars: { n: 5 } },
-  { v: 7, t: 'lastNDays', vars: { n: 7 } }, { v: 14, t: 'lastNDays', vars: { n: 14 } }, { v: 30, t: 'lastNDays', vars: { n: 30 } },
-  { v: 60, t: 'lastNDays', vars: { n: 60 } }, { v: 90, t: 'lastNDays', vars: { n: 90 } },
-]
 const PAGE_SIZES = [3, 5, 10, 15, 20, 50, 100]
 // 详情字段白名单（与服务端 chatAnalysisDetailFieldColumns 对齐）
 const DETAIL_FIELDS = [
@@ -94,7 +90,14 @@ export default function ChatAnalysis({ route }) {
   // 筛选条件（路由 > localStorage > 默认值）
   const [userName, setUserName] = useState(init.userName || (isAdmin && saved && saved.userName) || '')
   const [modelName, setModelName] = useState(init.modelName || (saved && saved.modelName) || '')
-  const [days, setDays] = useState((saved && saved.days != null) ? saved.days : 3)
+  // 20260826 动态档位：days 为统一 span 编码（负值=小时），档位加载后按旧存储值就近迁移
+  const { levels, loading: levelsLoading } = useTimeSpanLevels()
+  const [days, setDays] = useState(null)
+  useEffect(() => {
+    if (!levels.length || days !== null) return
+    setDays(nearestSpan(levels, (saved && saved.days != null) ? saved.days : 3))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels])
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState((saved && saved.pageSize) || 10)
   const [filterUrl, setFilterUrl] = useState((saved && saved.filterUrl) || '')
@@ -167,19 +170,24 @@ export default function ChatAnalysis({ route }) {
   }
   useEffect(() => {
     get('ChatAnalysisAgentToolsInterface').then((d) => setAgentTools(d.data || [])).catch(() => {})
-    if (hasKey) { loadOptions(); setPage(1); doQuery(1); return }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  // 20260826：等待动态档位加载（旧存储值就近迁移后再首查）；span 变化自动重查
+  useEffect(() => {
+    if (days === null) return
+    if (hasKey) { loadOptions(); setPage(1); doQuery(1) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days])
 
   // 用户端进入页面未带模型：本人模型列表（缓存一次）到达后自动选第一个并查询
   useEffect(() => {
+    if (days === null) return
     if (isAdmin || !myModelNames.length || modelName) return
     const first = myModelNames[0]
     setModelName(first); setPage(1)
     loadOptions(first)
     doQuery(1, first)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myModelNames])
+  }, [myModelNames, days])
 
   // 查询（modelOverride 用于自动查询时规避 setState 异步）
   const doQuery = async (p = page, modelOverride) => {
@@ -190,7 +198,7 @@ export default function ChatAnalysis({ route }) {
     try {
       const d = await post('ChatAnalysisInterface', {
         user_name: isAdmin ? userName.trim() : '', model_name: mn,
-        page: p, page_size: pageSize, days,
+        page: p, page_size: pageSize, days: days ?? 3,
         filter_url: filterUrl.trim(), filter_method: filterMethod.trim(),
         filter_status: filterStatus.trim(), filter_status_not: filterStatusNot,
         filter_protocol_type: filterProtocolType, filter_algorithm_type: filterAlgorithmType,
@@ -408,9 +416,7 @@ export default function ChatAnalysis({ route }) {
           </select>
         </label>
         <label>{t('chatAnalysis.timeRange')}
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            {DAYS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{t(`chatAnalysis.${o.t}`, o.vars)}</option>)}
-          </select>
+          <TimeRangeSelector span={days ?? 3} onChange={(v) => { setDays(v); setPage(1) }} levels={levels} loading={levelsLoading} />
         </label>
         <label>{t('chatAnalysis.perPage')}
           <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}>

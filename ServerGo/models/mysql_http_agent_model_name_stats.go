@@ -58,7 +58,7 @@ type ModelNameUsageStat struct {
 // ctx 取消安全：context.Canceled / DeadlineExceeded 直接返回，不当作 error。
 func GetModelNameUsageStatsByRange(subTableNum int, days int) ([]ModelNameUsageStat, error) {
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = ClampStatsDays(days)
+	days = ClampStatsSpan(days)
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -90,7 +90,7 @@ func GetModelNameUsageStatsByRange(subTableNum int, days int) ([]ModelNameUsageS
 			TokensOutput uint64 `gorm:"column:tokens_output"`
 			TokensAll    uint64 `gorm:"column:tokens_all"`
 		}
-		err := applyStatsDaysWhere(sdb.Table(tableName), days).
+		err := applyStatsSpanWhere(sdb.Table(tableName), days).
 			WithContext(ctx).
 			Select("model_name, COUNT(*) as call_count, COALESCE(SUM(tokens_input_size), 0) as tokens_input, COALESCE(SUM(tokens_output_size), 0) as tokens_output, COALESCE(SUM(tokens_all_size), 0) as tokens_all").
 			Where("model_name <> ''").
@@ -134,7 +134,7 @@ func GetModelNameUsageStatsByRange(subTableNum int, days int) ([]ModelNameUsageS
 			ModelName string `gorm:"column:model_name"`
 			UserCount int64  `gorm:"column:user_count"`
 		}
-		uerr := applyStatsDaysWhere(sdb.Table(tableName), days).
+		uerr := applyStatsSpanWhere(sdb.Table(tableName), days).
 			WithContext(ctx).
 			Select("model_name, COUNT(DISTINCT user_name) as user_count").
 			Where("model_name <> ''").
@@ -166,7 +166,7 @@ func GetModelNameUsageStatsByRange(subTableNum int, days int) ([]ModelNameUsageS
 			DstEndpointID uint64 `gorm:"column:dst_endpoint_id"`
 			CallCount     int64  `gorm:"column:call_count"`
 		}
-		derr := applyStatsDaysWhere(sdb.Table(tableName), days).
+		derr := applyStatsSpanWhere(sdb.Table(tableName), days).
 			WithContext(ctx).
 			Select("model_name, dst_endpoint_id, COUNT(*) as call_count").
 			Where("model_name <> '' AND dst_endpoint_id > 0").
@@ -275,7 +275,7 @@ func GetDstModelUsageStatsByUserModel(userName, modelName string, subTableNum in
 		return nil, fmt.Errorf("GetDstModelUsageStatsByUserModel: user_name 与 model_name 都必须非空")
 	}
 	subTableNum = normalizeSubTableNum(subTableNum)
-	days = ClampStatsDays(days)
+	days = ClampStatsSpan(days)
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -305,7 +305,7 @@ func GetDstModelUsageStatsByUserModel(userName, modelName string, subTableNum in
 			TokensOutput uint64 `gorm:"column:tokens_output"`
 			TokensAll    uint64 `gorm:"column:tokens_all"`
 		}
-		err := applyStatsDaysWhere(sdb.Table(tableName), days).
+		err := applyStatsSpanWhere(sdb.Table(tableName), days).
 			WithContext(ctx).
 			Select("dst_model_name, COUNT(*) as call_count, COALESCE(SUM(tokens_input_size), 0) as tokens_input, COALESCE(SUM(tokens_output_size), 0) as tokens_output, COALESCE(SUM(tokens_all_size), 0) as tokens_all").
 			Where("user_name = ? AND model_name = ? AND dst_model_name <> ''", userName, modelName).
@@ -347,7 +347,7 @@ func GetDstModelUsageStatsByUserModel(userName, modelName string, subTableNum in
 			DstEndpointID uint64 `gorm:"column:dst_endpoint_id"`
 			CallCount     int64  `gorm:"column:call_count"`
 		}
-		derr := applyStatsDaysWhere(sdb.Table(tableName), days).
+		derr := applyStatsSpanWhere(sdb.Table(tableName), days).
 			WithContext(ctx).
 			Select("dst_model_name, dst_endpoint_id, COUNT(*) as call_count").
 			Where("user_name = ? AND model_name = ? AND dst_model_name <> '' AND dst_endpoint_id > 0", userName, modelName).
