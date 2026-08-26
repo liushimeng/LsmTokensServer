@@ -2,12 +2,13 @@ package models
 
 import (
 	"fmt"
-	"github.com/lishimeng/LsmTokensServer/database"
-	"github.com/lishimeng/LsmTokensServer/logger"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/lishimeng/LsmTokensServer/database"
+	"github.com/lishimeng/LsmTokensServer/logger"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -358,6 +359,47 @@ func UpdateUserPasswordHashed(id uint64, hashedPassword string) error {
 	}
 	invalidateUserCache(id)
 	return nil
+}
+
+// MigratePlaintextPasswords 启动时扫描存量用户，将明文密码批量升级为 bcrypt 哈希。
+// 安全红线：v2.0.56 起密码只存 bcrypt 哈希；模型登录（doModelLogin）不经过 VerifyPassword，
+// 因此必须在启动时一次性迁移，而非依赖登录路径逐个升级。
+// 幂等：仅处理非 bcrypt 前缀的密码，哈希后原地回写，失败不阻塞启动。
+func MigratePlaintextPasswords() {
+	if database.DB == nil {
+		return
+	}
+
+	var users []TAgentHttpUserInfo
+	if err := database.DB.Table(AgentHttpUserInfoTableName).
+		Where("deleted_at IS NULL").
+		Find(&users).Error; err != nil {
+		logger.Printf("[SECURITY] 明文密码迁移扫描失败: %v", err)
+		return
+	}
+
+	migrated, failed := 0, 0
+	for _, u := range users {
+		if u.Password == "" || strings.HasPrefix(u.Password, "$2") {
+			continue // 空密码或已是 bcrypt 哈希，跳过
+		}
+		hashed, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.DefaultCost)
+		if err != nil {
+			logger.Printf("[SECURITY] 用户 %s (id=%d) 密码哈希生成失败: %v", u.UserName, u.ID, err)
+			failed++
+			continue
+		}
+		if err := UpdateUserPasswordHashed(u.ID, string(hashed)); err != nil {
+			logger.Printf("[SECURITY] 用户 %s (id=%d) 密码哈希回写失败: %v", u.UserName, u.ID, err)
+			failed++
+			continue
+		}
+		migrated++
+	}
+
+	if migrated > 0 || failed > 0 {
+		logger.Printf("[SECURITY] 明文密码迁移完成: 成功 %d, 失败 %d", migrated, failed)
+	}
 }
 
 // UpdateUserStatus 更新用户状态

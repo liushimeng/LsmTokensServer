@@ -80,6 +80,11 @@ var crawlUserLocks sync.Map
 //
 // 所有 error 分支均会写一个 "done" 事件，确保前端 EventSource 能正确收尾。
 func SpiderDataSourceCrawlHandler(w http.ResponseWriter, r *http.Request, isAdmin bool, userID uint64) {
+	// 解析 data_source_id —— 必须在任何响应写出之前执行：HTTP/1.1 下 handler 先写响应
+	// （含 header/flush）会导致 net/http 关闭未读的 request body，POST body 通道随即
+	// 读到 "invalid Read on closed Body"（管理端 9101 为 HTTP/1.1 受影响；用户端 HTTP/2 不受影响）
+	dataSourceID := parseCrawlDataSourceID(r)
+
 	// 设置 SSE 响应头（charset=utf-8 确保中文正确传输；retry 极大值抑制浏览器自动重连）
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -110,8 +115,6 @@ func SpiderDataSourceCrawlHandler(w http.ResponseWriter, r *http.Request, isAdmi
 		return
 	}
 
-	// 解析 data_source_id
-	dataSourceID := parseCrawlDataSourceID(r)
 	if dataSourceID == 0 {
 		writeCrawlSSEError(w, flusher, "缺少 data_source_id 参数")
 		return

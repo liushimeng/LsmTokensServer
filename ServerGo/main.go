@@ -301,6 +301,8 @@ func main() {
 				logger.Printf("[WARNING] Failed to init table: %v", err)
 			}
 		}
+		// v2.0.74 阶段AL-BUG2：启动时将存量明文密码批量升级为 bcrypt 哈希（安全红线）
+		modelsdb.MigratePlaintextPasswords()
 		if err := modelsdb.MigrateAgentToolColumns(cfg.DBMysqlSubTableNumber); err != nil {
 			logger.Printf("[WARNING] Failed to migrate agent tool columns: %v", err)
 		}
