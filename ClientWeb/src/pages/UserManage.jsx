@@ -3,16 +3,17 @@ import { post } from '../shared/api'
 import { clearUserModelOptionsCache } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import { useI18n } from '../i18n'
 
 // 用户管理：UserManageInterface + UserModelManageInterface（均 POST JSON {action:...}）
 // 分析页跳转：#/ChatAnalysis?user_name=..&model_name=.. 等（对照旧版 nav）
 
 const ANALYSIS_PAGES = [
-  { page: 'ChatAnalysis', label: '对话明细分析' },
-  { page: 'ChatAnalysisTotal', label: '汇总统计' },
-  { page: 'ChatAnalysisSession', label: '会话分析' },
-  { page: 'ChatAnalysisTask', label: '任务分析' },
-  { page: 'ChatDialog', label: '对话' },
+  { page: 'ChatAnalysis', label: 'chatAnalysis' },
+  { page: 'ChatAnalysisTotal', label: 'chatAnalysisTotal' },
+  { page: 'ChatAnalysisSession', label: 'chatAnalysisSession' },
+  { page: 'ChatAnalysisTask', label: 'chatAnalysisTask' },
+  { page: 'ChatDialog', label: 'chatDialog' },
 ]
 
 function analysisHref(page, userName, modelName) {
@@ -23,6 +24,7 @@ const emptyUserForm = { id: 0, user_name: '', password: '', phone: '', anthropic
 const emptyModelForm = { id: 0, user_id: 0, user_name: '', model_name: '' }
 
 export default function UserManage() {
+  const { t } = useI18n()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -80,8 +82,8 @@ export default function UserManage() {
 
   const toggleUserStatus = async (u) => {
     const status = u.status === 2 ? 1 : 2
-    const label = status === 2 ? '禁用' : '启用'
-    if (!confirm(`确认${label}该用户？已登录的用户将会被强制退出。`)) return
+    const actionLabel = status === 2 ? t('userManage.disable') : t('userManage.enable')
+    if (!confirm(t('userManage.toggleStatusConfirm', { action: actionLabel }))) return
     try {
       await post('UserManageInterface', { action: 'update_status', id: u.id, status })
       loadUsers()
@@ -89,7 +91,7 @@ export default function UserManage() {
   }
 
   const deleteUser = async (u) => {
-    if (!confirm('确认删除该用户？其所有模型也会被删除。')) return
+    if (!confirm(t('userManage.deleteUserConfirm'))) return
     try {
       await post('UserManageInterface', { action: 'delete', id: u.id })
       clearUserModelOptionsCache()
@@ -120,7 +122,7 @@ export default function UserManage() {
   }
 
   const deleteModel = async (m, userId) => {
-    if (!confirm('确认删除该模型？')) return
+    if (!confirm(t('userManage.deleteModelConfirm'))) return
     try {
       await post('UserModelManageInterface', { action: 'delete', id: m.id })
       clearUserModelOptionsCache()
@@ -129,34 +131,34 @@ export default function UserManage() {
   }
 
   const columns = [
-    { key: 'id', title: 'ID', width: 60, sortable: true },
-    { key: 'user_name', title: '用户名', sortable: true },
-    { key: 'phone', title: '手机号', render: (v) => v || '-' },
+    { key: 'id', title: t('userManage.id'), width: 60, sortable: true },
+    { key: 'user_name', title: t('userManage.username'), sortable: true },
+    { key: 'phone', title: t('userManage.phone'), render: (v) => v || '-' },
     {
-      key: 'status', title: '用户状态', sortable: true,
+      key: 'status', title: t('userManage.userStatus'), sortable: true,
       render: (v) => (
         <span>
           <span className={`status-dot ${v === 2 ? 'status-off' : 'status-on'}`} />
-          {v === 2 ? '禁用' : '启用'}
+          {v === 2 ? t('userManage.disable') : t('userManage.enable')}
         </span>
       ),
     },
     {
-      key: 'anthropic_enabled', title: 'Anthropic',
-      render: (v) => <span><span className={`status-dot ${v ? 'status-on' : 'status-off'}`} />{v ? '启用' : '禁用'}</span>,
+      key: 'anthropic_enabled', title: t('chatAnalysis.anthropic'),
+      render: (v) => <span><span className={`status-dot ${v ? 'status-on' : 'status-off'}`} />{v ? t('userManage.enable') : t('userManage.disable')}</span>,
     },
     {
-      key: 'openai_enabled', title: 'OpenAI',
-      render: (v) => <span><span className={`status-dot ${v ? 'status-on' : 'status-off'}`} />{v ? '启用' : '禁用'}</span>,
+      key: 'openai_enabled', title: t('chatAnalysis.openai'),
+      render: (v) => <span><span className={`status-dot ${v ? 'status-on' : 'status-off'}`} />{v ? t('userManage.enable') : t('userManage.disable')}</span>,
     },
     {
-      key: 'actions', title: '操作', render: (_, u) => (
+      key: 'actions', title: t('common.action'), render: (_, u) => (
         <span>
-          <button className="btn btn-sm" onClick={() => toggleUserStatus(u)}>{u.status === 2 ? '启用用户' : '禁用用户'}</button>{' '}
-          <button className="btn btn-sm btn-primary" onClick={() => setUserForm({ ...u, password: '' })}>编辑</button>{' '}
-          <button className="btn btn-sm btn-danger" onClick={() => deleteUser(u)}>删除</button>{' '}
+          <button className="btn btn-sm" onClick={() => toggleUserStatus(u)}>{u.status === 2 ? t('userManage.enableUser') : t('userManage.disableUser')}</button>{' '}
+          <button className="btn btn-sm btn-primary" onClick={() => setUserForm({ ...u, password: '' })}>{t('common.edit')}</button>{' '}
+          <button className="btn btn-sm btn-danger" onClick={() => deleteUser(u)}>{t('common.delete')}</button>{' '}
           <button className="btn btn-link" onClick={() => toggleExpand(u.id)}>
-            查看模型 {expanded === u.id ? '▲' : '▼'}
+            {t('userManage.viewModels')} {expanded === u.id ? '▲' : '▼'}
           </button>
         </span>
       ),
@@ -165,55 +167,55 @@ export default function UserManage() {
 
   return (
     <div className="page">
-      <h2 className="page-title">用户管理</h2>
+      <h2 className="page-title">{t('userManage.title')}</h2>
       <div className="toolbar">
-        <button className="btn" onClick={loadUsers}>刷新</button>
-        <button className="btn btn-primary" onClick={() => setUserForm({ ...emptyUserForm })}>+ 添加用户</button>
+        <button className="btn" onClick={loadUsers}>{t('common.refresh')}</button>
+        <button className="btn btn-primary" onClick={() => setUserForm({ ...emptyUserForm })}>+ {t('userManage.addUser')}</button>
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
-        <DataTable columns={columns} rows={users} loading={loading} empty="暂无用户" rowKey="id"
+        <DataTable columns={columns} rows={users} loading={loading} empty={t('userManage.noUsers')} rowKey="id"
           rowClass={(u) => (u.status === 2 ? 'row-disabled' : '')} />
         {expanded != null && users.find((u) => u.id === expanded) ? (
           <div style={{ marginTop: 12 }}>
             <div className="toolbar" style={{ marginBottom: 8 }}>
-              <strong>模型列表（{users.find((u) => u.id === expanded).user_name}）</strong>
+              <strong>{t('userManage.modelListWithUser', { userName: users.find((u) => u.id === expanded).user_name })}</strong>
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => setModelForm({ ...emptyModelForm, user_id: expanded, user_name: users.find((u) => u.id === expanded).user_name })}
-              >+ 添加模型</button>
+              >+ {t('userManage.addModel')}</button>
             </div>
             <DataTable
               loading={modelsLoading}
-              empty="暂无模型"
+              empty={t('userManage.noModels')}
               rowKey="id"
               rows={models}
               rowClass={(m) => (m.status === 2 ? 'row-disabled' : '')}
               columns={[
-                { key: 'id', title: 'ID', width: 60, sortable: true },
-                { key: 'model_name', title: '模型名', sortable: true },
-                { key: 'api_key', title: 'API Key', render: (v) => (v ? v.substring(0, 8) + '****' : '-') },
-                { key: 'status', title: '状态', sortable: true, render: (v) => <span><span className={`status-dot ${v === 2 ? 'status-off' : 'status-on'}`} />{v === 2 ? '禁用' : '启用'}</span> },
+                { key: 'id', title: t('userManage.id'), width: 60, sortable: true },
+                { key: 'model_name', title: t('userManage.modelName'), sortable: true },
+                { key: 'api_key', title: t('userManage.apiKey'), render: (v) => (v ? v.substring(0, 8) + '****' : '-') },
+                { key: 'status', title: t('common.status'), sortable: true, render: (v) => <span><span className={`status-dot ${v === 2 ? 'status-off' : 'status-on'}`} />{v === 2 ? t('userManage.disable') : t('userManage.enable')}</span> },
                 {
-                  key: 'analysis', title: '分析',
+                  key: 'analysis', title: t('userManage.analysis'),
                   render: (_, m) => {
                     const un = users.find((u) => u.id === expanded)?.user_name || ''
                     return (
                       <span>
                         {ANALYSIS_PAGES.map((p) => (
-                          <a key={p.page} className="btn btn-link" style={{ padding: '2px 4px' }} href={analysisHref(p.page, un, m.model_name)}>{p.label}</a>
+                          <a key={p.page} className="btn btn-link" style={{ padding: '2px 4px' }} href={analysisHref(p.page, un, m.model_name)}>{t(`nav.${p.label}`)}</a>
                         ))}
                       </span>
                     )
                   },
                 },
                 {
-                  key: 'actions', title: '操作',
+                  key: 'actions', title: t('common.action'),
                   render: (_, m) => (
                     <span>
-                      <button className="btn btn-sm" onClick={() => toggleModelStatus(m, expanded)}>{m.status === 2 ? '启用' : '禁用'}</button>{' '}
-                      <button className="btn btn-sm btn-primary" onClick={() => setModelForm({ id: m.id, user_id: expanded, model_name: m.model_name })}>编辑</button>{' '}
-                      <button className="btn btn-sm btn-danger" onClick={() => deleteModel(m, expanded)}>删除</button>
+                      <button className="btn btn-sm" onClick={() => toggleModelStatus(m, expanded)}>{m.status === 2 ? t('userManage.enable') : t('userManage.disable')}</button>{' '}
+                      <button className="btn btn-sm btn-primary" onClick={() => setModelForm({ id: m.id, user_id: expanded, model_name: m.model_name })}>{t('common.edit')}</button>{' '}
+                      <button className="btn btn-sm btn-danger" onClick={() => deleteModel(m, expanded)}>{t('common.delete')}</button>
                     </span>
                   ),
                 },
@@ -225,51 +227,51 @@ export default function UserManage() {
 
       {userForm ? (
         <Modal
-          title={userForm.id ? '编辑用户' : '添加用户'}
+          title={userForm.id ? t('userManage.editUser') : t('userManage.addUser')}
           width={480}
           onClose={() => setUserForm(null)}
           footer={
             <>
-              <button className="btn" onClick={() => setUserForm(null)}>取消</button>
-              <button className="btn btn-primary" disabled={saving} onClick={saveUser}>保存</button>
+              <button className="btn" onClick={() => setUserForm(null)}>{t('common.cancel')}</button>
+              <button className="btn btn-primary" disabled={saving} onClick={saveUser}>{t('common.save')}</button>
             </>
           }
         >
-          <label className="field"><span>用户名</span>
-            <input value={userForm.user_name} placeholder="3-50位" onChange={(e) => setUserForm({ ...userForm, user_name: e.target.value })} />
+          <label className="field"><span>{t('userManage.username')}</span>
+            <input value={userForm.user_name} placeholder={t('userManage.usernamePlaceholder')} onChange={(e) => setUserForm({ ...userForm, user_name: e.target.value })} />
           </label>
-          <label className="field"><span>密码</span>
-            <input type="password" value={userForm.password} placeholder="至少6位，编辑时留空表示不修改" onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} />
+          <label className="field"><span>{t('userManage.password')}</span>
+            <input type="password" value={userForm.password} placeholder={t('userManage.passwordPlaceholder')} onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} />
           </label>
-          <label className="field"><span>手机号</span>
-            <input value={userForm.phone} placeholder="7-20位数字" onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })} />
+          <label className="field"><span>{t('userManage.phone')}</span>
+            <input value={userForm.phone} placeholder={t('userManage.phonePlaceholder')} onChange={(e) => setUserForm({ ...userForm, phone: e.target.value })} />
           </label>
           <label className="field-check">
             <input type="checkbox" checked={!!userForm.anthropic_enabled} onChange={(e) => setUserForm({ ...userForm, anthropic_enabled: e.target.checked })} />
-            启用 Anthropic 协议
+            {t('userManage.enableAnthropicProtocol')}
           </label>
           <label className="field-check">
             <input type="checkbox" checked={!!userForm.openai_enabled} onChange={(e) => setUserForm({ ...userForm, openai_enabled: e.target.checked })} />
-            启用 OpenAI 协议
+            {t('userManage.enableOpenaiProtocol')}
           </label>
         </Modal>
       ) : null}
 
       {modelForm ? (
         <Modal
-          title={modelForm.id ? '编辑模型' : '添加模型'}
+          title={modelForm.id ? t('userManage.editModel') : t('userManage.addModel')}
           width={420}
           onClose={() => setModelForm(null)}
           footer={
             <>
-              <button className="btn" onClick={() => setModelForm(null)}>取消</button>
-              <button className="btn btn-primary" disabled={saving} onClick={saveModel}>保存</button>
+              <button className="btn" onClick={() => setModelForm(null)}>{t('common.cancel')}</button>
+              <button className="btn btn-primary" disabled={saving} onClick={saveModel}>{t('common.save')}</button>
             </>
           }
         >
-          <label className="field"><span>所属用户</span><input value={modelForm.user_name} disabled /></label>
-          <label className="field"><span>模型名</span>
-            <input value={modelForm.model_name} placeholder="8-64位" onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} />
+          <label className="field"><span>{t('userManage.belongingUser')}</span><input value={modelForm.user_name} disabled /></label>
+          <label className="field"><span>{t('userManage.modelName')}</span>
+            <input value={modelForm.model_name} placeholder={t('userManage.modelNamePlaceholder')} onChange={(e) => setModelForm({ ...modelForm, model_name: e.target.value })} />
           </label>
         </Modal>
       ) : null}

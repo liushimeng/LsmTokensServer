@@ -3,6 +3,7 @@ import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import { useI18n } from '../i18n'
 
 // 源站管理（管理端）：DstEndPointManageInterface（POST JSON {action:...}）
 // action: list / add / update / toggle_status / delete / batch_enable / batch_disable / batch_delete / test / list_platforms / list_models
@@ -14,10 +15,10 @@ const emptyForm = {
 }
 
 // 按协议+认证方式拼出保存时实际发出的 Request Header（纯前端预览）
-function headerPreview(protocolType, authType, apiKey, isEdit) {
+function headerPreview(protocolType, authType, apiKey, isEdit, t) {
   const proto = parseInt(protocolType, 10) || 1
   const auth = parseInt(authType, 10) || 0
-  if (!apiKey.trim()) return isEdit ? '（保持原值不变）' : '（请填写 API Key）'
+  if (!apiKey.trim()) return isEdit ? t('dstEndPoint.headerKeepUnchanged') : t('dstEndPoint.headerEnterKey')
   let authLine
   if (auth === 1) authLine = 'X-Api-Key: **API-KEY**'
   else if (auth === 2) authLine = 'Authorization: Bearer **API-KEY**'
@@ -33,6 +34,7 @@ function formatJSON(s) {
 }
 
 export default function DstEndPointManage() {
+  const { t } = useI18n()
   const isAdmin = __APP_ROLE__ === 'manager' ? isAdminRole() : false // 用户端：只读列表 + 连通性测试（构建期裁剪管理分支）
   const [users, setUsers] = useState([])
   const [endpoints, setEndpoints] = useState([])
@@ -64,7 +66,7 @@ export default function DstEndPointManage() {
 
   const userName = (uid) => {
     const u = users.find((x) => x.id == uid) // eslint-disable-line eqeqeq
-    return u ? u.user_name : '用户 ' + uid
+    return u ? u.user_name : t('dstEndPoint.userName', { id: uid })
   }
 
   const save = async () => {
@@ -94,7 +96,7 @@ export default function DstEndPointManage() {
 
   const toggleStatus = async (ep) => {
     const status = ep.status == 1 ? 0 : 1 // eslint-disable-line eqeqeq
-    if (!confirm(`确认${status === 1 ? '启用' : '禁用'}以下源站？\n\n${ep.platform_name} / ${ep.model_name}`)) return
+    if (!confirm(t('dstEndPoint.confirmToggle', { action: status === 1 ? t('dstEndPoint.enableAction') : t('dstEndPoint.disableAction'), platform: ep.platform_name, model: ep.model_name }))) return
     try {
       await post('DstEndPointManageInterface', { action: 'toggle_status', id: ep.id, status })
       loadData()
@@ -102,7 +104,7 @@ export default function DstEndPointManage() {
   }
 
   const deleteItem = async (ep) => {
-    if (!confirm(`确认删除以下源站？\n\n${ep.platform_name} / ${ep.model_name}\n\n将同步清理所有智能路由中对该源站的引用（仅剩该源站的路由会被级联删除），此操作不可恢复！`)) return
+    if (!confirm(t('dstEndPoint.confirmDeleteEndpoint', { platform: ep.platform_name, model: ep.model_name }))) return
     try {
       await post('DstEndPointManageInterface', { action: 'delete', id: ep.id })
       loadData()
@@ -115,16 +117,17 @@ export default function DstEndPointManage() {
       const d = await post('DstEndPointManageInterface', { action: 'test', id: ep.id })
       setTestResult({ success: d.success, message: d.message, data: d.data || {} })
     } catch (e) {
-      setTestResult({ success: false, message: '请求异常: ' + e.message, data: {} })
+      setTestResult({ success: false, message: t('dstEndPoint.requestError') + e.message, data: {} })
     }
   }
 
   const runBatch = async (actionName) => {
     const ids = [...selected]
-    if (ids.length === 0) { alert('请先选择要操作的源站'); return }
-    if (ids.length > 500) { alert('单次最多操作 500 条，当前已选 ' + ids.length + ' 条'); return }
-    const label = { batch_enable: '启用', batch_disable: '禁用', batch_delete: '删除' }[actionName]
-    if (!confirm(`确认${label}选中的 ${ids.length} 条源站？` + (actionName === 'batch_delete' ? '此操作不可恢复！' : ''))) return
+    if (ids.length === 0) { alert(t('dstEndPoint.selectEndpoints')); return }
+    if (ids.length > 500) { alert(t('dstEndPoint.max500', { count: ids.length })); return }
+    const label = { batch_enable: t('dstEndPoint.batchEnable'), batch_disable: t('dstEndPoint.batchDisable'), batch_delete: t('dstEndPoint.batchDelete') }[actionName]
+    const batchConfirmKey = { batch_enable: 'confirmBatchEnable', batch_disable: 'confirmBatchDisable', batch_delete: 'confirmBatchDelete' }[actionName]
+    if (!confirm(t(`dstEndPoint.${batchConfirmKey}`, { count: ids.length }))) return
     try {
       await post('DstEndPointManageInterface', { action: actionName, ids })
       setSelected(new Set())
@@ -141,27 +144,27 @@ export default function DstEndPointManage() {
   const columns = [
     ...(isAdmin ? [{
       key: 'checkbox', title: (
-        <input type="checkbox" title="全选"
+        <input type="checkbox" title={t('dstEndPoint.selectAll')}
           checked={endpoints.length > 0 && selected.size >= endpoints.length}
           onChange={(e) => setSelected(e.target.checked ? new Set(endpoints.map((x) => x.id)) : new Set())} />
       ), width: 36,
       render: (_, ep) => <input type="checkbox" checked={selected.has(ep.id)} onChange={() => toggleSelect(ep.id)} />,
     }] : []),
-    { key: 'id', title: 'ID', width: 60, sortable: true },
-    ...(isAdmin ? [{ key: 'user_id', title: '所属用户', sortable: true, sortValue: (r) => userName(r.user_id), render: (v) => userName(v) }] : []),
-    { key: 'platform_name', title: '平台', sortable: true },
-    { key: 'model_name', title: '模型', sortable: true },
-    { key: 'protocol_type', title: '协议', sortable: true, render: (v) => (v == 1 ? 'Anthropic' : 'OpenAI') },
-    { key: 'url_address', title: 'URL', sortable: true, render: (v) => <span style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>{v}</span> },
-    { key: 'status', title: '状态', sortable: true, render: (v) => <span><span className={`status-dot ${v == 1 ? 'status-on' : 'status-off'}`} />{v == 1 ? '启用' : '禁用'}</span> },
+    { key: 'id', title: t('dstEndPoint.id'), width: 60, sortable: true },
+    ...(isAdmin ? [{ key: 'user_id', title: t('dstEndPoint.userLabel'), sortable: true, sortValue: (r) => userName(r.user_id), render: (v) => userName(v) }] : []),
+    { key: 'platform_name', title: t('dstEndPoint.platformLabel'), sortable: true },
+    { key: 'model_name', title: t('dstEndPoint.modelLabel'), sortable: true },
+    { key: 'protocol_type', title: t('dstEndPoint.protocolLabel'), sortable: true, render: (v) => (v == 1 ? t('dstEndPoint.anthropic') : t('dstEndPoint.openai')) },
+    { key: 'url_address', title: t('dstEndPoint.urlLabel'), sortable: true, render: (v) => <span style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>{v}</span> },
+    { key: 'status', title: t('dstEndPoint.statusLabel'), sortable: true, render: (v) => <span><span className={`status-dot ${v == 1 ? 'status-on' : 'status-off'}`} />{v == 1 ? t('dstEndPoint.enableAction') : t('dstEndPoint.disableAction')}</span> },
     {
-      key: 'actions', title: '操作',
+      key: 'actions', title: t('common.action'),
       render: (_, ep) => (
         <span>
-          {isAdmin ? <button className="btn btn-sm" onClick={() => toggleStatus(ep)}>{ep.status == 1 ? '禁用' : '启用'}</button> : null}{' '}
-          {isAdmin ? <button className="btn btn-sm btn-primary" onClick={() => setForm({ ...emptyForm, ...ep, api_key: '' })}>编辑</button> : null}{' '}
-          <button className="btn btn-sm" onClick={() => testItem(ep)}>测试</button>
-          {isAdmin ? <>{' '}<button className="btn btn-sm btn-danger" onClick={() => deleteItem(ep)}>删除</button></> : null}
+          {isAdmin ? <button className="btn btn-sm" onClick={() => toggleStatus(ep)}>{ep.status == 1 ? t('dstEndPoint.disableAction') : t('dstEndPoint.enableAction')}</button> : null}{' '}
+          {isAdmin ? <button className="btn btn-sm btn-primary" onClick={() => setForm({ ...emptyForm, ...ep, api_key: '' })}>{t('common.edit')}</button> : null}{' '}
+          <button className="btn btn-sm" onClick={() => testItem(ep)}>{t('dstEndPoint.testConnection')}</button>
+          {isAdmin ? <>{' '}<button className="btn btn-sm btn-danger" onClick={() => deleteItem(ep)}>{t('common.delete')}</button></> : null}
         </span>
       ),
     },
@@ -169,103 +172,103 @@ export default function DstEndPointManage() {
 
   return (
     <div className="page">
-      <h2 className="page-title">源站管理</h2>
+      <h2 className="page-title">{t('dstEndPoint.title')}</h2>
       <div className="toolbar">
-        <button className="btn" onClick={loadData}>刷新</button>
-        {isAdmin ? <button className="btn btn-primary" onClick={() => setForm({ ...emptyForm, user_id: users[0]?.id || 0 })}>+ 添加源站</button>
-          : <span style={{ color: '#888', fontSize: 13 }}>用户模式：只读列表 + 连通性测试</span>}
+        <button className="btn" onClick={loadData}>{t('common.refresh')}</button>
+        {isAdmin ? <button className="btn btn-primary" onClick={() => setForm({ ...emptyForm, user_id: users[0]?.id || 0 })}>+ {t('dstEndPoint.addEndPoint')}</button>
+          : <span style={{ color: '#888', fontSize: 13 }}>{t('dstEndPoint.userMode')}</span>}
         {selected.size > 0 ? (
           <>
-            <span>已选择 {selected.size} 条（单次最多 500 条）</span>
-            <button className="btn btn-sm" onClick={() => runBatch('batch_enable')}>批量启用</button>
-            <button className="btn btn-sm" onClick={() => runBatch('batch_disable')}>批量禁用</button>
-            <button className="btn btn-sm btn-danger" onClick={() => runBatch('batch_delete')}>批量删除</button>
-            <button className="btn btn-sm" onClick={() => setSelected(new Set())}>取消选择</button>
+            <span>{t('dstEndPoint.selectedCountMax', { count: selected.size })}</span>
+            <button className="btn btn-sm" onClick={() => runBatch('batch_enable')}>{t('dstEndPoint.batchEnable')}</button>
+            <button className="btn btn-sm" onClick={() => runBatch('batch_disable')}>{t('dstEndPoint.batchDisable')}</button>
+            <button className="btn btn-sm btn-danger" onClick={() => runBatch('batch_delete')}>{t('dstEndPoint.batchDelete')}</button>
+            <button className="btn btn-sm" onClick={() => setSelected(new Set())}>{t('dstEndPoint.cancelSelection')}</button>
           </>
         ) : null}
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
-        <DataTable columns={columns} rows={endpoints} loading={loading} empty="暂无源站" rowKey="id"
+        <DataTable columns={columns} rows={endpoints} loading={loading} empty={t('dstEndPoint.noData')} rowKey="id"
           rowClass={(ep) => (ep.status == 1 ? 'row-enabled' : 'row-disabled')} />
       </div>
 
       {form ? (
         <Modal
-          title={form.id ? '编辑源站' : '添加源站'}
+          title={form.id ? t('dstEndPoint.editEndPoint') : t('dstEndPoint.addEndPoint')}
           onClose={() => setForm(null)}
           footer={
             <>
-              <button className="btn" onClick={() => setForm(null)}>取消</button>
-              <button className="btn btn-primary" disabled={saving} onClick={save}>保存</button>
+              <button className="btn" onClick={() => setForm(null)}>{t('common.cancel')}</button>
+              <button className="btn btn-primary" disabled={saving} onClick={save}>{t('common.save')}</button>
             </>
           }
         >
           {formError ? <div className="alert alert-error">{formError}</div> : null}
-          <label className="field"><span>所属用户</span>
+          <label className="field"><span>{t('dstEndPoint.userLabel')}</span>
             <select value={form.user_id} onChange={(e) => setForm({ ...form, user_id: parseInt(e.target.value, 10) })}>
               {users.map((u) => <option key={u.id} value={u.id}>{u.user_name}</option>)}
             </select>
           </label>
-          <label className="field"><span>平台名称</span>
-            <input value={form.platform_name} placeholder="如: Anthropic, OpenAI" onChange={(e) => setForm({ ...form, platform_name: e.target.value })} />
+          <label className="field"><span>{t('dstEndPoint.platformNameLabel')}</span>
+            <input value={form.platform_name} placeholder={t('dstEndPoint.platformNamePlaceholder')} onChange={(e) => setForm({ ...form, platform_name: e.target.value })} />
           </label>
-          <label className="field"><span>模型名</span>
-            <input value={form.model_name} placeholder="如: claude-3-5-sonnet" onChange={(e) => setForm({ ...form, model_name: e.target.value })} />
+          <label className="field"><span>{t('dstEndPoint.modelLabel')}</span>
+            <input value={form.model_name} placeholder={t('dstEndPoint.modelNamePlaceholder')} onChange={(e) => setForm({ ...form, model_name: e.target.value })} />
           </label>
-          <label className="field"><span>协议类型</span>
+          <label className="field"><span>{t('dstEndPoint.protocolType')}</span>
             <select value={form.protocol_type} onChange={(e) => setForm({ ...form, protocol_type: parseInt(e.target.value, 10) })}>
-              <option value={1}>Anthropic</option>
-              <option value={2}>OpenAI</option>
+              <option value={1}>{t('dstEndPoint.anthropic')}</option>
+              <option value={2}>{t('dstEndPoint.openai')}</option>
             </select>
           </label>
-          <label className="field"><span>认证方式</span>
+          <label className="field"><span>{t('dstEndPoint.authType')}</span>
             <select value={form.auth_type} onChange={(e) => setForm({ ...form, auth_type: parseInt(e.target.value, 10) })}>
-              <option value={0}>协议默认（Anthropic→X-Api-Key，OpenAI→Authorization Bearer）</option>
-              <option value={1}>强制 X-Api-Key</option>
-              <option value={2}>强制 Authorization Bearer</option>
+              <option value={0}>{t('dstEndPoint.authDefault')}</option>
+              <option value={1}>{t('dstEndPoint.authForceXApiKey')}</option>
+              <option value={2}>{t('dstEndPoint.authForceBearer')}</option>
             </select>
           </label>
-          <label className="field"><span>URL 地址</span>
-            <input value={form.url_address} placeholder="https://api.xxx.com/v1" onChange={(e) => setForm({ ...form, url_address: e.target.value })} />
+          <label className="field"><span>{t('dstEndPoint.urlAddress')}</span>
+            <input value={form.url_address} placeholder={t('dstEndPoint.urlPlaceholder')} onChange={(e) => setForm({ ...form, url_address: e.target.value })} />
           </label>
-          <label className="field"><span>API Key</span>
+          <label className="field"><span>{t('dstEndPoint.apiKey')}</span>
             <input type={form.id ? 'password' : 'text'} value={form.api_key}
-              placeholder={form.id ? '留空则保持原值不变' : '源站 API Key'}
+              placeholder={form.id ? t('dstEndPoint.apiKeyKeepUnchanged') : t('dstEndPoint.apiKeyPlaceholder')}
               onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
           </label>
-          <div className="field"><span>Request Header（保存时实际发出）</span>
+          <div className="field"><span>{t('dstEndPoint.headerPreview')}</span>
             <pre style={{ fontSize: 12, background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 4, whiteSpace: 'pre-wrap', margin: 0 }}>
-              {headerPreview(form.protocol_type, form.auth_type, form.api_key, !!form.id)}
+              {headerPreview(form.protocol_type, form.auth_type, form.api_key, !!form.id, t)}
             </pre>
           </div>
         </Modal>
       ) : null}
 
       {testResult ? (
-        <Modal title="源站连通性测试" width={720} onClose={() => setTestResult(null)}
-          footer={<button className="btn" onClick={() => setTestResult(null)}>关闭</button>}>
-          {testResult.loading ? <div className="table-loading">测试中，请稍候…</div> : (
+        <Modal title={t('dstEndPoint.connectivityTest')} width={720} onClose={() => setTestResult(null)}
+          footer={<button className="btn" onClick={() => setTestResult(null)}>{t('common.close')}</button>}>
+          {testResult.loading ? <div className="table-loading">{t('dstEndPoint.testing')}</div> : (
             <div>
               <div className={'alert ' + (testResult.success ? 'alert-ok' : 'alert-error')} style={{ fontWeight: 600 }}>
-                {testResult.success ? '测试成功' : '测试失败'}
-                {testResult.data?.status_code ? ' | HTTP ' + testResult.data.status_code : ''}
-                {testResult.data?.elapsed_ms ? ' | 耗时 ' + testResult.data.elapsed_ms + 'ms' : ''}
-                {testResult.message && testResult.message !== '测试成功' ? ' | ' + testResult.message : ''}
+                {testResult.success ? t('dstEndPoint.testSuccess') : t('dstEndPoint.testFailed')}
+                {testResult.data?.status_code ? t('dstEndPoint.httpStatus') + testResult.data.status_code : ''}
+                {testResult.data?.elapsed_ms ? t('dstEndPoint.elapsed', { ms: testResult.data.elapsed_ms }) : ''}
+                {testResult.message && testResult.message !== t('dstEndPoint.testSuccess') ? ' | ' + testResult.message : ''}
               </div>
-              <div className="field"><span>请求 URL</span>
+              <div className="field"><span>{t('dstEndPoint.requestUrl')}</span>
                 <div style={{ fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all', background: '#f8f9fa', padding: 8, borderRadius: 4 }}>{testResult.data.request_url}</div>
               </div>
-              <div className="field"><span>请求头</span>
+              <div className="field"><span>{t('dstEndPoint.requestHeaders')}</span>
                 <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', margin: 0, background: '#f8f9fa', padding: 8, borderRadius: 4 }}>{testResult.data.request_headers}</pre>
               </div>
-              <div className="field"><span>请求体</span>
+              <div className="field"><span>{t('dstEndPoint.requestBody')}</span>
                 <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', margin: 0, background: '#f8f9fa', padding: 8, borderRadius: 4 }}>{formatJSON(testResult.data.request_body)}</pre>
               </div>
-              <div className="field"><span>响应头</span>
+              <div className="field"><span>{t('dstEndPoint.responseHeaders')}</span>
                 <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', margin: 0, background: '#f8f9fa', padding: 8, borderRadius: 4, maxHeight: 160, overflow: 'auto' }}>{testResult.data.response_headers}</pre>
               </div>
-              <div className="field"><span>响应体</span>
+              <div className="field"><span>{t('dstEndPoint.responseBody')}</span>
                 <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', margin: 0, background: '#f8f9fa', padding: 8, borderRadius: 4, maxHeight: 160, overflow: 'auto' }}>{formatJSON(testResult.data.response_body)}</pre>
               </div>
             </div>

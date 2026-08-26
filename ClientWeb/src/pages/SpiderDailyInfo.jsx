@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { get, post } from '../shared/api'
 import DataTable from '../components/DataTable'
+import { useI18n } from '../i18n'
 
 // 每日 MCP 信息：SpiderDailyInfoInterface
 // 列表：GET ?page&page_size&platform&start_date&end_date（返回 {data:{infos,platforms}, total}）
@@ -35,6 +36,8 @@ function renderContent(text) {
 }
 
 export default function SpiderDailyInfo(props) {
+  const { t } = useI18n()
+
   const q = props?.route?.query
   const [page, setPage] = useState(() => Math.max(1, parseInt(q?.get('page') || '1', 10) || 1))
   const [pageSize, setPageSize] = useState(() => {
@@ -96,7 +99,7 @@ export default function SpiderDailyInfo(props) {
   }
 
   const deleteInfo = async (id) => {
-    if (!confirm('确认删除这条记录？此操作不可恢复！')) return
+    if (!confirm(t('spider.confirmDeleteRecord'))) return
     try {
       await post('SpiderDailyInfoInterface', { action: 'delete', id })
       setSelected((s) => { const n = new Set(s); n.delete(id); return n })
@@ -105,8 +108,8 @@ export default function SpiderDailyInfo(props) {
   }
 
   const batchDelete = async () => {
-    if (!selected.size) { alert('请先选择要删除的记录'); return }
-    if (!confirm('确认删除选中的 ' + selected.size + ' 条记录？此操作不可恢复！')) return
+    if (!selected.size) { alert(t('spider.selectRecordsToDelete')); return }
+    if (!confirm(t('spider.confirmBatchDelete', { count: selected.size }))) return
     try {
       await post('SpiderDailyInfoInterface', { action: 'batch_delete', items: [...selected].map((id) => ({ id })) })
       setSelected(new Set())
@@ -133,33 +136,33 @@ export default function SpiderDailyInfo(props) {
       render: (_, info) => <input type="checkbox" checked={selected.has(info.id)} onChange={() => toggleSelect(info.id)} />,
     },
     { key: 'id', title: 'ID', width: 70 },
-    { key: 'platform_name', title: '平台' },
-    { key: 'title', title: '标题', render: (v, info) => info.url ? <a href={info.url} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit' }}>{v}</a> : v },
-    { key: 'crawl_time', title: '爬取时间', render: (v) => fmtTime(v) || '-' },
+    { key: 'platform_name', title: t('spider.platform') },
+    { key: 'title', title: t('spider.title'), render: (v, info) => info.url ? <a href={info.url} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit' }}>{v}</a> : v },
+    { key: 'crawl_time', title: t('spider.crawlTime'), render: (v) => fmtTime(v) || '-' },
     {
-      key: 'content', title: '内容', render: (_, info) => {
+      key: 'content', title: t('spider.content'), render: (_, info) => {
         const c = contentCache[info.id]
         const isOpen = expanded.has(info.id)
-        if (!c) return <span style={{ color: '#999' }}>（未加载）</span>
-        if (c.state === 'loading') return <span>加载中…</span>
+        if (!c) return <span style={{ color: '#999' }}>{t('spider.notLoaded')}</span>
+        if (c.state === 'loading') return <span>{t('common.loading')}</span>
         if (c.state === 'error') return (
           <span style={{ color: '#dc3545' }}>
-            加载失败：{c.message}
-            <button className="btn btn-link" onClick={() => loadContent(info.id)}>点击重试</button>
+            {t('spider.loadContentFailed')}{c.message}
+            <button className="btn btn-link" onClick={() => loadContent(info.id)}>{t('spider.clickRetry')}</button>
           </span>
         )
-        return isOpen ? <span className="wrap">{renderContent(c.content)}</span> : <span style={{ color: '#999' }}>（已缓存，点击展开）</span>
+        return isOpen ? <span className="wrap">{renderContent(c.content)}</span> : <span style={{ color: '#999' }}>{t('spider.cachedClickExpand')}</span>
       },
     },
     {
-      key: 'actions', title: '操作',
+      key: 'actions', title: t('common.action'),
       render: (_, info) => {
         const c = contentCache[info.id]
-        const label = !c || c.state === 'error' ? (c?.state === 'error' ? '重试' : '展开内容') : (expanded.has(info.id) ? '收起' : '展开')
+        const label = !c || c.state === 'error' ? (c?.state === 'error' ? t('spider.retry') : t('spider.expandContent')) : (expanded.has(info.id) ? t('spider.collapse') : t('spider.expand'))
         return (
           <span>
             <button className="btn btn-sm" disabled={c?.state === 'loading'} onClick={() => toggleContent(info.id)}>{label}</button>{' '}
-            <button className="btn btn-sm btn-danger" onClick={() => deleteInfo(info.id)}>删除</button>
+            <button className="btn btn-sm btn-danger" onClick={() => deleteInfo(info.id)}>{t('common.delete')}</button>
           </span>
         )
       },
@@ -168,37 +171,37 @@ export default function SpiderDailyInfo(props) {
 
   return (
     <div className="page">
-      <h2 className="page-title">每日 MCP 信息</h2>
+      <h2 className="page-title">{t('spider.dailyInfo')}</h2>
       <div className="toolbar">
-        <span>平台</span>
+        <span>{t('spider.platform')}</span>
         <select value={platform} onChange={(e) => { setPlatform(e.target.value); setPage(1) }}>
-          <option value="">全部</option>
+          <option value="">{t('spider.all')}</option>
           {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
-        <span>开始时间</span>
+        <span>{t('spider.startDate')}</span>
         <input type="datetime-local" step={1} value={startDate} onChange={(e) => { setStartDate(e.target.value); setPage(1) }} />
-        <span>结束时间</span>
+        <span>{t('spider.endDate')}</span>
         <input type="datetime-local" step={1} value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1) }} />
-        <button className="btn" onClick={() => { setPage(1); setPlatform(''); setStartDate(''); setEndDate('') }}>重置</button>
-        <button className="btn btn-primary" onClick={() => load(page, pageSize, platform, startDate, endDate)}>刷新</button>
+        <button className="btn" onClick={() => { setPage(1); setPlatform(''); setStartDate(''); setEndDate('') }}>{t('spider.reset')}</button>
+        <button className="btn btn-primary" onClick={() => load(page, pageSize, platform, startDate, endDate)}>{t('common.refresh')}</button>
         {infos.length > 0 ? (
           <>
-            <span>已选择 {selected.size} 条</span>
-            <button className="btn btn-sm btn-danger" disabled={!selected.size} onClick={batchDelete}>批量删除</button>
+            <span>{t('spider.selectedCount', { count: selected.size })}</span>
+            <button className="btn btn-sm btn-danger" disabled={!selected.size} onClick={batchDelete}>{t('spider.batchDelete')}</button>
           </>
         ) : null}
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
-        <DataTable columns={columns} rows={infos} loading={loading} empty="暂无数据" rowKey="id" />
+        <DataTable columns={columns} rows={infos} loading={loading} empty={t('common.noData')} rowKey="id" />
         <div className="pager">
-          <span>总计 {total} 条 · 第 {page} / {totalPages} 页 · 每页</span>
+          <span>{t('spider.totalPages', { total, page, totalPages })}</span>
           <select value={pageSize} onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(1) }}>
             {PAGE_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
-          <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
+          <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>{t('datatable.previous')}</button>
           <span>{page}</span>
-          <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
+          <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>{t('datatable.next')}</button>
         </div>
       </div>
     </div>

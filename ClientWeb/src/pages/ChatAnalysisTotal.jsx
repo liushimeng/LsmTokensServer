@@ -4,6 +4,7 @@ import { isAdminRole } from '../shared/auth'
 import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import { fmtNum, fmtMs, pickRouteQuery } from '../shared/format'
+import { useI18n } from '../i18n'
 
 // 汇总统计页（/ChatAnalysisTotalWS WebSocket 流式分块推送）
 // 协议：连接后首条消息 {type:'query',days,model_name,request_id(12hex)}；
@@ -18,13 +19,24 @@ function genRequestId() {
   return s
 }
 
-// stage 名称 → 中文名（渲染顺序与后端 wsChatStatsStageOrder 一致）
-const STAGE_NAMES = {
-  kpi: 'KPI 概览', time_stats: '时间分布', tokens_summary: 'Tokens 概览',
-  model_distribution: '源站模型分布', trend_chart: '用量趋势', protocol_stats: '协议分析', agent_stats: 'Agent 工具',
-}
-
 export default function ChatAnalysisTotal({ route }) {
+  const { t } = useI18n()
+
+  // stage 名称 → 中文名（渲染顺序与后端 wsChatStatsStageOrder 一致）
+  const STAGE_NAMES = {
+    kpi: t('chatAnalysisTotal.kpiOverview'), time_stats: t('chatAnalysisTotal.timeStats'),
+    tokens_summary: t('chatAnalysisTotal.tokensSummary'), model_distribution: t('chatAnalysisTotal.modelDistOverview'),
+    trend_chart: t('chatAnalysisTotal.usageTrendChart'), protocol_stats: t('chatAnalysisTotal.protocolStats'),
+    agent_stats: t('chatAnalysisTotal.agentStats'),
+  }
+
+  // 区间报告 stage 名称
+  const RANGE_STAGES = [
+    ['validate', t('chatAnalysisTotal.validateRange')], ['series', t('chatAnalysisTotal.fetchSeries')],
+    ['model_dist', t('chatAnalysisTotal.modelDistributionStage')], ['latency_dist', t('chatAnalysisTotal.latencyDistribution')],
+    ['agent_dist', t('chatAnalysisTotal.agentToolDistribution')],
+  ]
+
   const init = pickRouteQuery(route && route.query)
   const isAdmin = isAdminRole() // 用户端：服务端强制本人数据，隐藏用户名输入
   const [userName, setUserName] = useState(isAdmin ? init.userName : '')
@@ -40,10 +52,6 @@ export default function ChatAnalysisTotal({ route }) {
   const reqIdRef = useRef('')
 
   // ===== 区间报告（v2.0.46 对齐：POST ChatAnalysisTotalRangeInterface?stream=1 SSE）=====
-  const RANGE_STAGES = [
-    ['validate', '校验时间区间'], ['series', '拉取时序数据'], ['model_dist', '模型分布'],
-    ['latency_dist', '延迟分布'], ['agent_dist', 'Agent 工具分布'],
-  ]
   const [rangeStart, setRangeStart] = useState('') // yyyy-mm-dd
   const [rangeEnd, setRangeEnd] = useState('')
   const [rangeGran, setRangeGran] = useState('') // '' = 自动推断
@@ -74,12 +82,12 @@ export default function ChatAnalysisTotal({ route }) {
   const inferGranularity = (spanMs) => (spanMs <= 48 * 3600 * 1000 ? 'hour' : 'day')
 
   const runRangeReport = async () => {
-    if (!rangeStart || !rangeEnd) { setRangeError('请填写起止日期'); return }
+    if (!rangeStart || !rangeEnd) { setRangeError(t('chatAnalysisTotal.fillStartDate')); return }
     const startMs = new Date(rangeStart + 'T00:00:00').getTime()
     const endMs = new Date(rangeEnd + 'T23:59:59.999').getTime()
-    if (!(startMs > 0 && endMs > startMs)) { setRangeError('无效的时间区间：结束须晚于开始'); return }
+    if (!(startMs > 0 && endMs > startMs)) { setRangeError(t('chatAnalysisTotal.invalidRange')); return }
     const spanMs = endMs - startMs
-    if (spanMs > 365 * 24 * 3600 * 1000) { setRangeError('时间区间过长：最大支持 365 天'); return }
+    if (spanMs > 365 * 24 * 3600 * 1000) { setRangeError(t('chatAnalysisTotal.rangeTooLong')); return }
     const gran = rangeGran || inferGranularity(spanMs)
     setRangeSteps({}); setRangePct(0); setRangePctText(''); setRangeError(''); setRangeReport(null)
     rangeDoneRef.current = false
@@ -92,18 +100,18 @@ export default function ChatAnalysisTotal({ route }) {
         setRangeSteps((s) => ({ ...s, [stage]: { state: 'running', message: payload.message || '' } }))
         let text = payload.message || payload.title || stage
         if (stage === 'series' && typeof payload.done === 'number' && typeof payload.total === 'number' && payload.total > 0) {
-          text = `已聚合 ${payload.done}/${payload.total} 桶`
+          text = t('chatAnalysisTotal.aggregating', { done: payload.done, total: payload.total })
         }
         setRangePct(typeof payload.percent === 'number' ? payload.percent : 0)
         setRangePctText(text)
       } else if (ev === 'done') {
         rangeDoneRef.current = true
         setRangeSteps(Object.fromEntries(RANGE_STAGES.map(([s]) => [s, { state: 'done' }])))
-        setRangePct(100); setRangePctText('完成')
+        setRangePct(100); setRangePctText(t('chatAnalysisTotal.complete'))
         setRangeReport(payload)
         setRangeRunning(false)
       } else if (ev === 'error') {
-        setRangeError((payload && (payload.message || payload.error)) || '未知错误')
+        setRangeError((payload && (payload.message || payload.error)) || t('chatAnalysisTotal.unknownError'))
         setRangeSteps((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v.state === 'running' ? { state: 'failed' } : v])))
         setRangeRunning(false)
       }
@@ -125,9 +133,9 @@ export default function ChatAnalysisTotal({ route }) {
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       })
       if (!resp.ok || !resp.body) {
-        applyEvent('error', { message: `HTTP ${resp.status}（无响应流）` }); return
+        applyEvent('error', { message: t('chatAnalysisTotal.httpError', { status: resp.status }) }); return
       }
-      setRangePct(5); setRangePctText('校验通过…')
+      setRangePct(5); setRangePctText(t('chatAnalysisTotal.validationPassed'))
       const reader = resp.body.getReader()
       const decoder = new TextDecoder('utf-8')
       let buffer = ''
@@ -143,9 +151,9 @@ export default function ChatAnalysisTotal({ route }) {
         }
       }
       if (buffer.length) parseEvent(buffer)
-      if (!rangeDoneRef.current) applyEvent('error', { message: '连接中断，未收到完成事件' })
+      if (!rangeDoneRef.current) applyEvent('error', { message: t('chatAnalysisTotal.connectionInterrupted') })
     } catch (e) {
-      applyEvent('error', { message: '请求失败: ' + e.message })
+      applyEvent('error', { message: t('chatAnalysisTotal.requestFailed', { message: e.message }) })
     }
   }
   // ===== 区间报告结束 =====
@@ -165,7 +173,7 @@ export default function ChatAnalysisTotal({ route }) {
   // WS 查询主流程
   const runQuery = (d = days, u = userName, m = modelName) => {
     stopQuery()
-    setStages({}); setError(''); setDoneInfo(null); setRunning(true); setProgress('连接中…')
+    setStages({}); setError(''); setDoneInfo(null); setRunning(true); setProgress(t('chatAnalysisTotal.connecting'))
     const rid = genRequestId()
     reqIdRef.current = rid
     let opened = false
@@ -176,15 +184,15 @@ export default function ChatAnalysisTotal({ route }) {
         if (obj.type === 'chunk') {
           applyStage(obj.stage, obj.data)
           const kpi = obj.stage === 'kpi' ? obj.data : null
-          if (kpi && kpi.scan_final) setProgress(`扫描完成（${fmtNum(kpi.scanned_rows)} 行）`)
-          else if (kpi) setProgress(`扫描中… 已处理 ${fmtNum(kpi.scanned_rows)} 行`)
+          if (kpi && kpi.scan_final) setProgress(t('chatAnalysisTotal.scanComplete', { count: fmtNum(kpi.scanned_rows) }))
+          else if (kpi) setProgress(t('chatAnalysisTotal.scanning', { count: fmtNum(kpi.scanned_rows) }))
         } else if (obj.type === 'done') {
           setDoneInfo(obj); setRunning(false); setProgress('')
         } else if (obj.type === 'error') {
-          setError(`${STAGE_NAMES[obj.stage] || obj.stage || '查询'}出错：${obj.message}`)
+          setError(t('chatAnalysisTotal.queryError', { stage: STAGE_NAMES[obj.stage] || obj.stage || t('chatAnalysisTotal.stageError'), message: obj.message }))
           setRunning(false); setProgress('')
         } else if (obj.type === 'busy') {
-          setError(obj.message || '上一个查询仍在进行'); setRunning(false)
+          setError(obj.message || t('chatAnalysisTotal.busyError')); setRunning(false)
         }
       },
       onError: () => {
@@ -200,14 +208,14 @@ export default function ChatAnalysisTotal({ route }) {
       try {
         ws.send(JSON.stringify({ type: 'query', days: d, model_name: m.trim(), request_id: rid }))
       } catch (e) {
-        setError('发送查询失败：' + e.message); setRunning(false)
+        setError(t('chatAnalysisTotal.sendQueryFailed', { message: e.message })); setRunning(false)
       }
     }
   }
 
   // HTTP fallback：POST ChatAnalysisTotalInterface action=full_http
   const httpFallback = async (d, u, m) => {
-    setProgress('WebSocket 不可用，改用 HTTP 全量拉取…')
+    setProgress(t('chatAnalysisTotal.wsUnavailable'))
     try {
       const resp = await post('ChatAnalysisTotalInterface', {
         user_name: u.trim(), model_name: m.trim(), days: d, action: 'full_http',
@@ -219,7 +227,7 @@ export default function ChatAnalysisTotal({ route }) {
       })
       setDoneInfo({ elapsed_ms: null, http_fallback: true })
     } catch (e) {
-      setError(e.message || '查询失败')
+      setError(e.message || t('chatAnalysisTotal.queryFailed'))
     } finally { setRunning(false); setProgress('') }
   }
 
@@ -261,149 +269,149 @@ export default function ChatAnalysisTotal({ route }) {
 
   return (
     <div className="page">
-      <h2 className="page-title">汇总统计</h2>
+      <h2 className="page-title">{t('chatAnalysisTotal.title')}</h2>
 
       <div className="toolbar">
-        {isAdmin ? <label>用户名
+        {isAdmin ? <label>{t('chatAnalysisTotal.userNameLabel')}
           <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName('') }} style={{ width: 160 }}>
-            <option value="">全部用户</option>
+            <option value="">{t('chatAnalysisTotal.allUsers')}</option>
             {userOptions.map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
           </select>
         </label> : null}
-        <label>模型名
+        <label>{t('chatAnalysisTotal.modelNameLabel')}
           <select value={modelName} onChange={(e) => setModelName(e.target.value)} style={{ width: 170 }}>
-            <option value="">全部模型</option>
+            <option value="">{t('chatAnalysisTotal.allModels')}</option>
             {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </label>
-        <label>时间跨度
+        <label>{t('chatAnalysisTotal.timeRange')}
           <select value={days} onChange={(e) => { const d = Number(e.target.value); setDays(d); setStages({}); setDoneInfo(null); if (!running) runQuery(d) }}>
-            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近${d}天`}</option>)}
+            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? t('chatAnalysisTotal.allTime') : t('chatAnalysisTotal.daysDay', { days: d })}</option>)}
           </select>
         </label>
-        <button className="btn btn-primary" onClick={() => runQuery()} disabled={running}>查询</button>
-        {running ? <button className="btn" onClick={() => { stopQuery(); setRunning(false); setProgress('') }}>取消</button> : null}
-        {running || progress ? <span style={{ color: 'var(--muted)', fontSize: 13 }}>{running ? (progress || '统计中…') : progress}</span> : null}
+        <button className="btn btn-primary" onClick={() => runQuery()} disabled={running}>{t('chatAnalysisTotal.query')}</button>
+        {running ? <button className="btn" onClick={() => { stopQuery(); setRunning(false); setProgress('') }}>{t('chatAnalysisTotal.cancel')}</button> : null}
+        {running || progress ? <span style={{ color: 'var(--muted)', fontSize: 13 }}>{running ? (progress || t('chatAnalysisTotal.statizing')) : progress}</span> : null}
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
       {doneInfo && doneInfo.timed_out ? (
-        <div className="alert alert-error">查询超时：{String(doneInfo.warnings || []).join('; ')}</div>
+        <div className="alert alert-error">{t('chatAnalysisTotal.queryTimeout', { warnings: String(doneInfo.warnings || []).join('; ') })}</div>
       ) : null}
       {doneInfo && !doneInfo.timed_out && doneInfo.elapsed_ms != null ? (
-        <div className="alert alert-ok">统计完成，耗时 {fmtMs(doneInfo.elapsed_ms)}</div>
+        <div className="alert alert-ok">{t('chatAnalysisTotal.statComplete', { ms: fmtMs(doneInfo.elapsed_ms) })}</div>
       ) : null}
       {doneInfo && doneInfo.http_fallback ? (
-        <div className="alert alert-ok">统计完成（HTTP 全量模式）</div>
+        <div className="alert alert-ok">{t('chatAnalysisTotal.statCompleteHttp')}</div>
       ) : null}
 
       {/* 维度 1：KPI 卡片 */}
       <div className="card-grid kpi-grid">
         <div className="card">
-          <h3>总请求数</h3>
+          <h3>{t('chatAnalysisTotal.totalRequests')}</h3>
           <div style={{ fontSize: 26, fontWeight: 700 }}>{kpi ? fmtNum(kpi.total_calls) : '-'}</div>
         </div>
         <div className="card">
-          <h3>总 Tokens</h3>
+          <h3>{t('chatAnalysisTotal.totalTokensCard')}</h3>
           <div style={{ fontSize: 26, fontWeight: 700 }}>{kpi ? fmtNum(kpi.total_tokens) : '-'}</div>
         </div>
         <div className="card">
-          <h3>活跃源站模型</h3>
+          <h3>{t('chatAnalysisTotal.activeModels')}</h3>
           <div style={{ fontSize: 26, fontWeight: 700 }}>{kpi ? fmtNum(kpi.active_models) : '-'}</div>
         </div>
         <div className="card">
-          <h3>活跃天数</h3>
+          <h3>{t('chatAnalysisTotal.activeDays')}</h3>
           <div style={{ fontSize: 26, fontWeight: 700 }}>{kpi ? fmtNum(kpi.active_days) : '-'}</div>
         </div>
       </div>
 
       {/* 维度 3：Tokens 概览 */}
       <div className="card">
-        <h3>Tokens 概览</h3>
+        <h3>{t('chatAnalysisTotal.tokensOverview')}</h3>
         {ts ? (
           <>
             <dl className="kv">
-              <dt>调用次数</dt><dd>{fmtNum(ts.total_count)}</dd>
-              <dt>输入 Tokens</dt><dd>{fmtNum(ts.total_input)}</dd>
-              <dt>输出 Tokens</dt><dd>{fmtNum(ts.total_output)}</dd>
-              <dt>总 Tokens</dt><dd>{fmtNum(ts.total_tokens)}</dd>
-              <dt>输入/输出比</dt><dd>{ts.total_output ? (ts.total_input / ts.total_output).toFixed(2) : '-'}</dd>
+              <dt>{t('chatAnalysisTotal.callCount')}</dt><dd>{fmtNum(ts.total_count)}</dd>
+              <dt>{t('chatAnalysisTotal.inputTokens')}</dt><dd>{fmtNum(ts.total_input)}</dd>
+              <dt>{t('chatAnalysisTotal.outputTokens')}</dt><dd>{fmtNum(ts.total_output)}</dd>
+              <dt>{t('chatAnalysisTotal.totalTokens')}</dt><dd>{fmtNum(ts.total_tokens)}</dd>
+              <dt>{t('chatAnalysisTotal.inputOutputRatio')}</dt><dd>{ts.total_output ? (ts.total_input / ts.total_output).toFixed(2) : '-'}</dd>
             </dl>
             <DataTable
               columns={[
-                { key: 'date', title: '日期' },
-                { key: 'count', title: '次数', render: fmtNum },
-                { key: 'tokens_input', title: '输入 Tokens', render: fmtNum },
-                { key: 'tokens_output', title: '输出 Tokens', render: fmtNum },
-                { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
-                { key: 'avg_elapsed_ms', title: '平均耗时', render: fmtMs },
+                { key: 'date', title: t('chatAnalysisTotal.date') },
+                { key: 'count', title: t('chatAnalysisTotal.count'), render: fmtNum },
+                { key: 'tokens_input', title: t('chatAnalysisTotal.inputTokens'), render: fmtNum },
+                { key: 'tokens_output', title: t('chatAnalysisTotal.outputTokens'), render: fmtNum },
+                { key: 'tokens_total', title: t('chatAnalysisTotal.totalTokens'), render: fmtNum },
+                { key: 'avg_elapsed_ms', title: t('chatAnalysisTotal.avgDuration'), render: fmtMs },
               ]}
-              rows={ts.buckets || []} empty="暂无数据" />
+              rows={ts.buckets || []} empty={t('chatAnalysisTotal.noData')} />
           </>
-        ) : <div className="table-empty">暂无数据</div>}
+        ) : <div className="table-empty">{t('chatAnalysisTotal.noData')}</div>}
       </div>
 
       {/* 维度 4：源站模型分布 */}
       <div className="card">
-        <h3>源站模型分布（dst_model_name）</h3>
+        <h3>{t('chatAnalysisTotal.modelDistribution')}</h3>
         <DataTable
           columns={[
-            { key: 'model_name', title: '源站模型' },
-            { key: 'call_count', title: '调用次数', render: fmtNum },
-            { key: 'call_share', title: '调用占比', render: (v) => (v != null ? (v * 100).toFixed(2) + '%' : '-') },
-            { key: 'tokens_input', title: '输入 Tokens', render: fmtNum },
-            { key: 'tokens_output', title: '输出 Tokens', render: fmtNum },
-            { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
-            { key: 'token_share', title: 'Token 占比', render: (v) => (v != null ? (v * 100).toFixed(2) + '%' : '-') },
-            { key: 'dst_endpoint_count', title: '源站数', render: (v) => fmtNum(v) },
-            { key: 'top_dst_endpoints', title: 'Top 源站', render: (v) => (v || []).map((e) => `#${e.dst_endpoint_id}(${fmtNum(e.call_count)})`).join('、') || '-' },
+            { key: 'model_name', title: t('chatAnalysisTotal.sourceModel') },
+            { key: 'call_count', title: t('chatAnalysisTotal.callCount2'), render: fmtNum },
+            { key: 'call_share', title: t('chatAnalysisTotal.callShare'), render: (v) => (v != null ? (v * 100).toFixed(2) + '%' : '-') },
+            { key: 'tokens_input', title: t('chatAnalysisTotal.inputTokens'), render: fmtNum },
+            { key: 'tokens_output', title: t('chatAnalysisTotal.outputTokens'), render: fmtNum },
+            { key: 'tokens_total', title: t('chatAnalysisTotal.totalTokens'), render: fmtNum },
+            { key: 'token_share', title: t('chatAnalysisTotal.tokenShare'), render: (v) => (v != null ? (v * 100).toFixed(2) + '%' : '-') },
+            { key: 'dst_endpoint_count', title: t('chatAnalysisTotal.sourceCount'), render: (v) => fmtNum(v) },
+            { key: 'top_dst_endpoints', title: t('chatAnalysisTotal.topSources'), render: (v) => (v || []).map((e) => `#${e.dst_endpoint_id}(${fmtNum(e.call_count)})`).join('、') || '-' },
           ]}
-          rows={modelDist} empty="暂无数据" />
+          rows={modelDist} empty={t('chatAnalysisTotal.noData')} />
       </div>
 
       {/* 维度 2：时间分布 */}
       <div className="card">
-        <h3>时间分布</h3>
+        <h3>{t('chatAnalysisTotal.timeDistribution')}</h3>
         <DataTable
           columns={[
-            { key: 'date', title: '时间' },
-            { key: 'count', title: '调用次数', render: (v, r) => (
+            { key: 'date', title: t('chatAnalysisTotal.date') },
+            { key: 'count', title: t('chatAnalysisTotal.callCount2'), render: (v, r) => (
               <span title={fmtNum(v)}>{v > 0 ? '█'.repeat(Math.min(30, Math.max(1, Math.round(v / Math.max(1, Math.max(...timeStats.map((x) => x.count))) * 30)))) + ' ' + fmtNum(v) : fmtNum(v)}</span>
             ) },
           ]}
-          rows={timeStats} empty="暂无数据" />
+          rows={timeStats} empty={t('chatAnalysisTotal.noData')} />
       </div>
 
       {/* 维度 5：用量趋势 */}
       <div className="card">
-        <h3>用量趋势（按天）</h3>
+        <h3>{t('chatAnalysisTotal.usageTrend')}</h3>
         <DataTable
           columns={[
-            { key: 'date', title: '日期' },
-            { key: 'count', title: '次数', render: fmtNum },
-            { key: 'tokens_input', title: '输入 Tokens', render: fmtNum },
-            { key: 'tokens_output', title: '输出 Tokens', render: fmtNum },
-            { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
+            { key: 'date', title: t('chatAnalysisTotal.date') },
+            { key: 'count', title: t('chatAnalysisTotal.count'), render: fmtNum },
+            { key: 'tokens_input', title: t('chatAnalysisTotal.inputTokens'), render: fmtNum },
+            { key: 'tokens_output', title: t('chatAnalysisTotal.outputTokens'), render: fmtNum },
+            { key: 'tokens_total', title: t('chatAnalysisTotal.totalTokens'), render: fmtNum },
           ]}
-          rows={trend} empty="暂无数据" />
+          rows={trend} empty={t('chatAnalysisTotal.noData')} />
       </div>
 
       {/* 区间报告（v2.0.46：ChatAnalysisTotalRangeInterface?stream=1 SSE 流式） */}
       <div className="card">
-        <h3>区间报告（tokens 时序 / 模型分布 / 延迟分布 / Agent 工具）</h3>
+        <h3>{t('chatAnalysisTotal.rangeReport')}</h3>
         <div className="toolbar">
-          <label>开始日期 <input type="date" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} /></label>
-          <label>结束日期 <input type="date" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} /></label>
-          <label>颗粒度
+          <label>{t('chatAnalysisTotal.startDate')} <input type="date" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} /></label>
+          <label>{t('chatAnalysisTotal.endDate')} <input type="date" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} /></label>
+          <label>{t('chatAnalysisTotal.granularity')}
             <select value={rangeGran} onChange={(e) => setRangeGran(e.target.value)}>
-              <option value="">自动（≤48h→小时，否则→天）</option>
-              <option value="minute">分钟</option>
-              <option value="hour">小时</option>
-              <option value="day">天</option>
+              <option value="">{t('chatAnalysisTotal.autoGranularity')}</option>
+              <option value="minute">{t('chatAnalysisTotal.minute')}</option>
+              <option value="hour">{t('chatAnalysisTotal.hour')}</option>
+              <option value="day">{t('chatAnalysisTotal.day')}</option>
             </select>
           </label>
           <button className="btn btn-primary" onClick={() => runRangeReport()} disabled={rangeRunning}>
-            {rangeRunning ? '生成中…' : '生成报告'}
+            {rangeRunning ? t('chatAnalysisTotal.generating') : t('chatAnalysisTotal.generateReport')}
           </button>
         </div>
         {rangeError ? <div className="alert alert-error" style={{ marginTop: 8 }}>{rangeError}</div> : null}
@@ -437,42 +445,42 @@ export default function ChatAnalysisTotal({ route }) {
               const a = rangeReport.agent_dist
               return (
                 <>
-                  <h4 style={{ margin: '10px 0 6px' }}>时序桶（{fmtNum(r.series ? r.series.length : 0)} 桶）</h4>
+                  <h4 style={{ margin: '10px 0 6px' }}>{t('chatAnalysisTotal.seriesBuckets', { count: fmtNum(r.series ? r.series.length : 0) })}</h4>
                   <DataTable
                     columns={[
-                      { key: 'date', title: '时间' },
-                      { key: 'count', title: '次数', render: fmtNum },
-                      { key: 'tokens_input', title: '输入 Tokens', render: fmtNum },
-                      { key: 'tokens_output', title: '输出 Tokens', render: fmtNum },
-                      { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
+                      { key: 'date', title: t('chatAnalysisTotal.date') },
+                      { key: 'count', title: t('chatAnalysisTotal.count'), render: fmtNum },
+                      { key: 'tokens_input', title: t('chatAnalysisTotal.inputTokens'), render: fmtNum },
+                      { key: 'tokens_output', title: t('chatAnalysisTotal.outputTokens'), render: fmtNum },
+                      { key: 'tokens_total', title: t('chatAnalysisTotal.totalTokens'), render: fmtNum },
                     ]}
-                    rows={r.series || []} empty="暂无数据" />
-                  <h4 style={{ margin: '10px 0 6px' }}>模型分布</h4>
+                    rows={r.series || []} empty={t('chatAnalysisTotal.noData')} />
+                  <h4 style={{ margin: '10px 0 6px' }}>{t('chatAnalysisTotal.modelDist')}</h4>
                   <DataTable
                     columns={[
-                      { key: 'model_name', title: '模型' },
-                      { key: 'call_count', title: '调用次数', render: fmtNum },
-                      { key: 'tokens_total', title: '总 Tokens', render: fmtNum },
+                      { key: 'model_name', title: t('chatAnalysisTotal.sourceModel') },
+                      { key: 'call_count', title: t('chatAnalysisTotal.callCount2'), render: fmtNum },
+                      { key: 'tokens_total', title: t('chatAnalysisTotal.totalTokens'), render: fmtNum },
                     ]}
-                    rows={r.model_dist || []} empty="暂无数据" />
-                  <h4 style={{ margin: '10px 0 6px' }}>延迟分布</h4>
+                    rows={r.model_dist || []} empty={t('chatAnalysisTotal.noData')} />
+                  <h4 style={{ margin: '10px 0 6px' }}>{t('chatAnalysisTotal.latencyDist')}</h4>
                   <DataTable
                     columns={[
-                      { key: 'range', title: '延迟区间' },
-                      { key: 'count', title: '次数', render: fmtNum },
-                      { key: 'percentage', title: '占比', render: (v) => (v != null ? (v * 100).toFixed(1) + '%' : '-') },
+                      { key: 'range', title: t('chatAnalysisTotal.latencyDist') },
+                      { key: 'count', title: t('chatAnalysisTotal.count'), render: fmtNum },
+                      { key: 'percentage', title: t('chatAnalysisTotal.percentage'), render: (v) => (v != null ? (v * 100).toFixed(1) + '%' : '-') },
                     ]}
-                    rows={r.latency_dist || []} empty="暂无数据" />
+                    rows={r.latency_dist || []} empty={t('chatAnalysisTotal.noData')} />
                   {a ? (
                     <>
-                      <h4 style={{ margin: '10px 0 6px' }}>Agent 工具（{fmtNum(a.unique_tools || 0)} 种 / {fmtNum(a.total_agent_count || 0)} 次）</h4>
+                      <h4 style={{ margin: '10px 0 6px' }}>{t('chatAnalysisTotal.agentToolDist', { unique: fmtNum(a.unique_tools || 0), total: fmtNum(a.total_agent_count || 0) })}</h4>
                       <DataTable
                         columns={[
-                          { key: 'agent_tool_name', title: '工具名称' },
-                          { key: 'count', title: '调用次数', render: fmtNum },
-                          { key: 'percentage', title: '占比', render: (v) => (v != null ? (v * 100).toFixed(1) + '%' : '-') },
+                          { key: 'agent_tool_name', title: t('chatAnalysisTotal.agentToolName') },
+                          { key: 'count', title: t('chatAnalysisTotal.callCount2'), render: fmtNum },
+                          { key: 'percentage', title: t('chatAnalysisTotal.percentage'), render: (v) => (v != null ? (v * 100).toFixed(1) + '%' : '-') },
                         ]}
-                        rows={a.tool_stats || []} empty="暂无数据" />
+                        rows={a.tool_stats || []} empty={t('chatAnalysisTotal.noData')} />
                     </>
                   ) : null}
                 </>
@@ -484,50 +492,50 @@ export default function ChatAnalysisTotal({ route }) {
 
       {/* 维度 6：协议分析 */}
       <div className="card">
-        <h3>协议分析</h3>
+        <h3>{t('chatAnalysisTotal.protocolAnalysis')}</h3>
         {proto ? (
           <>
             {kvTable(proto, [
-              ['avg_elapsed_ms', '平均耗时', fmtMs], ['min_elapsed_ms', '最小耗时', fmtMs],
-              ['max_elapsed_ms', '最大耗时', fmtMs], ['avg_req_size', '平均请求大小', fmtNum],
-              ['avg_resp_size', '平均响应大小', fmtNum], ['stream_count', '流式次数', fmtNum],
-              ['non_stream_count', '非流式次数', fmtNum], ['has_system_prompt', '含系统提示词', fmtNum],
-              ['has_tool_call', '含工具调用', fmtNum], ['multi_turn_count', '多轮对话', fmtNum],
-              ['single_turn_count', '单轮对话', fmtNum], ['sample_count', '取样条数', fmtNum],
+              ['avg_elapsed_ms', t('chatAnalysisTotal.avgElapsed'), fmtMs], ['min_elapsed_ms', t('chatAnalysisTotal.minElapsed'), fmtMs],
+              ['max_elapsed_ms', t('chatAnalysisTotal.maxElapsed'), fmtMs], ['avg_req_size', t('chatAnalysisTotal.avgReqSize'), fmtNum],
+              ['avg_resp_size', t('chatAnalysisTotal.avgRespSize'), fmtNum], ['stream_count', t('chatAnalysisTotal.streamCount'), fmtNum],
+              ['non_stream_count', t('chatAnalysisTotal.nonStreamCount'), fmtNum], ['has_system_prompt', t('chatAnalysisTotal.hasSystemPrompt'), fmtNum],
+              ['has_tool_call', t('chatAnalysisTotal.hasToolCall'), fmtNum], ['multi_turn_count', t('chatAnalysisTotal.multiTurn'), fmtNum],
+              ['single_turn_count', t('chatAnalysisTotal.singleTurn'), fmtNum], ['sample_count', t('chatAnalysisTotal.sampleCount'), fmtNum],
             ])}
-            <h3 style={{ marginTop: 12 }}>方法分布</h3>
-            <DataTable columns={[{ key: 'k', title: '方法' }, { key: 'v', title: '次数', render: fmtNum }]}
-                       rows={Object.entries(proto.method_stats || {}).map(([k, v]) => ({ k, v }))} empty="暂无数据" />
-            <h3 style={{ marginTop: 12 }}>URL 模式分布</h3>
-            <DataTable columns={[{ key: 'k', title: 'URL 模式' }, { key: 'v', title: '次数', render: fmtNum }]}
-                       rows={Object.entries(proto.url_pattern_stats || {}).map(([k, v]) => ({ k, v }))} empty="暂无数据" />
-            <h3 style={{ marginTop: 12 }}>状态码分布</h3>
-            <DataTable columns={[{ key: 'k', title: '状态码' }, { key: 'v', title: '次数', render: fmtNum }]}
-                       rows={Object.entries(proto.status_stats || {}).map(([k, v]) => ({ k, v }))} empty="暂无数据" />
+            <h3 style={{ marginTop: 12 }}>{t('chatAnalysisTotal.methodDist')}</h3>
+            <DataTable columns={[{ key: 'k', title: t('chatAnalysisTotal.method') }, { key: 'v', title: t('chatAnalysisTotal.count'), render: fmtNum }]}
+                       rows={Object.entries(proto.method_stats || {}).map(([k, v]) => ({ k, v }))} empty={t('chatAnalysisTotal.noData')} />
+            <h3 style={{ marginTop: 12 }}>{t('chatAnalysisTotal.urlPatternDist')}</h3>
+            <DataTable columns={[{ key: 'k', title: t('chatAnalysisTotal.urlPattern') }, { key: 'v', title: t('chatAnalysisTotal.count'), render: fmtNum }]}
+                       rows={Object.entries(proto.url_pattern_stats || {}).map(([k, v]) => ({ k, v }))} empty={t('chatAnalysisTotal.noData')} />
+            <h3 style={{ marginTop: 12 }}>{t('chatAnalysisTotal.statusCodeDist')}</h3>
+            <DataTable columns={[{ key: 'k', title: t('chatAnalysisTotal.statusCode') }, { key: 'v', title: t('chatAnalysisTotal.count'), render: fmtNum }]}
+                       rows={Object.entries(proto.status_stats || {}).map(([k, v]) => ({ k, v }))} empty={t('chatAnalysisTotal.noData')} />
           </>
-        ) : <div className="table-empty">暂无数据</div>}
+        ) : <div className="table-empty">{t('chatAnalysisTotal.noData')}</div>}
       </div>
 
       {/* 维度 7：Agent 工具统计 */}
       <div className="card">
-        <h3>Agent 工具统计</h3>
+        <h3>{t('chatAnalysisTotal.agentToolStats')}</h3>
         {agent ? (
           <>
             <dl className="kv">
-              <dt>Agent 总调用</dt><dd>{fmtNum(agent.total_agent_count)}</dd>
-              <dt>工具数</dt><dd>{fmtNum(agent.unique_tools)}</dd>
+              <dt>{t('chatAnalysisTotal.agentTotalCalls')}</dt><dd>{fmtNum(agent.total_agent_count)}</dd>
+              <dt>{t('chatAnalysisTotal.toolCount')}</dt><dd>{fmtNum(agent.unique_tools)}</dd>
             </dl>
             <DataTable
               columns={[
-                { key: 'agent_tool_name', title: '工具名称' },
-                { key: 'count', title: '调用次数', render: fmtNum },
-                { key: 'percentage', title: '占比', render: (v) => (v * 100).toFixed(2) + '%' },
-                { key: 'first_seen_at', title: '首次出现' },
-                { key: 'last_seen_at', title: '最近出现' },
+                { key: 'agent_tool_name', title: t('chatAnalysisTotal.agentToolName') },
+                { key: 'count', title: t('chatAnalysisTotal.callCount2'), render: fmtNum },
+                { key: 'percentage', title: t('chatAnalysisTotal.percentage'), render: (v) => (v * 100).toFixed(2) + '%' },
+                { key: 'first_seen_at', title: t('chatAnalysisTotal.firstSeen') },
+                { key: 'last_seen_at', title: t('chatAnalysisTotal.lastSeen') },
               ]}
-              rows={agent.tool_stats || []} empty="暂无数据" />
+              rows={agent.tool_stats || []} empty={t('chatAnalysisTotal.noData')} />
           </>
-        ) : <div className="table-empty">暂无数据</div>}
+        ) : <div className="table-empty">{t('chatAnalysisTotal.noData')}</div>}
       </div>
     </div>
   )

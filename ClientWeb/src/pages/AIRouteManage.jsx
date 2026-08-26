@@ -3,6 +3,7 @@ import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import { useI18n } from '../i18n'
 
 // 折叠/分页 localStorage 工具（带容错）
 const safeGet = (k) => { try { return window.localStorage.getItem(k) } catch { return null } }
@@ -15,14 +16,7 @@ const DEFAULT_PAGE_SIZE = 50
 // 用户端（29001）：UserAIRouteInterface（action: list / list_endpoints / count_record_by_protocol / update），
 // 仅限本人路由的受限编辑，无新增/删除/批量。
 
-const ALGO_NAMES = { 1: '指定型', 2: '稳定型', 3: '经济型' }
-const ALGO_DESC = {
-  1: '始终使用目标源站列表中的第一个。您可以通过调整列表顺序来控制优先级。',
-  2: '遇到服务端错误（429/500/502/503/504）或连接超时，自动切换到下一个源站。',
-  3: 'Session 级别负载均衡：根据 session_id 将不同会话轮询分配到各源站。仅支持 Anthropic 协议，OpenAI 协议自动降级为稳定型。',
-}
 const DAYS_OPTIONS = [-1, -2, -4, -6, -12, 1, 3, 5, 7, 14, 30, 60, 90, 0]
-const daysLabel = (d) => (d < 0 ? '最近' + -d + '小时' : d === 0 ? '全部时间' : '最近' + d + '天')
 
 const protocolName = (t) => (parseInt(t, 10) === 1 ? 'Anthropic' : 'OpenAI')
 const protocolSlug = (t) => (parseInt(t, 10) === 1 ? 'anthropic' : 'openai')
@@ -43,6 +37,7 @@ function emptyForm() {
 }
 
 export default function AIRouteManage() {
+  const { t } = useI18n()
   const isAdmin = __APP_ROLE__ === 'manager' ? isAdminRole() : false // 用户端走 UserAIRouteInterface（本人路由 + 受限编辑，构建期裁剪管理分支）
   const [routes, setRoutes] = useState([])
   const [users, setUsers] = useState([])
@@ -57,6 +52,17 @@ export default function AIRouteManage() {
   const [formError, setFormError] = useState('')
   const [days, setDays] = useState(3)
   const [stats, setStats] = useState({}) // route_id -> {anthropic_count, openai_count}
+
+  // 算法名称/描述（需 t() 内联，因为含变量）
+  const ALGO_NAMES = { 1: t('aiRouteManage.algoDesignated'), 2: t('aiRouteManage.algoStable'), 3: t('aiRouteManage.algoEconomic') }
+  const ALGO_DESC = {
+    1: t('aiRouteManage.algoDirectDesc'),
+    2: t('aiRouteManage.algoStableDesc'),
+    3: t('aiRouteManage.algoEconomicDesc'),
+  }
+
+  // 天数标签（需 t() 内联，因为含变量）
+  const daysLabel = (d) => (d < 0 ? t('aiRouteManage.daysHour', { hours: -d }) : d === 0 ? t('aiRouteManage.daysAll') : t('aiRouteManage.daysDay', { days: d }))
 
   // 折叠/展开状态（按角色隔离 localStorage）
   const collapseKey = `lsm:airoute:collapsed:${isAdmin ? 'manager' : 'user'}`
@@ -201,8 +207,8 @@ export default function AIRouteManage() {
   }
 
   const addEndpoint = (epId) => {
-    if (!epId) { alert('请先选择一个源站'); return }
-    if (form.endpoints.some((x) => x.id === epId)) { alert('该源站已添加'); return }
+    if (!epId) { alert(t('aiRouteManage.pleaseSelectEndpointFirst')); return }
+    if (form.endpoints.some((x) => x.id === epId)) { alert(t('aiRouteManage.endpointAlreadyAdded')); return }
     const ep = formEndpoints.find((e) => e.id == epId) // eslint-disable-line eqeqeq
     setForm({ ...form, endpoints: [...form.endpoints, { id: epId, algorithm_type: epAlgoForProtocol(ep, form.protocol_type), in_route_status: 1 }] })
   }
@@ -217,7 +223,7 @@ export default function AIRouteManage() {
   const setEpAlgo = (idx, algo) => {
     const ep = formEndpoints.find((e) => e.id == form.endpoints[idx].id) // eslint-disable-line eqeqeq
     if (!epAlgoValid(ep, form.protocol_type, algo)) {
-      alert(algo === 1 ? '协议直连要求源站协议与路由协议一致' : '协议转换器要求源站协议与路由协议相反')
+      alert(algo === 1 ? t('aiRouteManage.directProtocolMismatch') : t('aiRouteManage.converterProtocolMismatch'))
       return
     }
     const next = form.endpoints.slice()
@@ -235,9 +241,9 @@ export default function AIRouteManage() {
     const userId = editing ? editing.user_id : parseInt(form.user_id, 10) || 0
     const modelId = editing ? editing.user_model_id : parseInt(form.user_model_id, 10) || 0
     const protocolType = editing ? editing.protocol_type : parseInt(form.protocol_type, 10) || 0
-    if (!isAdmin && (!editing || !editing.user_model_id || !editing.protocol_type)) { setFormError('路由信息不完整，请刷新后重试'); return }
-    if (!userId || !modelId || !protocolType) { setFormError('请选择用户、模型和协议'); return }
-    if (!form.endpoints.length) { setFormError('请至少选择一个目标源站'); return }
+    if (!isAdmin && (!editing || !editing.user_model_id || !editing.protocol_type)) { setFormError(t('aiRouteManage.routeInfoIncomplete')); return }
+    if (!userId || !modelId || !protocolType) { setFormError(t('aiRouteManage.pleaseSelectUserModelProtocol')); return }
+    if (!form.endpoints.length) { setFormError(t('aiRouteManage.pleaseSelectAtLeastOneEndpoint')); return }
     setSaving(true)
     setFormError('')
     try {
@@ -274,7 +280,7 @@ export default function AIRouteManage() {
   }
 
   const deleteItem = async (route) => {
-    if (!confirm(`确认删除以下路由？\n\n${route.user_name || ''} / ${route.model_name || ''}\n\n此操作不可恢复！`)) return
+    if (!confirm(t('aiRouteManage.deleteRouteConfirm', { userName: route.user_name || '', modelName: route.model_name || '' }))) return
     try {
       await post('AIRouteManageInterface', { action: 'delete', id: route.id })
       loadRoutes()
@@ -283,8 +289,8 @@ export default function AIRouteManage() {
 
   const batchDelete = async () => {
     const ids = [...selected]
-    if (!ids.length) { alert('请先选择要删除的路由'); return }
-    if (!confirm('确认删除选中的 ' + ids.length + ' 条路由？此操作不可恢复！')) return
+    if (!ids.length) { alert(t('aiRouteManage.pleaseSelectRouteToDelete')); return }
+    if (!confirm(t('aiRouteManage.deleteSelectedConfirm', { count: ids.length }))) return
     try {
       await post('AIRouteManageInterface', { action: 'batch_delete', ids })
       setSelected(new Set())
@@ -294,8 +300,15 @@ export default function AIRouteManage() {
 
   const batchUpdateAlgo = async () => {
     const ids = [...selected]
-    if (!ids.length) { alert('请先选择要编辑的路由'); return }
-    const type = prompt('批量设置算法策略：1=指定型 2=稳定型 3=经济型（输入数字）', '2')
+    if (!ids.length) { alert(t('aiRouteManage.pleaseSelectRouteToEdit')); return }
+    const type = prompt(
+      t('aiRouteManage.batchSetAlgoPrompt', {
+        designated: t('aiRouteManage.algoDesignated'),
+        stable: t('aiRouteManage.algoStable'),
+        economic: t('aiRouteManage.algoEconomic'),
+      }),
+      '2'
+    )
     const algo = parseInt(type, 10)
     if (![1, 2, 3].includes(algo)) return
     try {
@@ -328,9 +341,9 @@ export default function AIRouteManage() {
   const renderLastRecord = (route, kind) => {
     const failed = kind === 'success' ? route.last_success_failed : route.last_failure_failed
     const has = kind === 'success' ? route.last_success_has_record : route.last_failure_has_record
-    if (failed) return <span style={{ color: '#c0392b', fontWeight: 600 }}>查询失败</span>
-    if (!has) return <span style={{ color: '#999', fontStyle: 'italic' }}>{kind === 'success' ? '暂无成功记录' : '暂无失败记录'}</span>
-    const status = (kind === 'success' ? route.last_success_status : route.last_failure_status) || '传输错误'
+    if (failed) return <span style={{ color: '#c0392b', fontWeight: 600 }}>{t('aiRouteManage.queryFailed')}</span>
+    if (!has) return <span style={{ color: '#999', fontStyle: 'italic' }}>{kind === 'success' ? t('aiRouteManage.noSuccessRecord') : t('aiRouteManage.noFailureRecord')}</span>
+    const status = (kind === 'success' ? route.last_success_status : route.last_failure_status) || t('aiRouteManage.transferError')
     const time = kind === 'success' ? route.last_success_at_text : route.last_failure_at_text
     const model = kind === 'success' ? route.last_success_dst_model_name : route.last_failure_dst_model_name
     return (
@@ -345,24 +358,24 @@ export default function AIRouteManage() {
   const columns = [
     ...(isAdmin ? [{
       key: 'checkbox', title: (
-        <input type="checkbox" title="全选"
+        <input type="checkbox" title={t('aiRouteManage.selectAll')}
           checked={routes.length > 0 && selected.size >= routes.length}
           onChange={(e) => setSelected(e.target.checked ? new Set(routes.map((r) => r.id)) : new Set())} />
       ), width: 36,
       render: (_, r) => <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSelect(r.id)} />,
     }] : []),
-    { key: 'id', title: 'ID', width: 60 },
-    ...(isAdmin ? [{ key: 'user_name', title: '所属用户' }] : []),
-    { key: 'model_name', title: '模型名' },
-    { key: 'endpoints', title: '目标源站列表', render: (_, r) => renderEpList(r) },
-    { key: 'protocol_type', title: '协议', render: (v) => (
+    { key: 'id', title: t('aiRouteManage.id'), width: 60 },
+    ...(isAdmin ? [{ key: 'user_name', title: t('aiRouteManage.belongUser') }] : []),
+    { key: 'model_name', title: t('aiRouteManage.modelName') },
+    { key: 'endpoints', title: t('aiRouteManage.targetList'), render: (_, r) => renderEpList(r) },
+    { key: 'protocol_type', title: t('aiRouteManage.protocol'), render: (v) => (
       <span className={`protocol-badge protocol-${protocolSlug(v)}`}>{protocolName(v)}</span>
     ) },
-    { key: 'algorithm_name', title: '算法策略', render: (v, r) => v || ALGO_NAMES[r.algorithm_strategy_type] || '-' },
+    { key: 'algorithm_name', title: t('aiRouteManage.algoStrategy'), render: (v, r) => v || ALGO_NAMES[r.algorithm_strategy_type] || '-' },
     {
       key: 'stats', title: (
         <span>
-          汇总统计{' '}
+          {t('aiRouteManage.summaryStats')}{' '}
           <select value={days} onChange={(e) => setDays(normalizeDays(e.target.value))} style={{ fontSize: 12 }}>
             {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{daysLabel(d)}</option>)}
           </select>
@@ -383,17 +396,17 @@ export default function AIRouteManage() {
         )
       },
     },
-    { key: 'last_success', title: '最后成功记录', render: (_, r) => renderLastRecord(r, 'success') },
-    { key: 'last_failure', title: '最后失败记录', render: (_, r) => renderLastRecord(r, 'failure') },
+    { key: 'last_success', title: t('aiRouteManage.lastSuccessRecord'), render: (_, r) => renderLastRecord(r, 'success') },
+    { key: 'last_failure', title: t('aiRouteManage.lastFailureRecord'), render: (_, r) => renderLastRecord(r, 'failure') },
     {
-      key: 'actions', title: '操作',
+      key: 'actions', title: t('aiRouteManage.operation'),
       render: (_, r) => (
         <span className="op-btns">
-          <button className="btn btn-sm btn-primary" onClick={() => openEdit(r)}>编辑</button>
-          <a className="btn btn-link" href={`#/ChatDialog?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>对话</a>
-          <a className="btn btn-link" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>对话明细分析</a>
-          <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days >= 0 ? '&days=' + days : ''}`}>汇总统计</a>
-          {isAdmin ? <button className="btn btn-sm btn-danger" onClick={() => deleteItem(r)}>删除</button> : null}
+          <button className="btn btn-sm btn-primary" onClick={() => openEdit(r)}>{t('aiRouteManage.editRoute')}</button>
+          <a className="btn btn-link" href={`#/ChatDialog?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>{t('aiRouteManage.dialog')}</a>
+          <a className="btn btn-link" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>{t('aiRouteManage.dialogAnalysis')}</a>
+          <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days >= 0 ? '&days=' + days : ''}`}>{t('aiRouteManage.summaryStats')}</a>
+          {isAdmin ? <button className="btn btn-sm btn-danger" onClick={() => deleteItem(r)}>{t('aiRouteManage.deleteRoute')}</button> : null}
         </span>
       ),
     },
@@ -409,76 +422,76 @@ export default function AIRouteManage() {
 
   return (
     <div className="page">
-      <h2 className="page-title">智能路由管理</h2>
+      <h2 className="page-title">{t('aiRouteManage.title')}</h2>
       <div className="toolbar">
-        <button className="btn" onClick={loadRoutes}>刷新</button>
-        {isAdmin ? <button className="btn btn-primary" onClick={openAdd}>+ 添加路由</button> : null}
-        {!isAdmin ? <span style={{ color: '#888', fontSize: 13 }}>用户模式：仅显示并允许编辑本人模型的路由</span> : null}
+        <button className="btn" onClick={loadRoutes}>{t('aiRouteManage.refresh')}</button>
+        {isAdmin ? <button className="btn btn-primary" onClick={openAdd}>+ {t('aiRouteManage.addRoute')}</button> : null}
+        {!isAdmin ? <span style={{ color: '#888', fontSize: 13 }}>{t('aiRouteManage.userMode')}</span> : null}
         {selected.size > 0 ? (
           <>
-            <span>已选择 {selected.size} 条</span>
-            <button className="btn btn-sm" onClick={batchUpdateAlgo}>批量编辑算法</button>
-            <button className="btn btn-sm btn-danger" onClick={batchDelete}>批量删除</button>
-            <button className="btn btn-sm" onClick={() => setSelected(new Set())}>取消选择</button>
+            <span>{t('aiRouteManage.selected', { count: selected.size })}</span>
+            <button className="btn btn-sm" onClick={batchUpdateAlgo}>{t('aiRouteManage.batchEditAlgo')}</button>
+            <button className="btn btn-sm btn-danger" onClick={batchDelete}>{t('aiRouteManage.batchDelete')}</button>
+            <button className="btn btn-sm" onClick={() => setSelected(new Set())}>{t('aiRouteManage.cancelSelection')}</button>
           </>
         ) : null}
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
-        <DataTable columns={columns} rows={pagedRoutes} loading={loading} empty="暂无路由配置" rowKey="id"
+        <DataTable columns={columns} rows={pagedRoutes} loading={loading} empty={t('aiRouteManage.noRoutesConfig')} rowKey="id"
           rowClass={(r) => 'row-protocol-' + protocolSlug(r.protocol_type)}
           collapsible collapsedIds={collapsedIds} onToggleCollapse={toggleCollapse}
           renderCollapsedRow={(r, onToggle) => (
             <div className="collapsed-summary">
-              <button type="button" className="collapse-btn" onClick={onToggle} title="展开" aria-label="展开">▶</button>
+              <button type="button" className="collapse-btn" onClick={onToggle} title={t('aiRouteManage.expand')} aria-label={t('aiRouteManage.expand')}>▶</button>
               <span className="collapsed-id">#{r.id}</span>
               <span className={`protocol-badge protocol-${protocolSlug(r.protocol_type)}`}>{protocolName(r.protocol_type)}</span>
               <span className="collapsed-model">{r.model_name || '-'}</span>
-              <span className="collapsed-hint">{r.algorithm_name || ALGO_NAMES[r.algorithm_strategy_type] || ''} · {(r.endpoint_list || []).length} 个源站</span>
+              <span className="collapsed-hint">{r.algorithm_name || ALGO_NAMES[r.algorithm_strategy_type] || ''} · {t('aiRouteManage.sourcesCount', { count: (r.endpoint_list || []).length })}</span>
             </div>
           )} />
         <div className="pager">
-          <span>总计 {routes.length} 条 · 第 {safePage} / {totalPages} 页 · 每页</span>
+          <span>{t('aiRouteManage.totalPages', { total: routes.length, page: safePage, pages: totalPages })}</span>
           <select value={pageSize} onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(1) }}>
             {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
-          <button className="btn btn-sm" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>上一页</button>
-          <button className="btn btn-sm" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>下一页</button>
+          <button className="btn btn-sm" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>{t('aiRouteManage.prevPage')}</button>
+          <button className="btn btn-sm" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>{t('aiRouteManage.nextPage')}</button>
         </div>
       </div>
 
       {form ? (
         <Modal
-          title={form.id ? '编辑路由' : '添加路由'}
+          title={form.id ? t('aiRouteManage.editRoute') : t('aiRouteManage.addRoute')}
           width={760}
           onClose={() => setForm(null)}
           footer={
             <>
-              <button className="btn" onClick={() => setForm(null)}>取消</button>
-              <button className="btn btn-primary" disabled={saving} onClick={save}>保存</button>
+              <button className="btn" onClick={() => setForm(null)}>{t('aiRouteManage.cancel')}</button>
+              <button className="btn btn-primary" disabled={saving} onClick={save}>{t('aiRouteManage.save')}</button>
             </>
           }
         >
           {formError ? <div className="alert alert-error">{formError}</div> : null}
           {!isAdmin ? (
             <dl className="kv" style={{ marginBottom: 10 }}>
-              <dt>模型</dt><dd><b>{form.id ? (routes.find((r) => r.id === form.id) || {}).model_name : ''}</b></dd>
-              <dt>协议</dt><dd>{protocolName(form.id ? (routes.find((r) => r.id === form.id) || {}).protocol_type : 0)}</dd>
+              <dt>{t('aiRouteManage.model')}</dt><dd><b>{form.id ? (routes.find((r) => r.id === form.id) || {}).model_name : ''}</b></dd>
+              <dt>{t('aiRouteManage.protocol')}</dt><dd>{protocolName(form.id ? (routes.find((r) => r.id === form.id) || {}).protocol_type : 0)}</dd>
             </dl>
           ) : null}
           {isAdmin ? (
           <>
-          <label className="field"><span>选择用户</span>
+          <label className="field"><span>{t('aiRouteManage.selectUser')}</span>
             <select value={form.user_id} disabled={!!form.id} onChange={(e) => onUserChange(e.target.value)}>
-              <option value="">请选择用户</option>
+              <option value="">{t('aiRouteManage.pleaseSelectUser')}</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>{u.user_name}</option>
               ))}
             </select>
           </label>
-          <label className="field"><span>模型列表</span>
+          <label className="field"><span>{t('aiRouteManage.modelList')}</span>
             <select value={form.user_model_id} disabled={!!form.id} onChange={(e) => setForm({ ...form, user_model_id: parseInt(e.target.value, 10), protocol_type: '', endpoints: [] })}>
-              <option value="">{form.user_id ? '请选择模型' : '请先选择用户'}</option>
+              <option value="">{form.user_id ? t('aiRouteManage.pleaseSelectModel') : t('aiRouteManage.pleaseSelectUserFirst')}</option>
               {formModels.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.model_name} ({(m.api_key || '').substring(0, 8)}****)
@@ -486,54 +499,54 @@ export default function AIRouteManage() {
               ))}
             </select>
           </label>
-          <label className="field"><span>协议类型</span>
+          <label className="field"><span>{t('aiRouteManage.protocolType')}</span>
             <select value={form.protocol_type} disabled={!!form.id} onChange={(e) => setForm({ ...form, protocol_type: parseInt(e.target.value, 10), endpoints: [] })}>
-              <option value="">{form.user_model_id ? '请选择协议' : '请先选择模型'}</option>
+              <option value="">{form.user_model_id ? t('aiRouteManage.pleaseSelectProtocol') : t('aiRouteManage.pleaseSelectModelFirst')}</option>
               {protocolOptions().map((p) => <option key={p} value={p}>{protocolName(p)}</option>)}
             </select>
           </label>
           </>
           ) : null}
-          <div className="field"><span>目标源站</span>
+          <div className="field"><span>{t('aiRouteManage.targetEndpoints')}</span>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <select style={{ flex: 1 }} value="" onChange={(e) => { if (e.target.value) addEndpoint(parseInt(e.target.value, 10)) }}>
-                <option value="">{form.protocol_type ? '请选择源站' : '请先选择协议'}</option>
+                <option value="">{form.protocol_type ? t('aiRouteManage.pleaseSelectEndpoint') : t('aiRouteManage.pleaseSelectProtocolFirst')}</option>
                 {form.protocol_type
                   ? formEndpoints
                       .filter((ep) => ep.status == 1 && !form.endpoints.some((x) => x.id === ep.id)) // eslint-disable-line eqeqeq
                       .sort((a, b) => ((a.platform_name || '') + (a.model_name || '')).localeCompare((b.platform_name || '') + (b.model_name || ''), 'zh-Hans-CN'))
                       .map((ep) => (
                         <option key={ep.id} value={ep.id}>
-                          {ep.platform_name} / {ep.model_name} [{protocolName(ep.protocol_type)} · {epAlgoForProtocol(ep, form.protocol_type) === 1 ? '协议直连' : '协议转换器'}]
+                          {ep.platform_name} / {ep.model_name} [{protocolName(ep.protocol_type)} · {epAlgoForProtocol(ep, form.protocol_type) === 1 ? t('aiRouteManage.protocolDirect') : t('aiRouteManage.protocolConverter')}]
                         </option>
                       ))
                   : null}
               </select>
             </div>
             <div style={{ border: '1px solid #ddd', borderRadius: 4, padding: 8, minHeight: 40, background: '#fafafa' }}>
-              {form.endpoints.length === 0 ? <span style={{ color: '#999', fontSize: 13 }}>暂无已选源站</span> : form.endpoints.map((sel, i) => {
+              {form.endpoints.length === 0 ? <span style={{ color: '#999', fontSize: 13 }}>{t('aiRouteManage.noSelectedEndpoints')}</span> : form.endpoints.map((sel, i) => {
                 const ep = formEndpoints.find((e) => e.id == sel.id) // eslint-disable-line eqeqeq
                 return (
                   <div key={sel.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '6px 8px', border: '1px solid #e0e0e0', borderRadius: 6, marginBottom: 6, fontSize: 13, background: '#fff' }}>
                     <span>{i + 1}. {ep ? `${ep.platform_name} / ${ep.model_name} [${protocolName(ep.protocol_type)}]` : 'ID: ' + sel.id}</span>
                     <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                      <label style={{ fontSize: 12 }}><input type="radio" checked={sel.algorithm_type === 1} onChange={() => setEpAlgo(i, 1)} disabled={ep && !epAlgoValid(ep, form.protocol_type, 1)} />直连</label>
-                      <label style={{ fontSize: 12 }}><input type="radio" checked={sel.algorithm_type === 2} onChange={() => setEpAlgo(i, 2)} disabled={ep && !epAlgoValid(ep, form.protocol_type, 2)} />转换器</label>
-                      <button className="btn btn-sm" onClick={() => toggleEpStatus(i)}>{sel.in_route_status === 0 ? '已禁用' : '已启用'}</button>
+                      <label style={{ fontSize: 12 }}><input type="radio" checked={sel.algorithm_type === 1} onChange={() => setEpAlgo(i, 1)} disabled={ep && !epAlgoValid(ep, form.protocol_type, 1)} />{t('aiRouteManage.directConnect')}</label>
+                      <label style={{ fontSize: 12 }}><input type="radio" checked={sel.algorithm_type === 2} onChange={() => setEpAlgo(i, 2)} disabled={ep && !epAlgoValid(ep, form.protocol_type, 2)} />{t('aiRouteManage.converter')}</label>
+                      <button className="btn btn-sm" onClick={() => toggleEpStatus(i)}>{sel.in_route_status === 0 ? t('aiRouteManage.disabledStatus') : t('aiRouteManage.enabledStatus')}</button>
                       <button className="btn btn-sm" disabled={i === 0} onClick={() => moveEndpoint(i, -1)}>↑</button>
                       <button className="btn btn-sm" disabled={i === form.endpoints.length - 1} onClick={() => moveEndpoint(i, 1)}>↓</button>
-                      <button className="btn btn-sm btn-danger" onClick={() => removeEndpoint(sel.id)}>移除</button>
+                      <button className="btn btn-sm btn-danger" onClick={() => removeEndpoint(sel.id)}>{t('aiRouteManage.removeOp')}</button>
                     </span>
                   </div>
                 )
               })}
             </div>
           </div>
-          <label className="field"><span>算法策略</span>
+          <label className="field"><span>{t('aiRouteManage.algoStrategy')}</span>
             <select value={form.algorithm_strategy_type} onChange={(e) => setForm({ ...form, algorithm_strategy_type: parseInt(e.target.value, 10) })}>
-              <option value={1}>指定型</option>
-              <option value={2}>稳定型</option>
-              <option value={3}>经济型</option>
+              <option value={1}>{t('aiRouteManage.algoDesignated')}</option>
+              <option value={2}>{t('aiRouteManage.algoStable')}</option>
+              <option value={3}>{t('aiRouteManage.algoEconomic')}</option>
             </select>
             <div style={{ marginTop: 6, padding: 10, background: '#f0f7ff', borderRadius: 6, fontSize: 12, color: '#0066cc' }}>
               {ALGO_DESC[form.algorithm_strategy_type] || ''}

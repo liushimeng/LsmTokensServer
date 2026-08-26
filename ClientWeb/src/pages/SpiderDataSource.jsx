@@ -3,6 +3,7 @@ import { post, openSse } from '../shared/api'
 import { fmtTime } from '../shared/format'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import { useI18n } from '../i18n'
 
 // 爬虫数据源管理（迁移自旧 server_web_spider_data_source.go / server_web_spider_crawl.go）
 // 数据源 CRUD（/SpiderDataSourceInterface，action=list/add/update/delete/toggle_status）
@@ -19,6 +20,8 @@ const defaultPromptTemplate = (id) =>
 const EMPTY_FORM = { id: 0, platform_name: '', url_address: '', description: '', remark: '' }
 
 export default function SpiderDataSource() {
+  const { t } = useI18n()
+
   const [rows, setRows] = useState(null) // null = 加载中
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
@@ -42,7 +45,7 @@ export default function SpiderDataSource() {
       setRows(d.data || [])
     } catch (e) {
       setRows([])
-      setErr('加载失败：' + e.message)
+      setErr(t('spider.loadFailed') + e.message)
     }
   }
 
@@ -56,26 +59,26 @@ export default function SpiderDataSource() {
   // 保存（新增 / 修改）
   const save = async () => {
     const f = editing
-    if (!f.platform_name || !f.url_address) { setErr('平台名称和 URL 为必填项'); return }
+    if (!f.platform_name || !f.url_address) { setErr(t('spider.platformNameRequired')); return }
     setSaving(true); setErr(''); setMsg('')
     try {
       const action = f.id ? 'update' : 'add'
       const d = await post('SpiderDataSourceInterface', { action, ...f })
-      setMsg(d.message || '保存成功')
+      setMsg(d.message || t('spider.saveSuccess'))
       setEditing(null)
       load()
-    } catch (e) { setErr(e.message || '保存失败') } finally { setSaving(false) }
+    } catch (e) { setErr(e.message || t('errors.saveFailed')) } finally { setSaving(false) }
   }
 
   // 删除（仅管理端）
   const remove = async (rec) => {
-    if (!window.confirm(`确认删除数据源「${rec.platform_name}」(#${rec.id})？`)) return
+    if (!window.confirm(t('spider.confirmDeleteSource', { name: rec.platform_name, id: rec.id }))) return
     setErr(''); setMsg('')
     try {
       const d = await post('SpiderDataSourceInterface', { action: 'delete', id: rec.id })
-      setMsg(d.message || '删除成功')
+      setMsg(d.message || t('spider.deleteSuccess'))
       load()
-    } catch (e) { setErr(e.message || '删除失败') }
+    } catch (e) { setErr(e.message || t('errors.deleteFailed')) }
   }
 
   // 启用/禁用切换
@@ -85,9 +88,9 @@ export default function SpiderDataSource() {
       const d = await post('SpiderDataSourceInterface', {
         action: 'toggle_status', id: rec.id, status: rec.status === 1 ? 0 : 1,
       })
-      setMsg(d.message || '状态已更新')
+      setMsg(d.message || t('spider.statusUpdated'))
       load()
-    } catch (e) { setErr(e.message || '操作失败') }
+    } catch (e) { setErr(e.message || t('errors.operationFailed')) }
   }
 
   // 打开爬取弹窗：默认提示词带 {{.DataSourceID}} 模板说明
@@ -120,10 +123,10 @@ export default function SpiderDataSource() {
           if (text) setLogText((s) => s + text)
         },
         onError: (e) => {
-          setLogText((s) => s + '\n[错误] ' + (e && e.message ? e.message : '连接中断'))
+          setLogText((s) => s + '\n' + t('spider.errorPrefix') + ' ' + (e && e.message ? e.message : t('common.networkError')))
         },
         onDone: () => {
-          setLogText((s) => s + '\n[完成] 爬取任务已结束')
+          setLogText((s) => s + '\n' + t('spider.donePrefix'))
           setCrawlBusy(false)
           esRef.current = null
         },
@@ -132,68 +135,68 @@ export default function SpiderDataSource() {
 
   const columns = [
     { key: 'id', title: 'ID', width: 60, sortable: true },
-    { key: 'platform_name', title: '平台名称', sortable: true },
+    { key: 'platform_name', title: t('spider.platform'), sortable: true },
     { key: 'url_address', title: 'URL', render: (v) => (
       <a href={v} target="_blank" rel="noreferrer" className="wrap">{v}</a>
     ) },
-    { key: 'description', title: '源信息描述', render: (v) => <span className="wrap">{v || '-'}</span> },
-    { key: 'remark', title: '备注' },
-    { key: 'status', title: '状态', sortable: true, render: (v) => (
-      <span><span className={'status-dot ' + (v === 1 ? 'status-on' : 'status-off')} />{v === 1 ? '启用' : '禁用'}</span>
+    { key: 'description', title: t('spider.sourceDescription'), render: (v) => <span className="wrap">{v || '-'}</span> },
+    { key: 'remark', title: t('spider.remark') },
+    { key: 'status', title: t('common.status'), sortable: true, render: (v) => (
+      <span><span className={'status-dot ' + (v === 1 ? 'status-on' : 'status-off')} />{v === 1 ? t('common.enabled') : t('common.disabled')}</span>
     ) },
-    { key: 'updated_at', title: '更新时间', render: (v) => fmtTime(v) },
-    { key: 'op', title: '操作', render: (_, rec) => (
+    { key: 'updated_at', title: t('userManage.updatedAt'), render: (v) => fmtTime(v) },
+    { key: 'op', title: t('common.action'), render: (_, rec) => (
       <span className="op-btns" style={{ display: 'flex', gap: 4 }}>
         <button className="btn btn-sm btn-primary" onClick={() => openCrawl(rec)}
-                disabled={rec.status !== 1} title={rec.status !== 1 ? '数据源已禁用' : ''}>爬取</button>
+                disabled={rec.status !== 1} title={rec.status !== 1 ? t('spider.dataSourceDisabled') : ''}>{t('spider.startCrawl')}</button>
         <button className="btn btn-sm" onClick={() => setEditing({
           id: rec.id, platform_name: rec.platform_name, url_address: rec.url_address,
           description: rec.description || '', remark: rec.remark || '',
-        })}>编辑</button>
-        <button className="btn btn-sm" onClick={() => toggleStatus(rec)}>{rec.status === 1 ? '禁用' : '启用'}</button>
-        {isAdmin && <button className="btn btn-sm btn-danger" onClick={() => remove(rec)}>删除</button>}
+        })}>{t('common.edit')}</button>
+        <button className="btn btn-sm" onClick={() => toggleStatus(rec)}>{rec.status === 1 ? t('common.disable') : t('common.enable')}</button>
+        {isAdmin && <button className="btn btn-sm btn-danger" onClick={() => remove(rec)}>{t('common.delete')}</button>}
       </span>
     ) },
   ]
 
   return (
     <div className="page">
-      <h2 className="page-title">爬虫数据源管理</h2>
+      <h2 className="page-title">{t('spider.dataSourceManagement')}</h2>
       <div className="toolbar">
-        <button className="btn btn-primary" onClick={() => setEditing({ ...EMPTY_FORM })}>+ 添加数据源</button>
-        <button className="btn" onClick={load}>刷新</button>
+        <button className="btn btn-primary" onClick={() => setEditing({ ...EMPTY_FORM })}>+ {t('spider.addDataSource')}</button>
+        <button className="btn" onClick={load}>{t('common.refresh')}</button>
         <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-          爬取通过 OpenClaw AI 多轮交互完成，最长 15 分钟；同一用户同时仅允许一个任务。
+          {t('spider.crawlThroughOpenClaw')}
         </span>
       </div>
       {err ? <div className="alert alert-error">{err}</div> : null}
       {msg ? <div className="alert alert-ok">{msg}</div> : null}
-      <DataTable columns={columns} rows={rows || []} loading={!rows} empty="暂无数据源" rowKey="id"
+      <DataTable columns={columns} rows={rows || []} loading={!rows} empty={t('spider.noData')} rowKey="id"
         rowClass={(rec) => (rec.status === 1 ? 'row-enabled' : 'row-disabled')} />
 
       {/* 新增/编辑弹窗 */}
       {editing && (
-        <Modal title={editing.id ? `编辑数据源 #${editing.id}` : '添加数据源'}
+        <Modal title={editing.id ? `${t('spider.editDataSourceTitle')} #${editing.id}` : t('spider.addDataSource')}
                onClose={() => setEditing(null)}
                footer={<>
-                 <button className="btn" onClick={() => setEditing(null)}>取消</button>
+                 <button className="btn" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
                  <button className="btn btn-primary" onClick={save} disabled={saving}>
-                   {saving ? '保存中…' : '保存'}
+                   {saving ? t('spider.saving') : t('common.save')}
                  </button>
                </>}>
-          <label className="field"><span>平台名称 *</span>
+          <label className="field"><span>{t('spider.platformNameLabel')}</span>
             <input value={editing.platform_name}
                    onChange={(e) => setEditing({ ...editing, platform_name: e.target.value })} />
           </label>
-          <label className="field"><span>URL 地址 *</span>
+          <label className="field"><span>{t('spider.urlAddressLabel')}</span>
             <input value={editing.url_address} placeholder="https://…"
                    onChange={(e) => setEditing({ ...editing, url_address: e.target.value })} />
           </label>
-          <label className="field"><span>源信息描述（爬虫任务指令）</span>
+          <label className="field"><span>{t('spider.sourceDescription')}</span>
             <textarea rows={4} value={editing.description}
                       onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
           </label>
-          <label className="field"><span>备注</span>
+          <label className="field"><span>{t('spider.remark')}</span>
             <input value={editing.remark}
                    onChange={(e) => setEditing({ ...editing, remark: e.target.value })} />
           </label>
@@ -202,18 +205,18 @@ export default function SpiderDataSource() {
 
       {/* 爬取弹窗：SSE 流式输出到 .log-box */}
       {crawling && (
-        <Modal title={`AI 爬取 — ${crawling.platform_name} (#${crawling.id})`} onClose={closeCrawl} width={860}
+        <Modal title={t('spider.aiCrawl', { name: crawling.platform_name, id: crawling.id })} onClose={closeCrawl} width={860}
                footer={<>
-                 <button className="btn" onClick={closeCrawl} disabled={crawlBusy}>关闭</button>
+                 <button className="btn" onClick={closeCrawl} disabled={crawlBusy}>{t('toolbar.close')}</button>
                  <button className="btn btn-primary" onClick={startCrawl} disabled={crawlBusy}>
-                   {crawlBusy ? '爬取中…' : '开始爬取'}
+                   {crawlBusy ? t('spider.crawling') : t('spider.startCrawl')}
                  </button>
                </>}>
-          <label className="field"><span>提示词（支持 {'{{.DataSourceID}}'} 占位符）</span>
+          <label className="field"><span>{t('spider.promptLabel')}</span>
             <textarea className="crawl-prompt" rows={8} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
           </label>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>爬取输出：</div>
-          <div className="log-box crawl-log" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}>{logText || '（尚未开始）'}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>{t('spider.crawlOutput')}</div>
+          <div className="log-box crawl-log" ref={(el) => { if (el) el.scrollTop = el.scrollHeight }}>{logText || t('spider.notStarted')}</div>
         </Modal>
       )}
     </div>

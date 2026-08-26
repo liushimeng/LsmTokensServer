@@ -4,6 +4,7 @@ import { isAdminRole } from '../shared/auth'
 import { useUserModelOptions } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import { pickRouteQuery } from '../shared/format'
+import { useI18n } from '../i18n'
 
 // 对话页（/ChatDialogInterface + 同源 AI 代理）
 // 两步配置：action=models 拉取模型列表 → action=config 拉取选中模型对话配置
@@ -13,6 +14,7 @@ import { pickRouteQuery } from '../shared/format'
 // 请求一律走同源相对路径（管理端 9101 / 用户端 29001 mux 均已挂载
 // {AgentAnthropicListenURL} 与 {AgentOpenAIListenURL} 代理，无 CORS 问题）。
 export default function ChatDialog({ route }) {
+  const { t } = useI18n()
   const init = pickRouteQuery(route && route.query)
   const isAdmin = isAdminRole() // 管理端：用户名下拉选择（页面生命周期内缓存一次）；用户端登录态即身份，无用户名控件
   const { users: userOptions } = useUserModelOptions()
@@ -47,7 +49,7 @@ export default function ChatDialog({ route }) {
 
   // 拉取用户的模型列表（管理端按选中用户名查询；用户端登录态即身份，不传 user_name）
   const loadModels = async (u = userName) => {
-    if (!u.trim() && !userMode) { setError('请先选择用户'); return }
+    if (!u.trim() && !userMode) { setError(t('chatDialog.selectUserFirst')); return }
     setLoadingModels(true); setError('')
     try {
       const body = { action: 'models' }
@@ -60,14 +62,14 @@ export default function ChatDialog({ route }) {
         loadConfig(u.trim(), init.modelName)
       }
     } catch (e) {
-      setError(e.message || '获取模型列表失败')
+      setError(e.message || t('chatDialog.getModelsFailed'))
       setModels([])
     } finally { setLoadingModels(false) }
   }
 
   // 拉取选中模型的对话配置（用户端不传 user_name，后端按登录态鉴权）
   const loadConfig = async (u = userName, m = modelName) => {
-    if ((!u.trim() && !userMode) || !m) { setError('请先选择模型'); return }
+    if ((!u.trim() && !userMode) || !m) { setError(t('chatDialog.selectModelFirst')); return }
     setLoadingConfig(true); setError(''); setConfig(null); setShowKey(false)
     try {
       const cfgBody = { action: 'config', model_name: m }
@@ -84,7 +86,7 @@ export default function ChatDialog({ route }) {
       setProtocolType(pt)
       loadHistory(cfg, pt)
     } catch (e) {
-      setError(e.message || '获取对话配置失败')
+      setError(e.message || t('chatDialog.getConfigFailed'))
     } finally { setLoadingConfig(false) }
   }
 
@@ -160,7 +162,7 @@ export default function ChatDialog({ route }) {
   }, [messages])
 
   const proxyPath = config
-    ? (protocolType === 1 ? (config.anthropic_proxy_path || 'Anthropic') : (config.openai_proxy_path || 'OpenAI'))
+    ? (protocolType === 1 ? (config.anthropic_proxy_path || t('chatDialog.anthropic')) : (config.openai_proxy_path || t('chatDialog.openai')))
     : ''
 
   const proxyFullUrl = config
@@ -176,7 +178,7 @@ export default function ChatDialog({ route }) {
     setMessages(next); setEditingIndex(-1); setEditText('')
   }
   const deleteMessage = (i) => {
-    if (!window.confirm('确认删除这条消息？')) return
+    if (!window.confirm(t('chatDialog.confirmDeleteMessage'))) return
     const next = messages.slice()
     // user 消息连同紧随其后的 assistant 回复成对删除
     if (next[i].role === 'user' && i + 1 < next.length && next[i + 1].role === 'assistant') next.splice(i, 2)
@@ -184,7 +186,7 @@ export default function ChatDialog({ route }) {
     setMessages(next)
   }
   const clearHistory = () => {
-    if (!window.confirm('确定清空所有对话历史？（仅清除本地浏览器存储）')) return
+    if (!window.confirm(t('chatDialog.confirmClearHistory'))) return
     setMessages([]); setSystemPrompt('')
   }
 
@@ -243,7 +245,7 @@ export default function ChatDialog({ route }) {
           : (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || ''
         setMessages((prev) => {
           const cp = prev.slice()
-          cp[msgIndex] = { ...cp[msgIndex], content: text || '(空响应)' }
+          cp[msgIndex] = { ...cp[msgIndex], content: text || t('chatDialog.emptyResponse') }
           return cp
         })
       } else {
@@ -273,15 +275,15 @@ export default function ChatDialog({ route }) {
             } catch { /* 忽略解析错误 */ }
           }
         }
-        if (!acc) appendChunk(msgIndex, '(空响应)')
+        if (!acc) appendChunk(msgIndex, t('chatDialog.emptyResponse'))
       }
     } catch (e) {
       if (e.name === 'AbortError') {
-        appendChunk(msgIndex, '\n（已停止生成）')
+        appendChunk(msgIndex, '\n' + t('chatDialog.generationStopped'))
       } else {
         const errMsg = (e.message === 'Failed to fetch')
-          ? '请求失败：无法连接到 Web 服务（服务未运行或被浏览器拦截）'
-          : '请求失败: ' + e.message
+          ? t('chatDialog.requestFailedConnection')
+          : t('chatDialog.requestFailed', { message: e.message })
         setMessages((prev) => {
           const cp = prev.slice()
           cp[msgIndex] = { ...cp[msgIndex], content: errMsg }
@@ -302,28 +304,28 @@ export default function ChatDialog({ route }) {
 
   return (
     <div className="page">
-      <h2 className="page-title">对话</h2>
+      <h2 className="page-title">{t('chatDialog.title')}</h2>
 
       <div className="toolbar">
         {isAdmin ? <>
-          <label>用户名
+          <label>{t('chatDialog.selectUser')}
             <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName(''); loadModels(e.target.value) }} style={{ width: 150 }}>
-              <option value="">请选择用户</option>
+              <option value="">{t('chatDialog.selectUser')}</option>
               {userOptions.map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
             </select>
           </label>
           <button className="btn btn-primary" onClick={() => loadModels()} disabled={loadingModels}>
-            {loadingModels ? '加载中…' : '加载模型列表'}
+            {loadingModels ? t('common.loading') : t('chatDialog.loadModels')}
           </button>
         </> : null}
-        <label>模型名
+        <label>{t('chatDialog.model')}
           <select value={modelName} onChange={(e) => setModelName(e.target.value)}>
-            <option value="">请选择模型</option>
+            <option value="">{t('chatDialog.selectModel')}</option>
             {models.map((m) => <option key={m.id} value={m.model_name}>{m.model_name}（{m.api_key_masked}）</option>)}
           </select>
         </label>
         <button className="btn btn-primary" onClick={() => loadConfig()} disabled={!modelName || loadingConfig}>
-          {loadingConfig ? '加载中…' : '加载对话配置'}
+          {loadingConfig ? t('common.loading') : t('chatDialog.loadConfig')}
         </button>
       </div>
 
@@ -331,30 +333,30 @@ export default function ChatDialog({ route }) {
 
       {models.length > 0 && !config ? (
         <div className="card">
-          <h3>模型列表</h3>
+          <h3>{t('chatDialog.modelList')}</h3>
           <DataTable
             columns={[
-              { key: 'id', title: 'ID' },
-              { key: 'model_name', title: '模型名' },
-              { key: 'api_key_masked', title: 'API Key' },
-              { key: 'actions', title: '操作', render: (_, r) => (
-                <button className="btn btn-sm" onClick={() => { setModelName(r.model_name); loadConfig(userName, r.model_name) }}>查看配置</button>
+              { key: 'id', title: t('chatDialog.id') },
+              { key: 'model_name', title: t('chatDialog.model') },
+              { key: 'api_key_masked', title: t('chatDialog.apiKey') },
+              { key: 'actions', title: t('common.action'), render: (_, r) => (
+                <button className="btn btn-sm" onClick={() => { setModelName(r.model_name); loadConfig(userName, r.model_name) }}>{t('chatDialog.viewConfig')}</button>
               ) },
             ]}
-            rows={models} rowKey="id" empty="该用户暂无模型" />
+            rows={models} rowKey="id" empty={t('chatDialog.noModelsForUser')} />
         </div>
       ) : null}
 
-      {loadingConfig ? <div className="table-loading">对话配置加载中…</div> : null}
+      {loadingConfig ? <div className="table-loading">{t('chatDialog.configLoading')}</div> : null}
 
       {config ? (
         <>
           <div className="card">
-            <h3>对话配置（{config.model_name}）</h3>
+            <h3>{t('chatDialog.chatConfig', { model: config.model_name })}</h3>
             <dl className="kv">
-              <dt>用户名</dt><dd>{config.user_name || '-'}</dd>
-              <dt>模型 ID</dt><dd>{config.model_id}</dd>
-              <dt>协议类型</dt>
+              <dt>{t('chatDialog.selectUser')}</dt><dd>{config.user_name || '-'}</dd>
+              <dt>{t('chatDialog.modelId')}</dt><dd>{config.model_id}</dd>
+              <dt>{t('chatDialog.protocolType')}</dt>
               <dd>
                 <select
                   value={protocolType}
@@ -363,32 +365,32 @@ export default function ChatDialog({ route }) {
                     setProtocolType(v); saveProtocolPref(v)
                   }}
                 >
-                  <option value={1}>Anthropic</option>
-                  <option value={2}>OpenAI</option>
-                  {protocolType !== 1 && protocolType !== 2 ? <option value={protocolType}>未知（{protocolType}）</option> : null}
+                  <option value={1}>{t('chatDialog.anthropic')}</option>
+                  <option value={2}>{t('chatDialog.openai')}</option>
+                  {protocolType !== 1 && protocolType !== 2 ? <option value={protocolType}>{t('chatDialog.unknown', { type: protocolType })}</option> : null}
                 </select>
               </dd>
-              <dt>API Key</dt>
+              <dt>{t('chatDialog.apiKey')}</dt>
               <dd>
                 <span className="field-inline">
                   <code>{showKey ? config.api_key : '••••••••••••'}</code>
-                  <button className="btn btn-link" onClick={() => setShowKey(!showKey)}>{showKey ? '隐藏' : '显示'}</button>
+                  <button className="btn btn-link" onClick={() => setShowKey(!showKey)}>{showKey ? t('chatDialog.hide') : t('chatDialog.show')}</button>
                 </span>
               </dd>
-              <dt>代理地址</dt><dd>{config.agent_addr || '-'}:{config.agent_port}</dd>
-              <dt>代理路径</dt><dd>{proxyPath || '-'}</dd>
-              <dt>完整 API 地址</dt><dd>{proxyFullUrl}</dd>
+              <dt>{t('chatDialog.proxyAddr')}</dt><dd>{config.agent_addr || '-'}:{config.agent_port}</dd>
+              <dt>{t('chatDialog.proxyPath')}</dt><dd>{proxyPath || '-'}</dd>
+              <dt>{t('chatDialog.fullApiUrl')}</dt><dd>{proxyFullUrl}</dd>
             </dl>
           </div>
 
           <div className="card">
-            <h3>对话</h3>
+            <h3>{t('chatDialog.title')}</h3>
             <div style={{ marginBottom: 8 }}>
-              <label>系统提示词</label>
+              <label>{t('chatDialog.systemPrompt')}</label>
               <textarea
                 rows={2}
                 style={{ width: '100%', padding: 8, border: '1px solid #ddd', borderRadius: 6, fontSize: 13, resize: 'vertical', boxSizing: 'border-box' }}
-                placeholder="例如：你是一个专业的编程助手，擅长Go语言..."
+                placeholder={t('chatDialog.systemPromptPlaceholder')}
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
               />
@@ -398,11 +400,11 @@ export default function ChatDialog({ route }) {
               style={{ height: 340, overflowY: 'auto', border: '1px solid #eee', borderRadius: 6, padding: 8, background: 'var(--bg-2, #fafafa)' }}
             >
               {messages.length === 0 ? (
-                <div style={{ color: '#999', textAlign: 'center', padding: 24 }}>暂无对话记录</div>
+                <div style={{ color: '#999', textAlign: 'center', padding: 24 }}>{t('chatDialog.noChatHistory')}</div>
               ) : messages.map((m, i) => (
                 <div key={i} style={{ marginBottom: 10, display: 'flex', flexDirection: 'column', alignItems: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
                   <div style={{ fontSize: 12, color: '#999', marginBottom: 2 }}>
-                    {m.role === 'user' ? '👤 我' : m.role === 'system' ? '⚠️ 系统' : '🤖 助手'}
+                    {m.role === 'user' ? t('chatDialog.me') : m.role === 'system' ? t('chatDialog.system') : t('chatDialog.assistant')}
                   </div>
                   {editingIndex === i ? (
                     <div style={{ width: '80%' }}>
@@ -413,8 +415,8 @@ export default function ChatDialog({ route }) {
                         onChange={(e) => setEditText(e.target.value)}
                       />
                       <div style={{ marginTop: 4 }}>
-                        <button className="btn btn-sm btn-primary" onClick={saveEdit}>保存</button>
-                        {' '}<button className="btn btn-sm" onClick={() => { setEditingIndex(-1); setEditText('') }}>取消</button>
+                        <button className="btn btn-sm btn-primary" onClick={saveEdit}>{t('common.save')}</button>
+                        {' '}<button className="btn btn-sm" onClick={() => { setEditingIndex(-1); setEditText('') }}>{t('common.cancel')}</button>
                       </div>
                     </div>
                   ) : (
@@ -428,8 +430,8 @@ export default function ChatDialog({ route }) {
                       >{m.content || (sending && i === messages.length - 1 ? '…' : '')}</div>
                       {m.role !== 'system' ? (
                         <div style={{ marginTop: 2 }}>
-                          <button className="btn btn-sm" onClick={() => startEdit(i)}>编辑</button>
-                          {' '}<button className="btn btn-sm" onClick={() => deleteMessage(i)}>删除</button>
+                          <button className="btn btn-sm" onClick={() => startEdit(i)}>{t('common.edit')}</button>
+                          {' '}<button className="btn btn-sm" onClick={() => deleteMessage(i)}>{t('common.delete')}</button>
                         </div>
                       ) : null}
                     </>
@@ -441,34 +443,34 @@ export default function ChatDialog({ route }) {
               <textarea
                 rows={2}
                 style={{ flex: 1, padding: 8, border: '1px solid #ddd', borderRadius: 6, fontSize: 13, resize: 'vertical' }}
-                placeholder="输入消息，Shift+回车换行，回车发送..."
+                placeholder={t('chatDialog.inputPlaceholderFull')}
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={onInputKeydown}
               />
               {sending
-                ? <button className="btn" onClick={stopSend}>停止</button>
-                : <button className="btn btn-primary" onClick={send} disabled={!config}>发送</button>}
+                ? <button className="btn" onClick={stopSend}>{t('chatDialog.stop')}</button>
+                : <button className="btn btn-primary" onClick={send} disabled={!config}>{t('chatDialog.send')}</button>}
               <label style={{ whiteSpace: 'nowrap', fontSize: 13 }}>
-                <input type="checkbox" checked={useStream} onChange={(e) => { setUseStream(e.target.checked); saveStreamPref(e.target.checked) }} /> 流式输出
+                <input type="checkbox" checked={useStream} onChange={(e) => { setUseStream(e.target.checked); saveStreamPref(e.target.checked) }} /> {t('chatDialog.streaming')}
               </label>
-              <button className="btn" onClick={clearHistory}>清空历史</button>
+              <button className="btn" onClick={clearHistory}>{t('chatDialog.clearHistory')}</button>
             </div>
           </div>
 
           <div className="card">
-            <h3>目标源站列表</h3>
+            <h3>{t('chatDialog.targetEndpoints')}</h3>
             <DataTable
               columns={[
-                { key: 'id', title: 'ID' },
-                { key: 'platform_name', title: '平台' },
-                { key: 'model_name', title: '源站模型' },
-                { key: 'protocol_type', title: '协议', render: (v) => (v === 1 ? 'Anthropic' : v === 2 ? 'OpenAI' : v) },
-                { key: 'status', title: '状态', render: (v) => (
-                  <span><span className={`status-dot ${v === 1 ? 'status-on' : 'status-off'}`} />{v === 1 ? '启用' : '禁用'}</span>
+                { key: 'id', title: t('chatDialog.id') },
+                { key: 'platform_name', title: t('chatDialog.platform') },
+                { key: 'model_name', title: t('chatDialog.sourceModel') },
+                { key: 'protocol_type', title: t('chatDialog.protocol'), render: (v) => (v === 1 ? t('chatDialog.anthropic') : v === 2 ? t('chatDialog.openai') : v) },
+                { key: 'status', title: t('common.status'), render: (v) => (
+                  <span><span className={`status-dot ${v === 1 ? 'status-on' : 'status-off'}`} />{v === 1 ? t('common.enabled') : t('common.disabled')}</span>
                 ) },
               ]}
-              rows={config.endpoints || []} rowKey="id" empty="该模型暂无可用源站（或未配置路由）" />
+              rows={config.endpoints || []} rowKey="id" empty={t('chatDialog.noEndpoints')} />
           </div>
         </>
       ) : null}
