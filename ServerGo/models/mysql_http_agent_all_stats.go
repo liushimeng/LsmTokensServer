@@ -635,3 +635,222 @@ func GetAllStatsKPISummary(subTableNum int, days int) (int64, uint64, int, error
 
 	return totalCalls, totalTokens, len(activeDays), nil
 }
+
+// ============================================================
+// 调用次数和 Token 数趋势（小时级 K 线图）
+// ============================================================
+
+// maxHourlyTrendHours 趋势接口的最大小时数（30 天等价小时数），超出强制按天桶。
+// 与 maxStatsSpanHours（720）一致——K 线图需要按小时粒度时最大跨度 720，
+// 大于 720 强制按天桶（每桶表示一天的总调用次数与 Tokens）。
+const maxHourlyTrendHours = 720
+
+// hourlyTrendHourBucketThreshold 7 天内按小时桶，更大跨度按天桶。
+// 与 TimeStatsMaxDays=7 对齐，保证 /ModelInfo /AgentInfo 趋势模块的「小时级精度」
+// 语义与 /ChatAnalysisTotal 一致。
+const hourlyTrendHourBucketThreshold = 168 // 7 * 24
+
+// HourlyTrendPoint 单时间桶内的调用次数与 Tokens 汇总。
+// 桶格式："YYYY-MM-DD HH:00"（小时桶）或 "YYYY-MM-DD"（天桶）。
+// 与 DailyStat 共用 JSON 字段名以降低前端解析分支。
+type HourlyTrendPoint struct {
+	Date         string `json:"date"`
+	Count        int64  `json:"count"`
+	TokensInput  uint64 `json:"tokens_input"`
+	TokensOutput uint64 `json:"tokens_output"`
+	TokensTotal  uint64 `json:"tokens_total"`
+}
+
+// HourlyTrendResult 趋势响应包装（含粒度 + 时间窗元数据）。
+// Granularity 取值 "hour" 或 "day"，Hours 为规范化后的请求窗口（1~720）。
+// From/To 为 ISO 时间，前端用于坐标轴对齐与工具提示。
+type HourlyTrendResult struct {
+	Points      []HourlyTrendPoint `json:"points"`
+	Granularity string             `json:"granularity"` // "hour" | "day"
+	Hours       int                `json:"hours"`
+	From        string             `json:"from"`
+	To          string             `json:"to"`
+}
+
+// hourlyTrendBucket 单桶聚合计数器（包级以便复用：GetHourlyTrendAll 与
+// GetHourlyTrendByUser 共享同一内存布局；buildHourlyTrendPoints 通过 map value 接收）。
+type hourlyTrendBucket struct {
+	count     int64
+	inTokens  uint64
+	outTokens uint64
+	allTokens uint64
+}
+
+// normalizeHourlyTrendHours 规范化 hours：<=0 视为 24；>720 截断到 720。
+// 返回规范化值。
+func normalizeHourlyTrendHours(hours int) int {
+	if hours <= 0 {
+		return 24
+	}
+	if hours > maxHourlyTrendHours {
+		return maxHourlyTrendHours
+	}
+	return hours
+}
+
+// GetHourlyTrendAll 全站维度按小时/天桶聚合调用次数与 Tokens，用于 ModelInfo / AgentInfo
+// 趋势模块的 K 线图。
+//
+// 参数 hours 语义：
+//   - hours<=0 → 视为 24（最近一天）
+//   - 1~168（7 天内） → granularity="hour"，桶格式 "YYYY-MM-DD HH:00"
+//   - 169~720（>7 天） → granularity="day"，桶格式 "YYYY-MM-DD"
+//
+// 复用 scanShardPaged keyset 分页 + database.StatsDB() 25s context：
+//   - 每批 5000 行 + created_at >= cutoff 预过滤，避免全表扫描
+//   - ctx 超时驱动向 MySQL 发 KILL 并归还连接
+//
+// 补齐空桶：从 (now - span) 到 now 逐桶 append，缺数据填零值 HourlyTrendPoint。
+// 调用方：管理员 /ModelInfoInterface 与 /AgentInfoInterface 的 action="trend"。
+func GetHourlyTrendAll(subTableNum int, hours int) (*HourlyTrendResult, error) {
+	if database.DB == nil {
+		// DB 未就绪：返回零值桶（与 GetTimeRangeStatsAll 的行为一致）
+		hours = normalizeHourlyTrendHours(hours)
+		granularity := "hour"
+		if hours > hourlyTrendHourBucketThreshold {
+			granularity = "day"
+		}
+		return buildEmptyHourlyTrend(hours, granularity), nil
+	}
+	subTableNum = normalizeSubTableNum(subTableNum)
+	hours = normalizeHourlyTrendHours(hours)
+
+	granularity := "hour"
+	if hours > hourlyTrendHourBucketThreshold {
+		granularity = "day"
+	}
+	goFmt := "2006-01-02 15:04"
+	if granularity == "day" {
+		goFmt = "2006-01-02"
+	}
+
+	sdb, cancel := database.StatsDB()
+	defer cancel()
+	if sdb == nil {
+		// sdb 不可用：返回零值桶
+		return buildEmptyHourlyTrend(hours, granularity), nil
+	}
+
+	buckets := make(map[string]*hourlyTrendBucket)
+
+	// scanShardPaged 的 cutoff 用「天」为单位；小时窗口用同等跨度的天数兜底。
+	// hours<=168 → cutoff = now - hours/24 + 1 天（保守向上取整，保证不漏最近一小时）
+	// hours>168  → cutoff = now - hours/24 天
+	daysForFilter := hours / 24
+	if hours%24 != 0 {
+		daysForFilter++ // 向上取整
+	}
+	if daysForFilter < 1 {
+		daysForFilter = 1
+	}
+
+	for i := 0; i < subTableNum; i++ {
+		tableName := fmt.Sprintf("TAgentHttpTransactionDataItem_%02d", i)
+		if !IsTableExists(tableName) {
+			continue
+		}
+
+		err := scanShardPaged(sdb, tableName,
+			"id, created_at, tokens_input_size, tokens_output_size, tokens_all_size",
+			daysForFilter, func(rows []shardScanRow) {
+				for _, r := range rows {
+					key := r.CreatedAt.Format(goFmt)
+					b, ok := buckets[key]
+					if !ok {
+						b = &hourlyTrendBucket{}
+						buckets[key] = b
+					}
+					b.count++
+					b.inTokens += r.TokensInputSize
+					b.outTokens += r.TokensOutputSize
+					b.allTokens += r.TokensAllSize
+				}
+			})
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				break
+			}
+			return nil, fmt.Errorf("failed to query %s: %w", tableName, err)
+		}
+	}
+
+	points := buildHourlyTrendPoints(buckets, hours, granularity)
+	now := time.Now()
+	from := now.Add(-time.Duration(hours) * time.Hour)
+	return &HourlyTrendResult{
+		Points:      points,
+		Granularity: granularity,
+		Hours:       hours,
+		From:        from.Format(time.RFC3339),
+		To:          now.Format(time.RFC3339),
+	}, nil
+}
+
+// buildHourlyTrendPoints 把 buckets map 按时间窗展平成连续桶序列，缺数据填零。
+// span 单位（小时桶 = hours 个，天桶 = ceil(hours/24) 个）。
+func buildHourlyTrendPoints(buckets map[string]*hourlyTrendBucket, hours int, granularity string) []HourlyTrendPoint {
+	now := time.Now()
+	points := make([]HourlyTrendPoint, 0)
+
+	if granularity == "hour" {
+		startTime := now.Add(-time.Duration(hours-1) * time.Hour).Truncate(time.Hour)
+		goFmt := "2006-01-02 15:04"
+		for t := startTime; !t.After(now); t = t.Add(time.Hour) {
+			key := t.Format(goFmt)
+			if b, ok := buckets[key]; ok {
+				points = append(points, HourlyTrendPoint{
+					Date:        key,
+					Count:       b.count,
+					TokensInput: b.inTokens,
+					TokensOutput: b.outTokens,
+					TokensTotal: b.allTokens,
+				})
+			} else {
+				points = append(points, HourlyTrendPoint{Date: key})
+			}
+		}
+	} else {
+		spanDays := hours / 24
+		if hours%24 != 0 {
+			spanDays++ // 向上取整
+		}
+		if spanDays < 1 {
+			spanDays = 1
+		}
+		goFmt := "2006-01-02"
+		for i := spanDays - 1; i >= 0; i-- {
+			key := now.AddDate(0, 0, -i).Format(goFmt)
+			if b, ok := buckets[key]; ok {
+				points = append(points, HourlyTrendPoint{
+					Date:        key,
+					Count:       b.count,
+					TokensInput: b.inTokens,
+					TokensOutput: b.outTokens,
+					TokensTotal: b.allTokens,
+				})
+			} else {
+				points = append(points, HourlyTrendPoint{Date: key})
+			}
+		}
+	}
+	return points
+}
+
+// buildEmptyHourlyTrend DB 未就绪时返回连续零值桶（保持前端渲染坐标轴对齐）。
+func buildEmptyHourlyTrend(hours int, granularity string) *HourlyTrendResult {
+	points := buildHourlyTrendPoints(make(map[string]*hourlyTrendBucket), hours, granularity)
+	now := time.Now()
+	from := now.Add(-time.Duration(hours) * time.Hour)
+	return &HourlyTrendResult{
+		Points:      points,
+		Granularity: granularity,
+		Hours:       hours,
+		From:        from.Format(time.RFC3339),
+		To:          now.Format(time.RFC3339),
+	}
+}

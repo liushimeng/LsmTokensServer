@@ -31,6 +31,7 @@ func userAgentInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Action string `json:"action"`
 		Days   int    `json:"days"`
+		Hours  int    `json:"hours"` // trend 用：1~720；<=0 视为 24
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{
@@ -41,6 +42,27 @@ func userAgentInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch req.Action {
+	case "trend":
+		// 小时粒度 K 线图数据：仅扫本用户模型对应的分表，JWT claims 保证越权防护。
+		userModels, err := modelsdb.GetUserModelsByUserID(claims.UserID)
+		if err != nil {
+			json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{Success: false, Message: err.Error()})
+			return
+		}
+		modelNames := make([]string, 0, len(userModels))
+		for _, userModel := range userModels {
+			modelNames = append(modelNames, userModel.ModelName)
+		}
+		res, err := modelsdb.GetHourlyTrendByUser(claims.UserName, modelNames, config.G.DBMysqlSubTableNumber, req.Hours)
+		if err != nil {
+			json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{Success: false, Message: err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "查询成功",
+			"data":    res,
+		})
 	case "", "stats":
 		userModels, err := modelsdb.GetUserModelsByUserID(claims.UserID)
 		if err != nil {

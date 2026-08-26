@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
+import HourlyTrendPanel from '../components/HourlyTrendPanel'
 import { useI18n } from '../i18n'
 
-// Agent 信息（统计页）：AgentInfoInterface（POST JSON {action:'stats', days}）
-// 无第三方图表库：纯 div 进度条 + 表格替代 echarts
+// Agent 信息（统计页）：AgentInfoInterface
+//   - action='stats' 返回 summary/agents/trend（管理员端）
+//   - action='trend'（新增）小时级 K 线图：调用次数 + Tokens 数
+// 无第三方图表库：K 线图用自研 SVG HourlyTrendPanel + KLineTrendChart 组件。
 
 const DAYS_OPTIONS = [1, 3, 5, 7, 14, 30, 60, 90, 0]
 
@@ -50,8 +53,6 @@ export default function AgentInfo(props) {
 
   const summary = (data && data.summary) || {}
   const agents = (data && data.agents) || []
-  const trend = isAdmin ? ((data && data.trend) || []) : []
-  const trendMax = Math.max(1, ...trend.map((s) => s.count || 0))
 
   const shareBars = (list, mode) => {
     if (!list.length) return <div className="table-empty">{t('agentInfo.noStatsData')}</div>
@@ -95,17 +96,24 @@ export default function AgentInfo(props) {
             <div className="card"><h3>{t('agentInfo.inputOutputTokens')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.tokens_input_size)} / {fmt(summary.tokens_output_size)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('agentInfo.tokenStructure')}</div></div>
           </div>
 
-          {trend.length ? (
+          {agents.length ? (
             <div className="card">
-              <h3>{t('agentInfo.callTrend')}</h3>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 160 }}>
-                {trend.map((s) => (
-                  <div key={s.date} title={`${s.date}：${t('agentInfo.callsUnit', { count: fmt(s.count) })} / ${t('agentInfo.tokensUnit', { count: fmt(s.tokens_total) })}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
-                    <div style={{ width: '70%', height: Math.max(2, ((s.count || 0) / trendMax) * 130), background: 'linear-gradient(180deg,#c084fc,#7c3aed)', borderRadius: 4 }} />
-                    <span style={{ fontSize: 10, color: '#888', whiteSpace: 'nowrap' }}>{(s.date || '').substring(5)}</span>
-                  </div>
-                ))}
-              </div>
+              <h3>{t('agentInfo.hourlyTrend')}</h3>
+              <HourlyTrendPanel
+                api="AgentInfoInterface"
+                storageKey={`lsm:agentInfo:trend:v1:${isAdmin ? 'admin' : 'user'}`}
+                labels={{
+                  '1d': t('agentInfo.trendWindow1d'),
+                  '3d': t('agentInfo.trendWindow3d'),
+                  '7d': t('agentInfo.trendWindow7d'),
+                  '30d': t('agentInfo.trendWindow30d'),
+                  loading: t('agentInfo.trendLoading'),
+                  empty: t('agentInfo.trendEmpty'),
+                  call: t('agentInfo.trendCallSeries'),
+                  token: t('agentInfo.trendTokenSeries'),
+                  tooltip: t('agentInfo.trendTooltip'),
+                }}
+              />
             </div>
           ) : null}
 

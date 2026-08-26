@@ -2702,3 +2702,111 @@ func protocolTypeKey(protocolType int) string {
 		return "unknown"
 	}
 }
+
+// GetHourlyTrendByUser 用户端趋势：按当前用户的平台模型(model_name)聚合调用次数与 Tokens。
+// 仅扫描该用户每个 model 对应的单张分表（GetAgentHttpTableName 哈希定位），
+// 不会越权读到其他用户的数据。
+//
+// 参数 hours 语义与 GetHourlyTrendAll 一致：
+//   - hours<=0 → 视为 24
+//   - 1~168 → granularity="hour"
+//   - 169~720 → granularity="day"
+//
+// 复用 scanShardPaged + database.StatsDB() 25s context。
+// 缺数据返回连续零值桶（前端坐标轴对齐）。
+//
+// 调用方：用户端 /ModelInfoInterface 与 /AgentInfoInterface 的 action="trend"。
+func GetHourlyTrendByUser(userName string, modelNames []string, subTableNum int, hours int) (*HourlyTrendResult, error) {
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		return nil, fmt.Errorf("user_name is required")
+	}
+	hours = normalizeHourlyTrendHours(hours)
+	if database.DB == nil {
+		// DB 未就绪：返回零值桶
+		granularity := "hour"
+		if hours > hourlyTrendHourBucketThreshold {
+			granularity = "day"
+		}
+		return buildEmptyHourlyTrend(hours, granularity), nil
+	}
+	subTableNum = normalizeSubTableNum(subTableNum)
+
+	granularity := "hour"
+	if hours > hourlyTrendHourBucketThreshold {
+		granularity = "day"
+	}
+	goFmt := "2006-01-02 15:04"
+	if granularity == "day" {
+		goFmt = "2006-01-02"
+	}
+
+	sdb, cancel := database.StatsDB()
+	defer cancel()
+	if sdb == nil {
+		return buildEmptyHourlyTrend(hours, granularity), nil
+	}
+
+	buckets := make(map[string]*hourlyTrendBucket)
+
+	// 去重 modelNames：同一用户多次出现同一个 model 只扫一次
+	seen := make(map[string]struct{})
+	// scanShardPaged 的 cutoff 用「天」为单位
+	daysForFilter := hours / 24
+	if hours%24 != 0 {
+		daysForFilter++
+	}
+	if daysForFilter < 1 {
+		daysForFilter = 1
+	}
+
+	for _, modelName := range modelNames {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			continue
+		}
+		if _, ok := seen[modelName]; ok {
+			continue
+		}
+		seen[modelName] = struct{}{}
+
+		tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
+		if !IsTableExists(tableName) {
+			continue
+		}
+
+		err := scanShardPaged(sdb, tableName,
+			"id, created_at, tokens_input_size, tokens_output_size, tokens_all_size",
+			daysForFilter, func(rows []shardScanRow) {
+				for _, r := range rows {
+					key := r.CreatedAt.Format(goFmt)
+					b, ok := buckets[key]
+					if !ok {
+						b = &hourlyTrendBucket{}
+						buckets[key] = b
+					}
+					b.count++
+					b.inTokens += r.TokensInputSize
+					b.outTokens += r.TokensOutputSize
+					b.allTokens += r.TokensAllSize
+				}
+			})
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				break
+			}
+			return nil, fmt.Errorf("failed to query %s: %w", tableName, err)
+		}
+	}
+
+	points := buildHourlyTrendPoints(buckets, hours, granularity)
+	now := time.Now()
+	from := now.Add(-time.Duration(hours) * time.Hour)
+	return &HourlyTrendResult{
+		Points:      points,
+		Granularity: granularity,
+		Hours:       hours,
+		From:        from.Format(time.RFC3339),
+		To:          now.Format(time.RFC3339),
+	}, nil
+}

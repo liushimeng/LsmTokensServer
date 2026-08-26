@@ -28,6 +28,7 @@ func agentInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Action string `json:"action"`
 		Days   int    `json:"days"`
+		Hours  int    `json:"hours"` // trend 用：1~720；<=0 视为 24
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "请求解析失败: " + err.Error()})
@@ -64,6 +65,19 @@ func agentInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			Success: true,
 			Message: "查询成功",
 			Data:    agentInfoStatsData{Summary: summary, Agents: agents, Trend: trend},
+		})
+	case "trend":
+		// 小时粒度 K 线图数据：与 stats 分离，前端按窗口分批请求 24h/72h/168h/720h。
+		res, err := modelsdb.GetHourlyTrendAll(config.G.DBMysqlSubTableNumber, req.Hours)
+		if err != nil {
+			logger.Printf("[WARNING] AgentInfoInterface trend hourly failed: %v", err)
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(userManageResp{
+			Success: true,
+			Message: "查询成功",
+			Data:    res,
 		})
 	default:
 		json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "未知操作: " + req.Action})

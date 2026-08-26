@@ -2,12 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
+import HourlyTrendPanel from '../components/HourlyTrendPanel'
 import { useI18n } from '../i18n'
 
-// 模型信息（统计页）：ModelInfoInterface（POST JSON {action:'stats', days}）
-// 用户端（29001）stats 额外返回 dst_summary/dst_models（目标源站模型统计）；
-// action=list 返回"我的模型信息列表"（成本/能力/动态性能标签/源站数/调用统计）。
-// 无第三方图表库：用纯 div 进度条 / 表格替代 echarts
+// 模型信息（统计页）：ModelInfoInterface
+//   - action='stats' 返回 summary/models/dst_summary/dst_models（仅用户端）
+//   - action='list' 用户端「我的模型信息列表」（成本/能力/动态性能标签/源站数）
+//   - action='trend'（新增）小时级 K 线图：调用次数 + Tokens 数（小时桶/天桶自适应）
+// 无第三方图表库：K 线图用自研 SVG HourlyTrendPanel + KLineTrendChart 组件。
 
 const DAYS_OPTIONS = [1, 3, 5, 7, 14, 30, 60, 90, 0]
 
@@ -63,8 +65,6 @@ export default function ModelInfo(props) {
   const models = (data && data.models) || []
   const dstSummary = (data && data.dst_summary) || {}
   const dstModels = (data && data.dst_models) || []
-  const trend = isAdmin ? ((data && data.trend) || []) : []
-  const trendMax = Math.max(1, ...trend.map((s) => s.count || 0))
   const tokenMax = Math.max(1, ...models.map((m) => m.tokens_all_size || 0))
   const callMax = Math.max(1, ...models.map((m) => m.call_count || 0))
 
@@ -110,17 +110,24 @@ export default function ModelInfo(props) {
             <div className="card"><h3>{t('modelInfo.inputOutputTokens')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.tokens_input_size)} / {fmt(summary.tokens_output_size)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('modelInfo.tokenStructure')}</div></div>
           </div>
 
-          {trend.length ? (
+          {models.length || dstModels.length ? (
             <div className="card">
-              <h3>{t('modelInfo.callTrend')}</h3>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 160 }}>
-                {trend.map((s) => (
-                  <div key={s.date} title={`${s.date}：${t('modelInfo.callsUnit', { count: fmt(s.count) })} / ${t('modelInfo.tokensUnit', { count: fmt(s.tokens_total) })}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
-                    <div style={{ width: '70%', height: Math.max(2, ((s.count || 0) / trendMax) * 130), background: 'linear-gradient(180deg,#38bdf8,#2563eb)', borderRadius: 4 }} />
-                    <span style={{ fontSize: 10, color: '#888', whiteSpace: 'nowrap' }}>{(s.date || '').substring(5)}</span>
-                  </div>
-                ))}
-              </div>
+              <h3>{t('modelInfo.hourlyTrend')}</h3>
+              <HourlyTrendPanel
+                api="ModelInfoInterface"
+                storageKey={`lsm:modelInfo:trend:v1:${isAdmin ? 'admin' : 'user'}`}
+                labels={{
+                  '1d': t('modelInfo.trendWindow1d'),
+                  '3d': t('modelInfo.trendWindow3d'),
+                  '7d': t('modelInfo.trendWindow7d'),
+                  '30d': t('modelInfo.trendWindow30d'),
+                  loading: t('modelInfo.trendLoading'),
+                  empty: t('modelInfo.trendEmpty'),
+                  call: t('modelInfo.trendCallSeries'),
+                  token: t('modelInfo.trendTokenSeries'),
+                  tooltip: t('modelInfo.trendTooltip'),
+                }}
+              />
             </div>
           ) : null}
 
