@@ -501,6 +501,7 @@
   "chatDialog.requestFailedConnection": "リクエスト失敗：Web サービスに接続できません（サービスが実行されていないか、ブラウザにブロックされています）",
   "chatDialog.selectModel": "モデルを選択",
   "chatDialog.selectModelFirst": "モデルを選択してください",
+  "chatDialog.selectUser": "ユーザーを選択",
   "chatDialog.selectUserFirst": "ユーザーを選択してください",
   "chatDialog.send": "送信",
   "chatDialog.show": "表示",

@@ -121,8 +121,9 @@ export default function useChatAnalysisData(isAdmin, userName, modelName, days, 
     }))
   }
 
-  // 批量删除
+  // 批量删除（管理端独占；用户端构建时 __APP_ROLE__ !== 'manager' 守卫阻断，Rollup 整函数 tree-shake 剔除）
   const batchDelete = async () => {
+    if (__APP_ROLE__ !== 'manager') return
     if (!selected.length) return
     if (!window.confirm(t('chatAnalysis.deleteConfirm', { count: selected.length }))) return
     setDeleting(true); setError(''); setOkMsg('')
