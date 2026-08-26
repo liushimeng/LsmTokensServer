@@ -18,7 +18,17 @@ export default function Home() {
   useEffect(() => {
     aliveRef.current = true
     get('UserInfoInterface')
-      .then((d) => { if (aliveRef.current) setInfo((d && d.data) || d) })
+      .then((d) => {
+        if (!aliveRef.current) return
+        const info = (d && d.data) || d
+        if (!info || !info.user_name) {
+          // 兜底：接口返回空数据（历史 302 重定向残留场景）→ 视为登录失效，自动跳登录页
+          setError('登录已失效，正在跳转登录页…')
+          setTimeout(() => { window.location.hash = '#/Login'; window.location.reload() }, 800)
+          return
+        }
+        setInfo(info)
+      })
       .catch((e) => {
         if (aliveRef.current) {
           // 区分超时/网络错误，给出更友好的提示

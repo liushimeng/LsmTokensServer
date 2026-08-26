@@ -616,6 +616,28 @@ func checkUserAndModelStatus(claims *UserTokenClaims) (bool, bool) {
 	return true, false
 }
 
+// isUserAPIPath 判定用户端数据接口路径（与管理端 isManagerAPIPath 同规则）
+// *Interface / *WS 后缀、验证码、协议转换分析器、SSE 爬虫接口；未匹配的 SPA 前端路由不属于数据接口。
+func isUserAPIPath(path string) bool {
+	if strings.HasSuffix(path, "Interface") || strings.HasSuffix(path, "WS") {
+		return true
+	}
+	if path == "/CaptchaGenerate" || path == "/CaptchaAudio" || path == "/SpiderDataSourceCrawl" {
+		return true
+	}
+	if strings.HasPrefix(path, "/ProtocolConvertAnalyzer") {
+		return true
+	}
+	return false
+}
+
+// writeUserAuthFail 用户端鉴权失败统一输出：API 请求返回 401 JSON（前端 api.js 捕获后自动跳登录页）
+func writeUserAuthFail(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: message})
+}
+
 // userAuthMiddleware 用户认证中间件
 func userAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -654,7 +676,20 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 		// 验证 Token
 		claims := getUserToken(r)
 		if claims.UserID == 0 {
-			http.Redirect(w, r, "UserLogin", http.StatusFound) // 相对 Location（网关子路径代理兼容）
+			// v2.0.75：对齐管理端行为——API 请求返回 401 JSON（fetch 自动跟随 302 会拿到登录页
+			// HTML 且 HTTP 200，导致前端误判为"获取失败"而非跳转登录页）；
+			// 页面导航放行由前端路由接管，页面型伪装请求 302 跳转登录页（相对 Location，网关子路径代理兼容）
+			clearUserLoginCookie(w)
+			acceptHTML := strings.Contains(r.Header.Get("Accept"), "text/html")
+			if acceptHTML && !isUserAPIPath(path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if acceptHTML {
+				http.Redirect(w, r, "UserLogin", http.StatusFound)
+				return
+			}
+			writeUserAuthFail(w, "未登录或登录已过期")
 			return
 		}
 
@@ -662,10 +697,14 @@ func userAuthMiddleware(next http.Handler) http.Handler {
 		isValid, shouldRedirect := checkUserAndModelStatus(claims)
 		if !isValid {
 			clearUserLoginCookie(w)
-			if shouldRedirect {
-				http.Redirect(w, r, "UserLogin", http.StatusFound) // 相对 Location
+			if strings.Contains(r.Header.Get("Accept"), "text/html") {
+				if shouldRedirect {
+					http.Redirect(w, r, "UserLogin", http.StatusFound) // 相对 Location
+				} else {
+					next.ServeHTTP(w, r)
+				}
 			} else {
-				w.WriteHeader(http.StatusUnauthorized)
+				writeUserAuthFail(w, "登录状态已失效（用户或模型被禁用/删除）")
 			}
 			return
 		}
