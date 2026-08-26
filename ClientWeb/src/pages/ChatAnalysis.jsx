@@ -249,27 +249,61 @@ export default function ChatAnalysis({ route }) {
     ) },
   ]
 
-  // 详情头部元信息
+  // 协议名称辅助
+  const protocolName = (v) => v === 1 ? 'Anthropic' : v === 2 ? 'OpenAI' : '-'
+
+  // 详情头部元信息（阶段AP：卡片式网格 + 协议流向）
   const renderDetailHead = () => {
     if (!detailRow) return null
+    const algoType = detailRow.dst_endpoint_algorithm_type
+    const isConvert = algoType === ALGO_TYPE_CONVERTER
+    const statusOk = String(detailRow.response_status).startsWith('2')
     return (
       <header className="detail-head">
-        <div className="detail-head-row">
-          <div><span className="muted">时间</span><span>{fmtTime(detailRow.created_at)}</span></div>
-          <div><span className="muted">请求</span><span>{detailRow.request_method} {detailRow.request_url}</span></div>
-          <div><span className="muted">状态</span><span>{detailRow.response_status}（耗时 {fmtMs(detailRow.elapsed_ms)}）</span></div>
-          <div><span className="muted">Tokens</span><span>输入 {fmtNum(detailRow.tokens_input_size)} / 输出 {fmtNum(detailRow.tokens_output_size)}</span></div>
-          <div><span className="muted">大小</span><span>请求 {fmtBytes(detailRow.request_content_length)} / 响应 {fmtBytes(detailRow.response_content_length)}</span></div>
+        {/* 协议流向 */}
+        <div className="detail-protocol-flow">
+          <span className={detailRow.protocol_type === 1 ? 'protocol-badge protocol-anthropic' : detailRow.protocol_type === 2 ? 'protocol-badge protocol-openai' : 'protocol-badge unknown'}>
+            {protocolName(detailRow.protocol_type)}
+          </span>
+          <span className="pf-arrow">→</span>
+          <span className={protocolBadgeClass(algoType)} title={protocolBadgeTitle(algoType)}>
+            {protocolBadgeText(algoType)}
+          </span>
+          {isConvert ? (
+            <>
+              <span className="pf-arrow">→</span>
+              <span className="protocol-badge unknown">目标端</span>
+            </>
+          ) : null}
+          <span className="pf-label">（ID #{detailRow.id}）</span>
         </div>
-        <div className="detail-head-row">
-          <div>
-            <span className="muted">源协议</span>
-            <span>{detailRow.protocol_type === 1 ? 'Anthropic' : detailRow.protocol_type === 2 ? 'OpenAI' : '-'}</span>
+
+        {/* 指标网格 */}
+        <div className="detail-head-grid">
+          <div className="detail-head-card">
+            <span className="dhc-label">⏱ 耗时</span>
+            <span className="dhc-value">{fmtMs(detailRow.elapsed_ms)}</span>
           </div>
-          <div>
-            <span className="muted">转发类型</span>
-            <span>{protocolBadge(detailRow.dst_endpoint_algorithm_type)}</span>
+          <div className="detail-head-card">
+            <span className="dhc-label">📥 输入 Tokens</span>
+            <span className="dhc-value">{fmtNum(detailRow.tokens_input_size)}</span>
           </div>
+          <div className="detail-head-card">
+            <span className="dhc-label">📤 输出 Tokens</span>
+            <span className="dhc-value">{fmtNum(detailRow.tokens_output_size)}</span>
+          </div>
+          <div className="detail-head-card">
+            <span className="dhc-label">📦 请求 / 响应大小</span>
+            <span className="dhc-value">{fmtBytes(detailRow.request_content_length)} / {fmtBytes(detailRow.response_content_length)}</span>
+          </div>
+        </div>
+
+        {/* 请求信息行 */}
+        <div className="detail-head-request">
+          <span className="dhreq-method">{detailRow.request_method}</span>
+          <span className="dhreq-url" title={detailRow.request_url}>{detailRow.request_url}</span>
+          <span className={`dhreq-status ${statusOk ? 'ok' : 'err'}`}>{detailRow.response_status}</span>
+          <span>{fmtTime(detailRow.created_at)}</span>
         </div>
       </header>
     )
@@ -410,19 +444,36 @@ export default function ChatAnalysis({ route }) {
         <Modal title={`对话详情 #${detailRow.id} · ${protocolBadgeText(detailRow.dst_endpoint_algorithm_type)}`} width={960} onClose={() => setDetailRow(null)}>
           {renderDetailHead()}
 
-          {/* 主 Tab：6 个字段 */}
+          {/* 主 Tab：分组式 6 个字段 */}
           <nav className="detail-tabs">
-            {DETAIL_FIELDS.map((f) => (
-              <button key={f.key} className={`btn btn-sm detail-tab${detailTab === f.key ? ' btn-primary' : ''}`}
-                      onClick={() => openDetail(detailRow, f.key)}>{f.title}</button>
-            ))}
+            <div className="detail-tab-group">
+              <span className="detail-tab-group-label">转发体</span>
+              {DETAIL_FIELDS.filter(f => f.key === 'request_body' || f.key === 'response_body').map((f) => (
+                <button key={f.key} className={`detail-tab${detailTab === f.key ? ' active' : ''}`}
+                        onClick={() => openDetail(detailRow, f.key)}>{f.title}</button>
+              ))}
+            </div>
+            <div className="detail-tab-group">
+              <span className="detail-tab-group-label">原始体</span>
+              {DETAIL_FIELDS.filter(f => f.key.includes('src_protocol')).map((f) => (
+                <button key={f.key} className={`detail-tab${detailTab === f.key ? ' active' : ''}`}
+                        onClick={() => openDetail(detailRow, f.key)}>{f.title}</button>
+              ))}
+            </div>
+            <div className="detail-tab-group">
+              <span className="detail-tab-group-label">头部</span>
+              {DETAIL_FIELDS.filter(f => f.key.includes('headers')).map((f) => (
+                <button key={f.key} className={`detail-tab${detailTab === f.key ? ' active' : ''}`}
+                        onClick={() => openDetail(detailRow, f.key)}>{f.title}</button>
+              ))}
+            </div>
           </nav>
 
-          {/* 仅 body 类字段显示视图 Tab */}
+          {/* 仅 body 类字段显示视图子Tab（pill胶囊样式） */}
           {detailTab.includes('body') ? (
             <nav className="detail-views">
               {Object.entries(VIEW_LABELS).map(([v, label]) => (
-                <button key={v} className={`btn btn-sm detail-view${detailView === v ? ' btn-primary' : ''}`}
+                <button key={v} className={`detail-view${detailView === v ? ' active' : ''}`}
                         onClick={() => setDetailView(v)}>{label}</button>
               ))}
             </nav>

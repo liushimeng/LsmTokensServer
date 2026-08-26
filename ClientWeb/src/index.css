@@ -240,17 +240,49 @@ a { color: var(--primary); text-decoration: none; }
 /* 折叠行：hover 保持折叠摘要色，不被 tr:hover 覆盖 */
 .data-table tr.row-collapsed td { padding: 0; }
 
-/* ===== 阶段AM：对话详情 Modal 三段式布局 ===== */
-.detail-head { padding: 12px 16px; background: var(--bg); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
-.detail-head-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
-.detail-head-row > div { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-.detail-head-row .muted { color: var(--muted); font-size: 12px; }
-.detail-tabs { display: flex; gap: 6px; padding: 8px 16px 4px; flex-wrap: wrap; border-bottom: 1px solid var(--border); background: #fafbfc; }
-.detail-tab { font-size: 12px; }
-.detail-views { display: flex; gap: 6px; padding: 6px 16px; border-bottom: 1px solid var(--border); background: #fafbfc; }
-.detail-view { font-size: 12px; }
+/* ===== 阶段AP：对话详情 Modal 重构布局 ===== */
+
+/* Header：协议流向展示 */
+.detail-head { padding: 14px 16px 10px; background: linear-gradient(180deg, #f8fafc, #fff); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.detail-protocol-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
+.detail-protocol-flow .pf-label { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+.detail-protocol-flow .pf-arrow { color: var(--muted); font-size: 14px; }
+
+/* Header：指标网格 */
+.detail-head-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.detail-head-card { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: #fff; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.detail-head-card .dhc-label { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.detail-head-card .dhc-value { font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail-head-card .dhc-sub { font-size: 11px; color: var(--muted); }
+
+/* Header：请求信息行 */
+.detail-head-request { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.detail-head-request .dhreq-method { font-weight: 700; color: var(--text); font-size: 13px; }
+.detail-head-request .dhreq-url { font-family: ui-monospace, Menlo, Consolas, monospace; color: #475569; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.detail-head-request .dhreq-status { font-weight: 600; }
+.detail-head-request .dhreq-status.ok { color: var(--ok); }
+.detail-head-request .dhreq-status.err { color: var(--danger); }
+
+/* Tab导航：分组式 */
+.detail-tabs { display: flex; align-items: center; gap: 0; padding: 0 16px; border-bottom: 1px solid var(--border); background: #fafbfc; overflow-x: auto; }
+.detail-tab-group { display: flex; align-items: center; gap: 2px; padding: 6px 0; }
+.detail-tab-group + .detail-tab-group { border-left: 1px solid var(--border); margin-left: 6px; padding-left: 6px; }
+.detail-tab-group-label { font-size: 10px; color: var(--muted); padding: 0 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.detail-tab { font-size: 12px; padding: 5px 10px; border: none; background: none; cursor: pointer; border-radius: 6px; color: var(--muted); white-space: nowrap; transition: all .15s; }
+.detail-tab:hover { background: #e8f0fe; color: var(--primary); }
+.detail-tab.active { background: var(--primary); color: #fff; font-weight: 600; }
+
+/* View子Tab：pill胶囊样式 */
+.detail-views { display: flex; gap: 4px; padding: 6px 16px; border-bottom: 1px solid var(--border); background: #fff; }
+.detail-view { font-size: 11px; padding: 3px 10px; border: 1px solid var(--border); background: #fff; cursor: pointer; border-radius: 12px; color: var(--muted); transition: all .15s; }
+.detail-view:hover { border-color: var(--primary); color: var(--primary); }
+.detail-view.active { background: #eff6ff; border-color: var(--primary); color: var(--primary); font-weight: 600; }
+
+/* Body与Content */
 .detail-body { padding: 12px 16px; min-height: 240px; max-height: 60vh; overflow: auto; }
 .detail-content { width: 100%; }
+
+/* Footer */
 .detail-foot { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; border-top: 1px solid var(--border); background: #fafbfc; flex-wrap: wrap; gap: 8px; }
 .detail-foot-meta { display: inline-flex; gap: 8px; align-items: center; font-size: 12px; flex-wrap: wrap; }
 .detail-foot-meta .muted { color: var(--muted); }
@@ -271,13 +303,22 @@ a { color: var(--primary); text-decoration: none; }
 .json-tree-overflow { color: var(--muted); padding: 4px 8px; font-size: 12px; font-style: italic; }
 .json-tree-deep > summary { color: var(--muted); }
 
-/* ===== 阶段AM：SSE 事件卡片列表 ===== */
+/* ===== 阶段AP：SSE 事件卡片列表（增强版） ===== */
+.sse-event-summary { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0 8px; font-size: 12px; color: var(--muted); }
+.sse-event-summary .ses-total { font-weight: 600; color: var(--text); }
+.sse-event-summary .ses-divider { width: 1px; height: 14px; background: var(--border); }
 .sse-event-list { display: flex; flex-direction: column; gap: 6px; }
-.sse-event-card { border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden; }
+.sse-event-card { border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden; border-left: 3px solid var(--border); }
+.sse-event-card.sse-color-message { border-left-color: #2563eb; }
+.sse-event-card.sse-color-content { border-left-color: #16a34a; }
+.sse-event-card.sse-color-delta { border-left-color: #ea580c; }
+.sse-event-card.sse-color-error { border-left-color: #dc2626; }
+.sse-event-card.sse-color-default { border-left-color: #94a3b8; }
 .sse-event-card-head { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: #fafbfc; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
 .sse-event-card-head:hover { background: #f1f5f9; }
-.sse-event-index { font-weight: 600; color: var(--muted); font-size: 12px; }
+.sse-event-index { font-weight: 600; color: var(--muted); font-size: 12px; min-width: 28px; }
 .sse-event-name { flex: 1; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; color: #1e293b; word-break: break-all; }
+.sse-event-type-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; flex-shrink: 0; }
 .sse-event-toggle { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; font-size: 12px; cursor: pointer; }
 .sse-event-card-body { padding: 8px 12px; }
 .sse-event-data { max-height: 360px; margin: 0; }
@@ -285,17 +326,27 @@ a { color: var(--primary); text-decoration: none; }
 .sse-event-raw { max-height: 200px; margin-top: 6px; }
 .sse-empty { color: var(--muted); padding: 12px; text-align: center; }
 
-/* ===== 阶段AM：聚合视图 ===== */
+/* ===== 阶段AP：聚合视图（增强版） ===== */
 .aggregate-view { display: flex; flex-direction: column; gap: 10px; }
-.agg-block { padding: 8px 12px; border-left: 3px solid var(--primary); background: #fafbfc; border-radius: 4px; }
-.agg-block-title { font-weight: 600; margin-bottom: 6px; color: #1e293b; font-size: 13px; }
+.agg-block { padding: 10px 14px; border-left: 3px solid var(--primary); background: #fafbfc; border-radius: 6px; }
+.agg-block-title { font-weight: 600; margin-bottom: 8px; color: #1e293b; font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .agg-block-body { font-size: 13px; color: #334155; }
-.agg-block-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.agg-block-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.agg-usage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.agg-usage-item { display: flex; flex-direction: column; gap: 2px; }
+.agg-usage-label { font-size: 11px; color: var(--muted); }
+.agg-usage-val { font-size: 18px; font-weight: 700; }
+.agg-usage-val.input { color: #2563eb; }
+.agg-usage-val.output { color: #16a34a; }
+.agg-usage-bar { height: 6px; border-radius: 3px; background: #e2e8f0; overflow: hidden; display: flex; }
+.agg-usage-bar .bar-input { background: #2563eb; height: 100%; transition: width .3s; }
+.agg-usage-bar .bar-output { background: #16a34a; height: 100%; transition: width .3s; }
 .agg-tag-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.agg-tag { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; background: #e0e7ff; color: #3730a3; border-radius: 10px; font-size: 12px; }
+.agg-tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; background: #e0e7ff; color: #3730a3; border-radius: 10px; font-size: 12px; }
 .agg-tag-name { font-weight: 500; }
-.agg-tag-count { font-size: 11px; color: #6366f1; }
+.agg-tag-count { font-size: 11px; color: #6366f1; background: rgba(99,102,241,.1); border-radius: 6px; padding: 0 5px; }
 .agg-tag-tool { background: #fef3c7; color: #92400e; }
+.agg-tag-tool .agg-tag-count { color: #b45309; background: rgba(180,83,9,.1); }
 .agg-text-content { max-height: 360px; }
 .agg-empty { color: var(--muted); padding: 12px; text-align: center; }
 .muted { color: var(--muted); }
@@ -442,8 +493,11 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
   /* 清理报告趋势柱：超宽时横向滚动、每柱最小宽（11 文档） */
   .trend-chart { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .trend-bar { flex: 1 0 18px !important; }
-  /* 对话详情弹窗 6 个字段 Tab 转 3 列网格（07 文档） */
-  .detail-tabs { display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  /* 对话详情弹窗 Tab 转纵向堆叠 */
+  .detail-tabs { flex-wrap: wrap; gap: 2px; }
+  .detail-tab-group + .detail-tab-group { border-left: none; margin-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: 6px; }
+  .detail-head-grid { grid-template-columns: 1fr 1fr; }
+  .detail-protocol-flow { font-size: 12px; }
 
   /* 爬虫数据源：操作列 4 按钮 2×2；爬取弹窗 textarea 压低、日志框自适应（10 文档） */
   .data-table.card-mode td .op-btns { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
