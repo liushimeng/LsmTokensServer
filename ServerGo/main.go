@@ -32,8 +32,8 @@ import (
 )
 
 const (
-	APP_NAME       = "LsmTokensServer"
-	PRODUCT_NAME   = "Lsm AI Tokens 代理服务"
+	APP_NAME       = config.APP_NAME     // 单一事实来源在 config 包（20260826-05 版本显示）
+	PRODUCT_NAME   = config.PRODUCT_NAME // 同上
 	PID_FILE       = "lsmtokensserver.pid"
 	DEFAULT_CONFIG = "LsmTokensServer.conf"
 )
@@ -269,6 +269,8 @@ func main() {
 	logger.Printf("[INIT] App Name: %s %s", APP_NAME, config.APP_VERSION)
 	logger.Printf("[INIT] Config File: %s", configFile)
 	logger.Printf("[INIT] Log File: %s", cfg.LogFileURL)
+	// 编译时间导出到 config 包，供 api 层 /AppVersionInterface 读取（20260826-05）
+	config.BuildTime = buildTime
 	if buildTime != "" {
 		logger.Printf("[INIT] Build Time: %s", buildTime)
 	}

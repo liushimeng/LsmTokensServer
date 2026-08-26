@@ -930,3 +930,14 @@ var G *LsmTokensServerConfig
 
 // APP_VERSION 应用版本（自旧工程 main.go 迁移）
 const APP_VERSION = "v2.0.73"
+
+// APP_NAME / PRODUCT_NAME 产品标识（自 main.go 迁出为单一事实来源，
+// 供 api 包 /AppVersionInterface 等跨包复用；main.go 以常量别名引用）
+const (
+	APP_NAME     = "LsmTokensServer"
+	PRODUCT_NAME = "Lsm AI Tokens 代理服务"
+)
+
+// BuildTime 后端编译时间（由 rebuild_restart_app.sh 经 -ldflags 注入 main.buildTime，
+// main 启动时赋值到此处供 api 包读取；未注入时为空字符串）
+var BuildTime string

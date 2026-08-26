@@ -49,6 +49,7 @@ func RegisterManagerAPIRoutes(mux *http.ServeMux) {
 	// 系统信息
 	mux.HandleFunc("/GitInfoInterface", gitInfoInterfaceHandle)
 	mux.HandleFunc("/SystemInfoInterface", systemInfoInterfaceHandle)
+	mux.HandleFunc("/AppVersionInterface", appVersionInterfaceHandle) // 20260826-05 工具栏版本号/编译时间
 
 	// 对话页面数据接口
 	mux.HandleFunc("/ChatDialogInterface", chatDialogInterfaceHandle)
@@ -125,6 +126,7 @@ func RegisterUserAPIRoutes(mux *http.ServeMux) {
 	// 系统信息
 	mux.HandleFunc("/GitInfoInterface", gitInfoInterfaceHandle)
 	mux.HandleFunc("/SystemInfoInterface", systemInfoInterfaceHandle)
+	mux.HandleFunc("/AppVersionInterface", appVersionInterfaceHandle) // 20260826-05 工具栏版本号/编译时间
 
 	// 对话页面数据接口
 	mux.HandleFunc("/ChatDialogInterface", userChatDialogInterfaceHandle)

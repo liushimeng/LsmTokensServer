@@ -4,6 +4,7 @@ import { baseUrl } from '../shared/api'
 import { loadSidebarCollapsed, saveSidebarCollapsed } from '../shared/navConfig'
 import ToolbarDialogs from './ToolbarDialogs'
 import SideNav from './SideNav'
+import VersionInfo from './VersionInfo'
 import { useI18n, LanguageSwitcher } from '../i18n'
 
 const MOBILE_MQ = '(max-width: 860px)'
@@ -47,6 +48,7 @@ export default function Layout({ route, userInfo, children }) {
           <button className="menu-toggle" onClick={onToggle}>☰</button>
           <img className="app-logo" src={baseUrl() + "logo-48.png"} alt="logo" />
           <span className="app-title">LsmTokensServer</span>
+          <VersionInfo />
           <span className="app-role">{isAdmin ? t('common.role.admin') : t('common.role.user')}</span>
         </div>
         <div className="header-right">
