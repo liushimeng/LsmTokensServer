@@ -375,11 +375,11 @@ export default function ProtocolConvertAnalyzer() {
               {/* 输出面板 */}
               <div className="card" style={{ margin: 0 }}>
                 <h3>{t('protocolConvert.output')}</h3>
-                {SECTIONS.map(([sec, label]) => {
+                {SECTIONS.map(([sec, labelKey]) => {
                   const pair = outputs[sec]
                   return (
                     <div key={sec} style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 4 }}>{t(labelKey)}</div>
                       <div className="log-box" style={{
                         background: pair && pair.error ? '#fff5f5' : undefined,
                         color: pair && pair.error ? '#991b1b' : undefined,
