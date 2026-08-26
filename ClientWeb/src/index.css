@@ -76,6 +76,7 @@ a { color: var(--primary); text-decoration: none; }
 .btn-primary:hover { background: var(--primary-dark); }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn-sm { padding: 3px 8px; font-size: 12px; }
+.btn-active { background: #eff6ff; border-color: var(--primary); color: var(--primary); font-weight: 600; }
 .btn-link { border: none; background: none; color: var(--primary); padding: 4px 6px; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .field > span:first-child { font-size: 13px; color: var(--muted); }
@@ -288,6 +289,47 @@ a { color: var(--primary); text-decoration: none; }
 .detail-foot-meta .muted { color: var(--muted); }
 .detail-foot-actions { display: inline-flex; gap: 6px; }
 
+/* ===== 内联展开详情面板（替代 Modal 弹窗） ===== */
+.inline-detail-row {
+  background: var(--panel);
+  border: 2px solid var(--primary);
+  border-radius: 10px;
+  margin: 4px 0;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, .12);
+  overflow: hidden;
+  animation: inline-detail-enter .2s ease-out;
+}
+@keyframes inline-detail-enter {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.inline-detail-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+  border-bottom: 1px solid var(--border);
+}
+.inline-detail-title-text {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--primary);
+}
+.inline-detail-close {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.inline-detail-close:hover {
+  background: var(--primary);
+  color: #fff;
+}
+/* 内联详情面板内的 detail-body 调整 */
+.inline-detail-row .detail-body {
+  max-height: 50vh;
+  min-height: 180px;
+}
+
 /* ===== 阶段AM：JSON 美化可折叠树 ===== */
 .json-tree { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.7; padding: 4px 0; }
 .json-tree .json-tree-body { margin-left: 16px; padding-left: 8px; border-left: 1px dashed #e2e8f0; }
@@ -493,11 +535,16 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
   /* 清理报告趋势柱：超宽时横向滚动、每柱最小宽（11 文档） */
   .trend-chart { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .trend-bar { flex: 1 0 18px !important; }
-  /* 对话详情弹窗 Tab 转纵向堆叠 */
+  /* 对话详情 Tab 转纵向堆叠 */
   .detail-tabs { flex-wrap: wrap; gap: 2px; }
   .detail-tab-group + .detail-tab-group { border-left: none; margin-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: 6px; }
   .detail-head-grid { grid-template-columns: 1fr 1fr; }
   .detail-protocol-flow { font-size: 12px; }
+  /* 内联详情面板移动端 */
+  .inline-detail-row { border-radius: 8px; }
+  .inline-detail-title { padding: 8px 12px; }
+  .inline-detail-title-text { font-size: 13px; }
+  .inline-detail-row .detail-body { max-height: 40vh; min-height: 120px; }
 
   /* 爬虫数据源：操作列 4 按钮 2×2；爬取弹窗 textarea 压低、日志框自适应（10 文档） */
   .data-table.card-mode td .op-btns { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }

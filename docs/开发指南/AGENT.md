@@ -133,6 +133,7 @@ gofmt -w <修改的 .go>
 - `/ProtocolConvertAnalyzer` 管理/用户端布局一致：列表展示 ID 列；`转换方向` 只读；`执行转换` 才填 Output；4 项筛选用 localStorage 持久化（`lsm_protocol_converter_filters` / `lsm_protocol_converter_user_filters`）；URL 参数优先于 localStorage；`结构转换成功率`/`字段转换率` 由后端 `CalculateConversionMetricsForSection` 实际转换后计算
 - 启用态核心按钮避免黑/灰背景；优先蓝/紫/青/绿/红等语义色 + hover 态
 - `/ChatAnalysis` 浏览记录页已拆分为 `server_web_manager_chat_page_{html,styles,body,scripts}.go`；`agentPageTemplate` 是组合入口；修改时禁止改变 `template.New(...).Parse(...)` 拼接方式
+- **ChatAnalysis 前端模块化**：`ClientWeb/src/pages/ChatAnalysis.jsx` 仅为重导出入口（`export { default } from './chat-analysis'`），实际代码位于 `ClientWeb/src/pages/chat-analysis/` 目录，按职责拆分为：主组件 `index.jsx`、筛选工具栏 `ChatAnalysisToolbar.jsx`、内联展开详情面板 `InlineDetailRow.jsx`（替代旧 Modal）、详情子组件 `Detail{Header,Tabs,Body,Footer}.jsx`、筛选 Hook `useChatAnalysisFilters.js`、数据查询 Hook `useChatAnalysisData.js`、常量 `constants.js`；新增页面组件时参考此模块化模式
 
 ## 5. 代理核心流程与约束
 

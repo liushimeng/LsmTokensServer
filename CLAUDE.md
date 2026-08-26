@@ -72,6 +72,7 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架�
 | `server_ws_*.go` | `websocket/` | WS 推送（ChatTotal 流式） |
 | `ai_api_connectivity.go` / `git_info.go` / `system_info_linux.go` | `system/` | 系统辅助 |
 | server_web_*.go（旧 HTML 生成） | 废弃，由前端实现 | `webserver/` 仅做 SPA 静态托管 + API 路由挂载 |
+| `ClientWeb/src/pages/chat-analysis/` | 前端模块化页面示例 | ChatAnalysis 从单文件拆分为 `index.jsx` + `ChatAnalysisToolbar.jsx` + `InlineDetailRow.jsx` + `Detail{Header,Tabs,Body,Footer}.jsx` + `useChatAnalysis{Filters,Data}.js` + `constants.js`；详情展示从 Modal 改为 DataTable 内联展开行 |
 
 ## 4. 工作流
 

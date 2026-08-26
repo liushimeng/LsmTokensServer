@@ -257,6 +257,23 @@
 | [`spider_cdp_actions_test.go`](spider_cdp_actions_test.go) | CDP 解析层（选择器 / URL / text JS） | `TestParseSelector`, `TestBuildNextPageURL` |
 | [`spider_cdp_integration_test.go`](spider_cdp_integration_test.go) | CDP 引擎 E2E（需 `LSMSpiderCDPIntegration=1`） | `TestSpiderEngineCrawlCDP` |
 
+### 十一、前端源码 - ChatAnalysis 模块化页面（React + Vite）
+
+> `ClientWeb/src/pages/ChatAnalysis.jsx` 为重导出入口；实际代码位于 `ClientWeb/src/pages/chat-analysis/`。
+
+| 文件 | 核心功能 |
+|------|----------|
+| [`chat-analysis/index.jsx`](../../ClientWeb/src/pages/chat-analysis/index.jsx) | 主页面组件：组合工具栏 + DataTable + 内联展开行 |
+| [`chat-analysis/ChatAnalysisToolbar.jsx`](../../ClientWeb/src/pages/chat-analysis/ChatAnalysisToolbar.jsx) | 筛选工具栏（用户/模型/Agent/时间跨度等） |
+| [`chat-analysis/InlineDetailRow.jsx`](../../ClientWeb/src/pages/chat-analysis/InlineDetailRow.jsx) | 内联展开详情面板（替代旧 Modal 弹窗） |
+| [`chat-analysis/DetailHeader.jsx`](../../ClientWeb/src/pages/chat-analysis/DetailHeader.jsx) | 详情头部（请求概要信息） |
+| [`chat-analysis/DetailTabs.jsx`](../../ClientWeb/src/pages/chat-analysis/DetailTabs.jsx) | 字段 Tab 导航（请求体/响应头/转换分析等） |
+| [`chat-analysis/DetailBody.jsx`](../../ClientWeb/src/pages/chat-analysis/DetailBody.jsx) | 详情主体渲染（JSON 树 / 原文） |
+| [`chat-analysis/DetailFooter.jsx`](../../ClientWeb/src/pages/chat-analysis/DetailFooter.jsx) | 详情底部状态栏（耗时/Token/协议算法） |
+| [`chat-analysis/useChatAnalysisFilters.js`](../../ClientWeb/src/pages/chat-analysis/useChatAnalysisFilters.js) | 筛选条件 localStorage 持久化 Hook |
+| [`chat-analysis/useChatAnalysisData.js`](../../ClientWeb/src/pages/chat-analysis/useChatAnalysisData.js) | 数据查询 Hook（分页/筛选/加载状态） |
+| [`chat-analysis/constants.js`](../../ClientWeb/src/pages/chat-analysis/constants.js) | 常量定义（localStorage key / 默认值等） |
+
 ---
 
 ## 代理核心流程
