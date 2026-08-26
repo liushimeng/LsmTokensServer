@@ -202,6 +202,31 @@ a { color: var(--primary); text-decoration: none; }
 .protocol-badge.converter { background: #fef3c7; color: #92400e; }
 .protocol-badge.unknown { background: #f1f5f9; color: #64748b; }
 
+/* ===== 阶段AC：智能路由管理 协议背景色 ===== */
+.data-table tr.row-protocol-anthropic td { background: rgba(255, 198, 110, 0.07); }
+.data-table tr.row-protocol-anthropic td:first-child { box-shadow: inset 3px 0 0 #ff9800; }
+.data-table tr.row-protocol-anthropic:hover td { background: rgba(255, 198, 110, 0.14); }
+.data-table tr.row-protocol-openai td { background: rgba(16, 163, 127, 0.07); }
+.data-table tr.row-protocol-openai td:first-child { box-shadow: inset 3px 0 0 #10a37f; }
+.data-table tr.row-protocol-openai:hover td { background: rgba(16, 163, 127, 0.14); }
+/* 协议徽章：Anthropic 暖橙 / OpenAI 蓝绿 */
+.protocol-badge.protocol-anthropic { background: #fff3e0; color: #e65100; border: 1px solid #ffcc80; }
+.protocol-badge.protocol-openai { background: #e0f2f1; color: #00695c; border: 1px solid #80cbc4; }
+
+/* ===== 阶段AC：折叠行 ===== */
+.cell-collapse-toggle { width: 40px; text-align: center; padding: 6px 8px !important; }
+.collapse-btn { background: none; border: 1px solid transparent; border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; color: var(--muted); line-height: 1; }
+.collapse-btn:hover { background: #f0f3f7; border-color: var(--border); color: var(--text); }
+.cell-collapsed-row { padding: 0 !important; }
+.collapsed-summary { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 13px; cursor: pointer; background: #fafbfc; transition: background .15s; }
+.collapsed-summary:hover { background: #f1f5f9; }
+.collapsed-summary .collapse-btn { flex-shrink: 0; }
+.collapsed-id { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--muted); font-size: 12px; min-width: 36px; }
+.collapsed-model { font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collapsed-hint { color: var(--muted); font-size: 12px; flex-shrink: 0; }
+/* 折叠行：hover 保持折叠摘要色，不被 tr:hover 覆盖 */
+.data-table tr.row-collapsed td { padding: 0; }
+
 /* ===== 阶段AM：对话详情 Modal 三段式布局 ===== */
 .detail-head { padding: 12px 16px; background: var(--bg); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
 .detail-head-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }

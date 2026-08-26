@@ -4,6 +4,7 @@
 // sortable: true 时表头可点击排序（升序→降序→取消 三态循环，纯前端实现）；
 // sortValue(row) 可选，提供排序取值（默认取 row[key]）；nowrap: true 时该列单元格不换行（cell-nowrap）；
 // rowClass(row) 用于状态行高亮。td 默认可换行（长内容多行展示、无横向滚动）。
+// collapsible: true 启用折叠行；collapsedIds: Set 折叠的 rowKey 集合；onToggleCollapse(rowKey)：切换回调。
 import { useMemo, useState } from 'react'
 
 // 数值优先数值比较，其余中文 localeCompare；null/undefined 恒排末尾
@@ -18,7 +19,8 @@ function compare(a, b) {
   return String(a).localeCompare(String(b), 'zh-CN')
 }
 
-export default function DataTable({ columns, rows, loading, empty = '暂无数据', rowKey, cardMode = true, rowClass }) {
+export default function DataTable({ columns, rows, loading, empty = '暂无数据', rowKey, cardMode = true, rowClass,
+  collapsible, collapsedIds, onToggleCollapse, renderCollapsedRow }) {
   const [sort, setSort] = useState(null) // {key, dir: 1|-1}
 
   const sorted = useMemo(() => {
@@ -41,25 +43,50 @@ export default function DataTable({ columns, rows, loading, empty = '暂无数�
     <div className={'table-wrap' + (cardMode ? ' card-wrap' : '')}>
       <table className={'data-table' + (cardMode ? ' card-mode' : '')}>
         <thead>
-          <tr>{columns.map((c) => (
-            <th key={c.key} style={c.width ? { width: c.width } : undefined}
-              className={c.sortable ? 'sortable' : undefined}
-              onClick={() => clickSort(c)}
-              title={c.sortable ? '点击排序' : undefined}>
-              {c.title}{c.sortable && sort && sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
-            </th>
-          ))}</tr>
+          <tr>
+            {collapsible ? <th style={{ width: 40 }} title="展开/折叠"></th> : null}
+            {columns.map((c) => (
+              <th key={c.key} style={c.width ? { width: c.width } : undefined}
+                className={c.sortable ? 'sortable' : undefined}
+                onClick={() => clickSort(c)}
+                title={c.sortable ? '点击排序' : undefined}>
+                {c.title}{c.sortable && sort && sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+              </th>
+            ))}
+          </tr>
         </thead>
         <tbody>
-          {sorted.map((r, i) => (
-            <tr key={keyOf(r, i)} className={rowClass ? rowClass(r) : undefined}>
-              {columns.map((c) => (
-                <td key={c.key} className={c.nowrap ? 'cell-nowrap' : undefined} data-label={typeof c.title === 'string' ? c.title : undefined}>
-                  {c.render ? c.render(r[c.key], r) : (r[c.key] ?? '')}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {sorted.map((r, i) => {
+            const k = keyOf(r, i)
+            const collapsed = collapsible && collapsedIds && collapsedIds.has(k)
+            const cls = [rowClass ? rowClass(r) : '', collapsed ? 'row-collapsed' : ''].filter(Boolean).join(' ') || undefined
+            if (collapsed && renderCollapsedRow) {
+              return (
+                <tr key={k} className={cls}>
+                  <td colSpan={columns.length + 1} className="cell-collapsed-row">
+                    {renderCollapsedRow(r, () => onToggleCollapse && onToggleCollapse(k))}
+                  </td>
+                </tr>
+              )
+            }
+            return (
+              <tr key={k} className={cls}>
+                {collapsible ? (
+                  <td className="cell-collapse-toggle">
+                    <button type="button" className="collapse-btn" onClick={() => onToggleCollapse && onToggleCollapse(k)}
+                      title={collapsed ? '展开' : '折叠'} aria-label={collapsed ? '展开' : '折叠'}>
+                      {collapsed ? '▶' : '▼'}
+                    </button>
+                  </td>
+                ) : null}
+                {columns.map((c) => (
+                  <td key={c.key} className={c.nowrap ? 'cell-nowrap' : undefined} data-label={typeof c.title === 'string' ? c.title : undefined}>
+                    {c.render ? c.render(r[c.key], r) : (r[c.key] ?? '')}
+                  </td>
+                ))}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>

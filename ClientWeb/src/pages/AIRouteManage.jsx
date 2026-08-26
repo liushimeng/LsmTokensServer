@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+
+// 折叠/分页 localStorage 工具（带容错）
+const safeGet = (k) => { try { return window.localStorage.getItem(k) } catch { return null } }
+const safeSet = (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* 忽略 */ } }
+const PAGE_SIZES = [10, 20, 30, 50, 100]
+const DEFAULT_PAGE_SIZE = 50
 
 // 智能路由管理（管理端）：AIRouteManageInterface（POST JSON {action:...}）
 // action: list / list_models / list_endpoints / add / update / delete / batch_delete / batch_update / batch_stats
@@ -19,6 +25,7 @@ const DAYS_OPTIONS = [-1, -2, -4, -6, -12, 1, 3, 5, 7, 14, 30, 60, 90, 0]
 const daysLabel = (d) => (d < 0 ? '最近' + -d + '小时' : d === 0 ? '全部时间' : '最近' + d + '天')
 
 const protocolName = (t) => (parseInt(t, 10) === 1 ? 'Anthropic' : 'OpenAI')
+const protocolSlug = (t) => (parseInt(t, 10) === 1 ? 'anthropic' : 'openai')
 // 源站算法：1=协议直连（同协议）2=协议转换器（异协议）
 const epAlgoForProtocol = (ep, routeProtocol) => (parseInt(ep.protocol_type, 10) === parseInt(routeProtocol, 10) ? 1 : 2)
 const epAlgoValid = (ep, routeProtocol, algo) => {
@@ -50,6 +57,32 @@ export default function AIRouteManage() {
   const [formError, setFormError] = useState('')
   const [days, setDays] = useState(3)
   const [stats, setStats] = useState({}) // route_id -> {anthropic_count, openai_count}
+
+  // 折叠/展开状态（按角色隔离 localStorage）
+  const collapseKey = `lsm:airoute:collapsed:${isAdmin ? 'manager' : 'user'}`
+  const [collapsedIds, setCollapsedIds] = useState(() => {
+    try { const raw = safeGet(collapseKey); return new Set(raw ? JSON.parse(raw) : []) } catch { return new Set() }
+  })
+  const toggleCollapse = (id) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      safeSet(collapseKey, JSON.stringify([...next]))
+      return next
+    })
+  }
+
+  // 分页状态（按角色隔离 localStorage）
+  const pageKey = `lsm:airoute:page:${isAdmin ? 'manager' : 'user'}`
+  const [page, setPage] = useState(() => {
+    try { const raw = safeGet(pageKey); if (raw) { const s = JSON.parse(raw); if (s && s.page > 0) return s.page } } catch { /* 忽略 */ }
+    return 1
+  })
+  const [pageSize, setPageSize] = useState(() => {
+    try { const raw = safeGet(pageKey); if (raw) { const s = JSON.parse(raw); if (s && PAGE_SIZES.includes(s.pageSize)) return s.pageSize } } catch { /* 忽略 */ }
+    return DEFAULT_PAGE_SIZE
+  })
+  useEffect(() => { safeSet(pageKey, JSON.stringify({ page, pageSize })) }, [page, pageSize, pageKey])
 
   const loadRoutes = useCallback(() => {
     setLoading(true)
@@ -322,7 +355,9 @@ export default function AIRouteManage() {
     ...(isAdmin ? [{ key: 'user_name', title: '所属用户' }] : []),
     { key: 'model_name', title: '模型名' },
     { key: 'endpoints', title: '目标源站列表', render: (_, r) => renderEpList(r) },
-    { key: 'protocol_type', title: '协议', render: (v) => protocolName(v) },
+    { key: 'protocol_type', title: '协议', render: (v) => (
+      <span className={`protocol-badge protocol-${protocolSlug(v)}`}>{protocolName(v)}</span>
+    ) },
     { key: 'algorithm_name', title: '算法策略', render: (v, r) => v || ALGO_NAMES[r.algorithm_strategy_type] || '-' },
     {
       key: 'stats', title: (
@@ -364,6 +399,14 @@ export default function AIRouteManage() {
     },
   ]
 
+  // 分页计算
+  const totalPages = Math.max(1, Math.ceil(routes.length / pageSize))
+  const safePage = Math.min(page, totalPages)
+  const pagedRoutes = useMemo(() => {
+    const start = (safePage - 1) * pageSize
+    return routes.slice(start, start + pageSize)
+  }, [routes, safePage, pageSize])
+
   return (
     <div className="page">
       <h2 className="page-title">智能路由管理</h2>
@@ -382,7 +425,26 @@ export default function AIRouteManage() {
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
-        <DataTable columns={columns} rows={routes} loading={loading} empty="暂无路由配置" rowKey="id" />
+        <DataTable columns={columns} rows={pagedRoutes} loading={loading} empty="暂无路由配置" rowKey="id"
+          rowClass={(r) => 'row-protocol-' + protocolSlug(r.protocol_type)}
+          collapsible collapsedIds={collapsedIds} onToggleCollapse={toggleCollapse}
+          renderCollapsedRow={(r, onToggle) => (
+            <div className="collapsed-summary">
+              <button type="button" className="collapse-btn" onClick={onToggle} title="展开" aria-label="展开">▶</button>
+              <span className="collapsed-id">#{r.id}</span>
+              <span className={`protocol-badge protocol-${protocolSlug(r.protocol_type)}`}>{protocolName(r.protocol_type)}</span>
+              <span className="collapsed-model">{r.model_name || '-'}</span>
+              <span className="collapsed-hint">{r.algorithm_name || ALGO_NAMES[r.algorithm_strategy_type] || ''} · {(r.endpoint_list || []).length} 个源站</span>
+            </div>
+          )} />
+        <div className="pager">
+          <span>总计 {routes.length} 条 · 第 {safePage} / {totalPages} 页 · 每页</span>
+          <select value={pageSize} onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(1) }}>
+            {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <button className="btn btn-sm" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>上一页</button>
+          <button className="btn btn-sm" disabled={safePage >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>下一页</button>
+        </div>
       </div>
 
       {form ? (
