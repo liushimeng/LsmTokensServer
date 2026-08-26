@@ -116,7 +116,7 @@ export default function ModelInfo(props) {
               <h3>{t('modelInfo.hourlyTrend')}</h3>
               <HourlyTrendPanel
                 api="ModelInfoInterface"
-                storageKey={`lsm:modelInfo:trend:v1:${isAdmin ? 'admin' : 'user'}`}
+                span={span}
                 labels={{
                   loading: t('modelInfo.trendLoading'),
                   empty: t('modelInfo.trendEmpty'),
@@ -125,6 +125,7 @@ export default function ModelInfo(props) {
                   tooltip: t('modelInfo.trendTooltip'),
                   zoomHint: t('modelInfo.trendZoomHint'),
                   reset: t('modelInfo.trendReset'),
+                  truncated: t('modelInfo.trendTruncated'),
                 }}
               />
             </div>

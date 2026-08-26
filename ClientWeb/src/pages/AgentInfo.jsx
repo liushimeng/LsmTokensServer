@@ -102,7 +102,7 @@ export default function AgentInfo(props) {
               <h3>{t('agentInfo.hourlyTrend')}</h3>
               <HourlyTrendPanel
                 api="AgentInfoInterface"
-                storageKey={`lsm:agentInfo:trend:v1:${isAdmin ? 'admin' : 'user'}`}
+                span={span}
                 labels={{
                   loading: t('agentInfo.trendLoading'),
                   empty: t('agentInfo.trendEmpty'),
@@ -111,6 +111,7 @@ export default function AgentInfo(props) {
                   tooltip: t('agentInfo.trendTooltip'),
                   zoomHint: t('agentInfo.trendZoomHint'),
                   reset: t('agentInfo.trendReset'),
+                  truncated: t('agentInfo.trendTruncated'),
                 }}
               />
             </div>

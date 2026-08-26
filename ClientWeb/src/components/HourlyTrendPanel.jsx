@@ -1,57 +1,44 @@
-// HourlyTrendPanel：调用次数 + Token 数趋势面板
-// v2 简化版：只负责窗口切换 + 拉数据 + 持久化；viewport/缩放完全交给 KLineTrendChart 内部
+// HourlyTrendPanel：调用次数 + Token 数趋势面板（受控版）
+// v3 受控版：接收页面级 span prop，不再自管窗口按钮；viewport/缩放完全交给 KLineTrendChart 内部
 //
-// 20260826 动态档位：窗口按钮选项改由 /TimeSpanConfigInterface 推导（与页面级
-// TimeRangeSelector 同一档位表），取其中 ≥24h 且 ≤720h（后端 trend 接口上限）的子集；
-// 档位加载前沿用固定 [24, 72, 168, 720]，避免首帧空白。
+// 20260826 重构：
+//   - 从「自管状态的容器组件」改为「受控的展示组件」
+//   - 时间范围由父页面的 TimeRangeSelector 统一控制（span prop）
+//   - 移除内部 hours state、窗口按钮组、独立持久化
+//   - 超 720h（后端 trend 接口上限）自动截断并显示提示
 //
 // props:
 //   api: 'ModelInfoInterface' | 'AgentInfoInterface'
-//   defaultWindow: 默认窗口 hours（默认 24）
-//   labels: { loading, empty, call, token, zoomHint, reset }
-//   storageKey: localStorage 记忆键
+//   span: 统一 span 编码（正=天，负=小时，0=全部）
+//   labels: { loading, empty, call, token, zoomHint, reset, truncated }
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { post } from '../shared/api'
 import KLineTrendChart from './KLineTrendChart'
-import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
-import { hoursToSpan, spanLabel } from '../shared/timeSpan'
+import { spanToHours } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
 
-const DEFAULT_WINDOWS = [24, 72, 168, 720]
 const MAX_TREND_HOURS = 720 // 后端 GetHourlyTrendAll 上限
-
-function fmtHours(h) {
-  if (h < 24) return `${h}h`
-  const d = h / 24
-  return Number.isInteger(d) ? `${d}d` : `${d}d`
-}
 
 export default function HourlyTrendPanel(props) {
   const { t } = useI18n()
   const {
     api,
-    defaultWindow = 24,
+    span,
     labels = {},
-    storageKey,
   } = props
-  const { levels } = useTimeSpanLevels()
 
-  // 动态窗口：档位表取 ≥24h 且 ≤720h 的子集；档位未加载时用固定默认窗口
-  const windowOptions = useMemo(() => {
-    const wins = levels.map((l) => l.hours).filter((h) => h >= 24 && h <= MAX_TREND_HOURS)
-    return wins.length >= 2 ? wins : DEFAULT_WINDOWS.filter((h) => h <= MAX_TREND_HOURS)
-  }, [levels])
+  // span → hours 换算（超上限截断）
+  const hours = useMemo(() => {
+    const h = spanToHours(span)
+    if (h <= 0) return 24
+    return Math.min(h, MAX_TREND_HOURS)
+  }, [span])
 
-  const initialHours = useMemo(() => {
-    if (storageKey) {
-      const cached = parseInt(localStorage.getItem(storageKey), 10)
-      if (windowOptions.includes(cached)) return cached
-    }
-    return defaultWindow
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const truncated = useMemo(() => {
+    const h = spanToHours(span)
+    return h > MAX_TREND_HOURS
+  }, [span])
 
-  const [hours, setHours] = useState(initialHours)
   const [points, setPoints] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -77,46 +64,18 @@ export default function HourlyTrendPanel(props) {
   }, [api])
 
   useEffect(() => {
-    if (storageKey) localStorage.setItem(storageKey, String(hours))
     load(hours)
-  }, [hours, load, storageKey])
-
-  // 动态档位到达后：当前窗口不在档位内 → 就近切换（保持持久化值合法）
-  useEffect(() => {
-    if (!windowOptions.length || windowOptions.includes(hours)) return
-    let best = windowOptions[0]
-    let bestDist = Infinity
-    for (const h of windowOptions) {
-      const dist = Math.abs(h - hours)
-      if (dist < bestDist) {
-        bestDist = dist
-        best = h
-      }
-    }
-    setHours(best)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [windowOptions])
-
-  const windowLabel = (h) => {
-    const lab = spanLabel(hoursToSpan(h))
-    return t(lab.key, lab.vars)
-  }
+  }, [hours, load])
 
   return (
     <div>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
-        {windowOptions.map((h) => (
-          <button
-            key={h}
-            className={'btn ' + (h === hours ? 'btn-primary' : '')}
-            style={{ padding: '4px 10px', fontSize: 12 }}
-            disabled={loading && h === hours}
-            onClick={() => setHours(h)}
-          >
-            {windowLabel(h) || fmtHours(h)}
-          </button>
-        ))}
-        <span style={{ color: '#94a3b8', fontSize: 12, marginLeft: 4 }}>
+        {truncated ? (
+          <span style={{ color: '#f59e0b', fontSize: 12 }}>
+            {labels.truncated || t('trend.truncatedHint', { days: 30 }) || '仅展示最近 30 天趋势'}
+          </span>
+        ) : null}
+        <span style={{ color: '#94a3b8', fontSize: 12, marginLeft: 'auto' }}>
           {loading ? (labels.loading || '加载中…') : ''}
         </span>
       </div>

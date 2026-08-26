@@ -77,7 +77,9 @@ func TestBuildHourlyTrendPoints_Day(t *testing.T) {
 	}
 }
 
-// 30 天跨度（720h）：应产生 30 个天桶。
+// 30 天天桶：显式指定 "day" 粒度时 720h 应产生 30 个天桶。
+// 注意：v2.0.70 起默认粒度阈值提到 720h，GetHourlyTrendAll(720) 返回小时桶；
+// 本测试仅验证 buildHourlyTrendPoints 的 day 路径本身仍然正确。
 func TestBuildHourlyTrendPoints_30Days(t *testing.T) {
 	points := buildHourlyTrendPoints(map[string]*hourlyTrendBucket{}, 720, "day")
 	if len(points) != 30 {
@@ -90,16 +92,25 @@ func TestBuildHourlyTrendPoints_30Days(t *testing.T) {
 	}
 }
 
-// 7 天边界：hours=168 仍按小时桶（threshold=168），hours=169 切天桶。
+// 720h 边界：hours=720 仍按小时桶（threshold=720，与上限对齐），
+// hours>720 会被 normalize 截断到 720 后仍按小时桶返回。
+// 天桶路径保留为防御性降级（未来上限扩大时仍可用）。
 // 这两个断言在 DB == nil 时也成立（粒度判定早于 DB 访问）。
 func TestHourlyTrendGranularityThreshold(t *testing.T) {
-	res168, _ := GetHourlyTrendAll(8, 168)
-	if res168.Granularity != "hour" {
-		t.Errorf("hours=168 should be 'hour', got %s", res168.Granularity)
+	res720, _ := GetHourlyTrendAll(8, 720)
+	if res720.Granularity != "hour" {
+		t.Errorf("hours=720 should be 'hour', got %s", res720.Granularity)
 	}
-	res169, _ := GetHourlyTrendAll(8, 169)
-	if res169.Granularity != "day" {
-		t.Errorf("hours=169 should be 'day', got %s", res169.Granularity)
+	// 30 天跨度 720 个小时桶（从 start 到 now 逐小时）
+	if len(res720.Points) != 720 {
+		t.Errorf("hours=720 should have 720 hourly points, got %d", len(res720.Points))
+	}
+	// 验证小时桶格式（含空格分隔的时间部分）
+	if len(res720.Points) > 0 {
+		first := res720.Points[0].Date
+		if !strings.Contains(first, " ") {
+			t.Errorf("hourly bucket should contain time: %s", first)
+		}
 	}
 }
 

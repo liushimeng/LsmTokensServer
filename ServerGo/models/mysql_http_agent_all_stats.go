@@ -628,10 +628,11 @@ func GetAllStatsKPISummary(subTableNum int, days int) (int64, uint64, int, error
 // 大于 720 强制按天桶（每桶表示一天的总调用次数与 Tokens）。
 const maxHourlyTrendHours = 720
 
-// hourlyTrendHourBucketThreshold 7 天内按小时桶，更大跨度按天桶。
-// 与 TimeStatsMaxDays=7 对齐，保证 /ModelInfo /AgentInfo 趋势模块的「小时级精度」
-// 语义与 /ChatAnalysisTotal 一致。
-const hourlyTrendHourBucketThreshold = 168 // 7 * 24
+// hourlyTrendHourBucketThreshold 在此时长内按小时桶返回，更大跨度按天桶降级。
+// v2.0.70 起从 168（7天）提高到 720（30天，与 maxHourlyTrendHours 对齐），
+// 保证 /ModelInfo /AgentInfo 趋势模块 30 天内全小时级精度。
+// 天桶路径保留为防御性降级（未来上限扩大时仍可用）。
+const hourlyTrendHourBucketThreshold = 720 // 30 * 24
 
 // HourlyTrendPoint 单时间桶内的调用次数与 Tokens 汇总。
 // 桶格式："YYYY-MM-DD HH:00"（小时桶）或 "YYYY-MM-DD"（天桶）。
