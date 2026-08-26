@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { get, post, download } from '../shared/api'
 import Modal from './Modal'
 import DataTable from './DataTable'
+import { useI18n } from '../i18n'
 
 // 顶部工具栏弹窗组（迁移自旧 server_web_common_dialog_*.go / server_web_common_wiki.go）：
 // 用户日志 / Wiki / 证书 / Git 信息 / 系统信息
@@ -91,6 +92,7 @@ function actionChipStyle(type) {
 }
 
 function UserLogDialog({ onClose }) {
+  const { t } = useI18n()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [keyword, setKeyword] = useState('')
@@ -131,29 +133,29 @@ function UserLogDialog({ onClose }) {
   const doReset = () => { setKeyword(''); setInput(''); setActionType(''); setPage(1) }
 
   return (
-    <Modal title="用户日志" onClose={onClose} width={960}>
+    <Modal title={t('toolbar.userLog')} onClose={onClose} width={960}>
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <input style={{ flex: 1, minWidth: 150 }} value={input} placeholder="关键词搜索…"
+        <input style={{ flex: 1, minWidth: 150 }} value={input} placeholder={t('datatable.searchPlaceholder')}
                onChange={(e) => setInput(e.target.value)}
                onKeyDown={(e) => { if (e.key === 'Enter') doSearch() }} />
         <select value={actionType} onChange={(e) => { setActionType(e.target.value); setKeyword(''); setInput(''); setPage(1) }}>
           {ACTION_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
-        <button className="btn btn-sm btn-primary" onClick={doSearch}>查询</button>
-        {(keyword || actionType) ? <button className="btn btn-sm" onClick={doReset}>重置</button> : null}
+        <button className="btn btn-sm btn-primary" onClick={doSearch}>{t('common.search')}</button>
+        {(keyword || actionType) ? <button className="btn btn-sm" onClick={doReset}>{t('common.reset')}</button> : null}
       </div>
       {err ? <div className="alert alert-error">{err}</div> : null}
-      <DataTable columns={columns} rows={(data && data.records) || []} loading={loading} empty="暂无日志" rowKey="id" />
+      <DataTable columns={columns} rows={(data && data.records) || []} loading={loading} empty={t('toolbar.noData')} rowKey="id" />
       <div className="pager">
-        <span>共 {totalCount} 条 · 第 {page} / {totalPages || 1} 页</span>
+        <span>{t('toolbar.total', { count: totalCount })}</span>
         <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }} style={{ fontSize: 12 }}>
-          <option value={10}>10 条/页</option>
-          <option value={20}>20 条/页</option>
-          <option value={50}>50 条/页</option>
-          <option value={100}>100 条/页</option>
+          <option value={10}>10</option>
+          <option value={20}>20</option>
+          <option value={50}>50</option>
+          <option value={100}>100</option>
         </select>
-        <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
-        <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
+        <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>{t('datatable.previous')}</button>
+        <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>{t('datatable.next')}</button>
       </div>
     </Modal>
   )
@@ -259,6 +261,7 @@ function WikiTreeNode({ node, depth, expanded, selectedPath, matchedPaths, onTog
 }
 
 function WikiDialog({ onClose }) {
+  const { t } = useI18n()
   const [tree, setTree] = useState(null)
   const [treeErr, setTreeErr] = useState('')
   const [expanded, setExpanded] = useState(new Set()) // 已展开目录 path 集合
@@ -368,7 +371,7 @@ function WikiDialog({ onClose }) {
   })() : 0
 
   return (
-    <Modal title="Wiki 知识库" onClose={onClose} width={1000}>
+    <Modal title={t('toolbar.wiki')} onClose={onClose} width={1000}>
       <div className="wiki-toolbar">
         <input
           className="wiki-search"
@@ -376,9 +379,9 @@ function WikiDialog({ onClose }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <button className="btn btn-sm" onClick={expandAll}>展开全部</button>
-        <button className="btn btn-sm" onClick={collapseAll}>折叠全部</button>
-        <span className="wiki-stats">共 {totalFiles} 个 .md 文件</span>
+        <button className="btn btn-sm" onClick={expandAll}>{t('common.expand')}</button>
+        <button className="btn btn-sm" onClick={collapseAll}>{t('common.collapse')}</button>
+        <span className="wiki-stats">{t('common.total', { count: totalFiles })} .md</span>
       </div>
       {treeErr ? <div className="alert alert-error">{treeErr}</div> : null}
       <div className="wiki-layout">
@@ -668,6 +671,7 @@ function CertCodeBlock({ children, dataCopy }) {
 }
 
 function CertDialog({ onClose }) {
+  const { t } = useI18n()
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
   const [copied, setCopied] = useState('')
@@ -700,7 +704,7 @@ function CertDialog({ onClose }) {
   const httpEnabled = !!info && info.http_port > 0 && !!info.public_host && (httpUrls.some((u) => u.url))
 
   return (
-    <Modal title="证书安装指南" onClose={onClose} width={760}>
+    <Modal title={t('toolbar.cert')} onClose={onClose} width={760}>
       {err ? <div className="alert alert-error">{err}</div> : null}
       {info && (
         <>
@@ -835,6 +839,7 @@ function StepBody({ step, info }) {
 // ===== Git 信息弹窗（阶段AA：客户端分页 + 展开时惰性拉取文件变更，弹窗打开零 git show 子进程）=====
 const GIT_PAGE_SIZE = 20
 function GitDialog({ onClose }) {
+  const { t } = useI18n()
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
   const [page, setPage] = useState(1)
@@ -866,7 +871,7 @@ function GitDialog({ onClose }) {
   const pageCommits = commits.slice((cur - 1) * GIT_PAGE_SIZE, cur * GIT_PAGE_SIZE)
 
   return (
-    <Modal title="Git 信息" onClose={onClose} width={760}
+    <Modal title={t('toolbar.git')} onClose={onClose} width={760}
            footer={<>
              <button className="btn btn-sm" disabled={cur <= 1} onClick={() => setPage(cur - 1)}>上一页</button>
              <span style={{ fontSize: 12 }}>第 {cur} / {totalPages} 页</span>
@@ -897,8 +902,8 @@ function GitDialog({ onClose }) {
                             ? changes[c.hash].map((f, i) => (
                                 <div key={i}><span className={`chg chg-${f.status}`}>{f.status}</span><code>{f.path}</code></div>
                               ))
-                            : '无文件变更信息')
-                        : '加载变更中…'}
+                            : t('common.noData'))
+                        : t('common.loading')}
                     </div>
                   </td></tr>
                 )}
@@ -915,6 +920,7 @@ function GitDialog({ onClose }) {
 // ===== 系统信息弹窗（5 秒自动刷新，迁移自旧 setInterval 逻辑）=====
 const SYS_REFRESH_MS = 5000
 function SysDialog({ onClose }) {
+  const { t } = useI18n()
   const [info, setInfo] = useState(null)
   const [err, setErr] = useState('')
   const [auto, setAuto] = useState(true)
@@ -934,7 +940,7 @@ function SysDialog({ onClose }) {
 
   const Row = ({ k, v }) => <><dt>{k}</dt><dd>{v}</dd></>
   return (
-    <Modal title="系统信息" onClose={onClose} width={720}
+    <Modal title={t('toolbar.sysInfo')} onClose={onClose} width={720}
            footer={<label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
              <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
              自动刷新（每 5 秒）
@@ -943,16 +949,16 @@ function SysDialog({ onClose }) {
       {info && (
         <>
           <dl className="kv">
-            <Row k="主机名" v={info.hostname} />
-            <Row k="操作系统" v={`${info.os} / ${info.arch}`} />
-            <Row k="Go 版本" v={info.go_version} />
-            <Row k="CPU" v={`${info.num_cpu} 核 / 协程 ${info.num_goroutine}`} />
-            <Row k="运行时长" v={info.uptime} />
+            <Row k="Hostname" v={info.hostname} />
+            <Row k="OS" v={`${info.os} / ${info.arch}`} />
+            <Row k="Go" v={info.go_version} />
+            <Row k="CPU" v={`${info.num_cpu} cores / ${info.num_goroutine} goroutines`} />
+            <Row k="Uptime" v={info.uptime} />
             {(info.cpus || []).slice(0, 2).map((c, i) => (
               <Row key={i} k={`CPU${i}`} v={`${c.model_name}（${c.usage_pct}%）`} />
             ))}
-            {info.memory && <Row k="内存" v={`${info.memory.used_human || '-'} / ${info.memory.total_human || '-'}（${info.memory.usage_pct}%）`} />}
-            {info.load && <Row k="负载" v={`${info.load.load1} / ${info.load.load5} / ${info.load.load15}`} />}
+            {info.memory && <Row k="Memory" v={`${info.memory.used_human || '-'} / ${info.memory.total_human || '-'} (${info.memory.usage_pct}%)`} />}
+            {info.load && <Row k="Load" v={`${info.load.load1} / ${info.load.load5} / ${info.load.load15}`} />}
           </dl>
           {(info.disk || []).filter((d) => d.mounted_on === '/' || d.usage_pct > 0).slice(0, 6).map((d, i) => (
             <p key={i} style={{ fontSize: 12, color: 'var(--muted)' }}>
@@ -996,6 +1002,7 @@ function SysDialog({ onClose }) {
 
 // ===== 构建日志弹窗（阶段AK：结构化构建记录 + 服务端分页） =====
 function BuildLogDialog({ onClose }) {
+  const { t } = useI18n()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [data, setData] = useState(null)
@@ -1026,9 +1033,9 @@ function BuildLogDialog({ onClose }) {
   }
   const modeLabel = (mode) => {
     switch (mode) {
-      case 'restart':    return '完整重启'
-      case 'build-only': return '仅编译'
-      case 'skip-web':   return '跳过前端'
+      case 'restart':    return t('common.restart')
+      case 'build-only': return t('common.buildOnly')
+      case 'skip-web':   return t('common.skipWeb')
       default:           return mode || '-'
     }
   }
@@ -1049,10 +1056,10 @@ function BuildLogDialog({ onClose }) {
   }
 
   return (
-    <Modal title="构建日志" onClose={onClose} width={800}>
+    <Modal title={t('toolbar.buildLog')} onClose={onClose} width={800}>
       {err ? <div className="alert alert-error">{err}</div> : null}
       {loading && !data ? <div className="table-loading">加载中…</div> : null}
-      {!loading && !err && records.length === 0 ? <div className="table-empty">暂无构建日志</div> : null}
+      {!loading && !err && records.length === 0 ? <div className="table-empty">{t('toolbar.noData')}</div> : null}
       {records.length > 0 && (
         <div className="buildlog-list">
           {records.map((entry, i) => {
@@ -1095,18 +1102,19 @@ function BuildLogDialog({ onClose }) {
 
 // 工具按钮注册表
 const DIALOGS = {
-  userlog: { label: '用户日志', Comp: UserLogDialog },
-  wiki: { label: 'Wiki', Comp: WikiDialog },
-  cert: { label: '证书', Comp: CertDialog },
-  git: { label: 'Git', Comp: GitDialog },
-  sysinfo: { label: '系统信息', Comp: SysDialog },
-  buildlog: { label: '构建日志', Comp: BuildLogDialog },
+  userlog: { labelKey: 'toolbar.userLog', Comp: UserLogDialog },
+  wiki: { labelKey: 'toolbar.wiki', Comp: WikiDialog },
+  cert: { labelKey: 'toolbar.cert', Comp: CertDialog },
+  git: { labelKey: 'toolbar.git', Comp: GitDialog },
+  sysinfo: { labelKey: 'toolbar.sysInfo', Comp: SysDialog },
+  buildlog: { labelKey: 'toolbar.buildLog', Comp: BuildLogDialog },
 }
 
 // 顶部工具栏：桌面端一排小按钮；≤860px 收进「⋯」下拉面板（见 00 文档 §3.1）
 export default function ToolbarDialogs() {
   const [open, setOpen] = useState(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const { t } = useI18n()
   const Current = open && DIALOGS[open] ? DIALOGS[open].Comp : null
 
   // 打开弹窗或下拉变化时收起下拉
@@ -1114,13 +1122,13 @@ export default function ToolbarDialogs() {
 
   return (
     <div className="header-tools">
-      <button className="tools-more" title="更多工具" aria-label="更多工具"
+      <button className="tools-more" title={t('common.more')} aria-label={t('common.more')}
               onClick={() => setMenuOpen((v) => !v)}>⋯</button>
       {menuOpen && <div className="tools-close-mask" onClick={() => setMenuOpen(false)} />}
       <div className={'tools-list' + (menuOpen ? ' open' : '')}>
         {Object.entries(DIALOGS).map(([key, d]) => (
           <button key={key} className="btn btn-link btn-sm tool-btn"
-                  onClick={() => setOpen(key)}>{d.label}</button>
+                  onClick={() => setOpen(key)}>{t(d.labelKey)}</button>
         ))}
       </div>
       {Current ? <Current onClose={() => setOpen(null)} /> : null}

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { get, post } from '../shared/api'
 import { saveCredentials, loadCredentials, clearCredentials } from '../shared/auth'
+import { useI18n } from '../i18n'
 
 // 登录页：模型登录（model_name + api_key）+ 验证码，与旧 /UserLogin 表单等价
 export default function Login() {
+  const { t } = useI18n()
   const [captchaId, setCaptchaId] = useState('')
   const [captchaUrl, setCaptchaUrl] = useState('')
   const [modelName, setModelName] = useState('')
@@ -39,7 +41,7 @@ export default function Login() {
   const submit = async (e) => {
     e.preventDefault()
     setError('')
-    if (!modelName || !apiKey || !captchaCode) { setError('请填写完整登录信息'); return }
+    if (!modelName || !apiKey || !captchaCode) { setError(t('login.emptyModelName')); return }
     setBusy(true)
     try {
       const d = await post('UserLoginInterface', {
@@ -51,11 +53,11 @@ export default function Login() {
         window.location.hash = '#/Home'
         window.location.reload()
       } else {
-        setError(d.message || '登录失败')
+        setError(d.message || t('login.loginFailed'))
         refreshCaptcha(); setCaptchaCode('')
       }
     } catch (err) {
-      setError(err.message || '登录失败')
+      setError(err.message || t('login.loginFailed'))
       refreshCaptcha(); setCaptchaCode('')
     } finally { setBusy(false) }
   }
@@ -63,42 +65,42 @@ export default function Login() {
   return (
     <div className="login-page">
       <form className="login-card" onSubmit={submit}>
-        <h1 className="login-title">LsmTokensServer</h1>
-        <p className="login-sub">AI Tokens 代理与管理服务</p>
+        <h1 className="login-title">{t('common.appName')}</h1>
+        <p className="login-sub">AI Tokens {t('login.title')}</p>
         {error ? <div className="login-error">{error}</div> : null}
         <label className="field">
-          <span>模型名称</span>
+          <span>{t('login.modelName')}</span>
           <input value={modelName} onChange={(e) => setModelName(e.target.value)}
-                 autoComplete="username" placeholder="请输入模型名称" />
+                 autoComplete="username" placeholder={t('login.emptyModelName')} />
         </label>
         <label className="field">
-          <span>API Key</span>
+          <span>{t('login.apiKey')}</span>
           <span className="field-inline">
             <input type={showKey ? 'text' : 'password'} value={apiKey}
                    onChange={(e) => setApiKey(e.target.value)}
-                   autoComplete="current-password" placeholder="请输入 API Key" />
+                   autoComplete="current-password" placeholder={t('login.emptyApiKey')} />
             <button type="button" className="btn btn-link" onClick={() => setShowKey(!showKey)}>
-              {showKey ? '隐藏' : '显示'}
+              {showKey ? t('common.hide') : t('common.show')}
             </button>
           </span>
         </label>
         <label className="field">
-          <span>验证码</span>
+          <span>{t('login.captcha')}</span>
           <span className="field-inline">
             <input value={captchaCode} onChange={(e) => setCaptchaCode(e.target.value)}
-                   maxLength={4} placeholder="请输入验证码" />
+                   maxLength={4} placeholder={t('login.captchaPlaceholder')} />
             {captchaUrl
               ? <img className="captcha-img" src={captchaUrl} onClick={refreshCaptcha}
-                     title="点击刷新" alt="验证码" />
-              : <button type="button" className="btn btn-link" onClick={refreshCaptcha}>刷新</button>}
+                     title={t('login.captchaRefresh')} alt={t('login.captcha')} />
+              : <button type="button" className="btn btn-link" onClick={refreshCaptcha}>{t('common.refresh')}</button>}
           </span>
         </label>
         <label className="field-check">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-          <span>记住模型名称（API Key 不在本地保存）</span>
+          <span>{t('login.rememberMe')}</span>
         </label>
         <button className="btn btn-primary login-submit" type="submit" disabled={busy}>
-          {busy ? '登录中…' : '登录'}
+          {busy ? t('common.processing') : t('login.submit')}
         </button>
       </form>
     </div>

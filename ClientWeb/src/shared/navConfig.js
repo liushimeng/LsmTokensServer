@@ -1,58 +1,58 @@
 // 菜单配置与记忆（docs/菜单栏设计以及优化方案/01、02）
 // 一级 = 功能分组（可折叠），二级 = 页面项；key 与 App.jsx PAGES 注册表一致。
+// label 字段为 i18n 翻译键，由 SideNav 组件通过 t() 翻译。
 
 export const NAV_TREES = {
   // 阶段T：admin 树经构建期常量裁剪，用户端产物不携带管理菜单字样
   admin: __APP_ROLE__ === 'manager' ? [
-    { id: 'overview', label: '总览', icon: '🏠', items: [
-      { key: 'Home', label: '首页' },
+    { id: 'overview', label: 'nav.overview', icon: '🏠', items: [
+      { key: 'Home', label: 'nav.home' },
     ]},
-    { id: 'user-route', label: '用户与路由', icon: '👥', items: [
-      { key: 'UserManage', label: '用户管理' },
-      { key: 'DstEndPointManage', label: '源站管理' },
-      { key: 'AIRouteManage', label: '路由管理' },
+    { id: 'user-route', label: 'nav.userRoute', icon: '👥', items: [
+      { key: 'UserManage', label: 'nav.userManage' },
+      { key: 'DstEndPointManage', label: 'nav.dstEndPointManage' },
+      { key: 'AIRouteManage', label: 'nav.aiRouteManage' },
     ]},
-    { id: 'model-proxy', label: '模型与代理', icon: '🧠', items: [
-      { key: 'ModelInfo', label: '模型信息' },
-      { key: 'AgentInfo', label: 'Agent信息' },
-      { key: 'ProtocolConvertAnalyzer', label: '协议分析器' },
+    { id: 'model-proxy', label: 'nav.modelProxy', icon: '🧠', items: [
+      { key: 'ModelInfo', label: 'nav.modelInfo' },
+      { key: 'AgentInfo', label: 'nav.agentInfo' },
+      { key: 'ProtocolConvertAnalyzer', label: 'nav.protocolConvertAnalyzer' },
     ]},
-    // 管理端补齐对话分析组：从用户管理/路由管理跳入分析页后仍有菜单归属与高亮
-    { id: 'analysis', label: '对话分析', icon: '💬', items: [
-      { key: 'ChatAnalysis', label: '对话明细分析' },
-      { key: 'ChatAnalysisTotal', label: '汇总统计' },
-      { key: 'ChatAnalysisSession', label: '会话分析' },
-      { key: 'ChatAnalysisTask', label: '任务分析' },
-      { key: 'ChatDialog', label: '对话' },
+    { id: 'analysis', label: 'nav.analysis', icon: '💬', items: [
+      { key: 'ChatAnalysis', label: 'nav.chatAnalysis' },
+      { key: 'ChatAnalysisTotal', label: 'nav.chatAnalysisTotal' },
+      { key: 'ChatAnalysisSession', label: 'nav.chatAnalysisSession' },
+      { key: 'ChatAnalysisTask', label: 'nav.chatAnalysisTask' },
+      { key: 'ChatDialog', label: 'nav.chatDialog' },
     ]},
-    { id: 'spider', label: '爬虫与数据', icon: '🕷', items: [
-      { key: 'SpiderDataSource', label: '爬虫数据源' },
-      { key: 'SpiderDailyInfo', label: '每日 MCP 信息' },
-      { key: 'CleanupReport', label: '清理报告' },
+    { id: 'spider', label: 'nav.spider', icon: '🕷', items: [
+      { key: 'SpiderDataSource', label: 'nav.spiderDataSource' },
+      { key: 'SpiderDailyInfo', label: 'nav.spiderDailyInfo' },
+      { key: 'CleanupReport', label: 'nav.cleanupReport' },
     ]},
   ] : [],
   user: [
-    { id: 'overview', label: '总览', icon: '🏠', items: [
-      { key: 'Home', label: '首页' },
+    { id: 'overview', label: 'nav.overview', icon: '🏠', items: [
+      { key: 'Home', label: 'nav.home' },
     ]},
-    { id: 'analysis', label: '对话分析', icon: '💬', items: [
-      { key: 'ChatAnalysis', label: '对话明细分析' },
-      { key: 'ChatAnalysisTotal', label: '汇总统计' },
-      { key: 'ChatAnalysisSession', label: '会话分析' },
-      { key: 'ChatAnalysisTask', label: '任务分析' },
-      { key: 'ChatDialog', label: '对话' },
+    { id: 'analysis', label: 'nav.analysis', icon: '💬', items: [
+      { key: 'ChatAnalysis', label: 'nav.chatAnalysis' },
+      { key: 'ChatAnalysisTotal', label: 'nav.chatAnalysisTotal' },
+      { key: 'ChatAnalysisSession', label: 'nav.chatAnalysisSession' },
+      { key: 'ChatAnalysisTask', label: 'nav.chatAnalysisTask' },
+      { key: 'ChatDialog', label: 'nav.chatDialog' },
     ]},
-    { id: 'route-model', label: '路由与模型', icon: '🧭', items: [
-      { key: 'AIRouteManage', label: '路由管理' },
-      { key: 'ModelInfo', label: '模型信息' },
-      { key: 'AgentInfo', label: 'Agent信息' },
-      { key: 'ProtocolConvertAnalyzer', label: '协议分析器' },
-      { key: 'DstEndPointManage', label: '源站管理' },
+    { id: 'route-model', label: 'nav.routeModel', icon: '🧭', items: [
+      { key: 'AIRouteManage', label: 'nav.aiRouteManage' },
+      { key: 'ModelInfo', label: 'nav.modelInfo' },
+      { key: 'AgentInfo', label: 'nav.agentInfo' },
+      { key: 'ProtocolConvertAnalyzer', label: 'nav.protocolConvertAnalyzer' },
+      { key: 'DstEndPointManage', label: 'nav.dstEndPointManage' },
     ]},
-    { id: 'spider', label: '爬虫与数据', icon: '🕷', items: [
-      { key: 'SpiderDataSource', label: '爬虫数据源' },
-      { key: 'SpiderDailyInfo', label: '每日 MCP 信息' },
-      { key: 'CleanupReport', label: '清理报告' },
+    { id: 'spider', label: 'nav.spider', icon: '🕷', items: [
+      { key: 'SpiderDataSource', label: 'nav.spiderDataSource' },
+      { key: 'SpiderDailyInfo', label: 'nav.spiderDailyInfo' },
+      { key: 'CleanupReport', label: 'nav.cleanupReport' },
     ]},
   ],
 }

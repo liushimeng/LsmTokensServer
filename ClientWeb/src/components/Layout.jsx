@@ -4,6 +4,7 @@ import { baseUrl } from '../shared/api'
 import { loadSidebarCollapsed, saveSidebarCollapsed } from '../shared/navConfig'
 import ToolbarDialogs from './ToolbarDialogs'
 import SideNav from './SideNav'
+import { useI18n, LanguageSwitcher } from '../i18n'
 
 const MOBILE_MQ = '(max-width: 860px)'
 
@@ -21,6 +22,7 @@ function useIsMobile() {
 export default function Layout({ route, userInfo, children }) {
   const isAdmin = !!(userInfo && userInfo.isAdmin)
   const role = isAdmin ? 'admin' : 'user'
+  const { t } = useI18n()
   const isMobile = useIsMobile()
   // 移动端：抽屉开关；桌面端：整侧栏折叠（localStorage 记忆）
   const [menuOpen, setMenuOpen] = useState(false)
@@ -45,16 +47,17 @@ export default function Layout({ route, userInfo, children }) {
           <button className="menu-toggle" onClick={onToggle}>☰</button>
           <img className="app-logo" src={baseUrl() + "logo-48.png"} alt="logo" />
           <span className="app-title">LsmTokensServer</span>
-          <span className="app-role">{isAdmin ? '管理端' : '用户端'}</span>
+          <span className="app-role">{isAdmin ? t('common.role.admin') : t('common.role.user')}</span>
         </div>
         <div className="header-right">
+          <LanguageSwitcher />
           <ToolbarDialogs />
           {userInfo && userInfo.user_name ? (
             <span className="user-chip">
               {userInfo.user_name}{userInfo.model_name ? ` / ${userInfo.model_name}` : ''}
             </span>
           ) : null}
-          <button className="btn btn-link" onClick={isAdmin ? managerLogout : logout}>退出</button>
+          <button className="btn btn-link" onClick={isAdmin ? managerLogout : logout}>{t('common.logout')}</button>
         </div>
       </header>
       <div className="layout-body">

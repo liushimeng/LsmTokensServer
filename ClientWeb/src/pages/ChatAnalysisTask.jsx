@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useI18n } from '../i18n'
 import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } from '../shared/userModelOptions'
@@ -12,6 +13,7 @@ const DAYS_OPTIONS = [0, 1, 3, 5, 7, 14, 30, 60, 90]
 const PAGE_SIZE = 20
 
 export default function ChatAnalysisTask({ route }) {
+  const { t } = useI18n()
   const init = pickRouteQuery(route && route.query)
   const isAdmin = isAdminRole() // 用户端：服务端强制 claims.UserName
   const [userName, setUserName] = useState(isAdmin ? init.userName : '')
@@ -33,8 +35,8 @@ export default function ChatAnalysisTask({ route }) {
 
   const doQuery = async (modelOverride) => {
     const mn = (modelOverride !== undefined ? modelOverride : modelName).trim()
-    if (isAdmin && userName.trim() === '') { setError('请先选择用户'); return }
-    if (!mn) { setError('请先选择模型'); return }
+    if (isAdmin && userName.trim() === '') { setError(t('chatAnalysisTask.selectUserFirst')); return }
+    if (!mn) { setError(t('chatAnalysisTask.selectModelFirst')); return }
     setLoading(true); setError(''); setPage(1)
     try {
       const d = await post('ChatAnalysisTaskInterface', {
@@ -42,7 +44,7 @@ export default function ChatAnalysisTask({ route }) {
       })
       setData(d.data || {})
     } catch (e) {
-      setError(e.message || '查询失败')
+      setError(e.message || t('chatAnalysisTask.queryFailed'))
     } finally { setLoading(false) }
   }
 
@@ -64,102 +66,102 @@ export default function ChatAnalysisTask({ route }) {
   const pageRows = tasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const columns = [
-    { key: 'id', title: 'ID', width: 90 },
-    { key: 'created_at', title: '时间', render: (v) => fmtTime(v) },
-    { key: 'model', title: '任务模型', render: (v) => v || '-' },
-    { key: 'request_method', title: '方法', width: 70 },
-    { key: 'request_url', title: 'URL', render: (v) => <span title={v}>{String(v || '').length > 50 ? String(v).slice(0, 50) + '…' : v}</span> },
-    { key: 'response_status', title: '状态', render: (v) => {
+    { key: 'id', title: t('chatAnalysisTask.id'), width: 90 },
+    { key: 'created_at', title: t('chatAnalysisTask.time'), render: (v) => fmtTime(v) },
+    { key: 'model', title: t('chatAnalysisTask.taskModel'), render: (v) => v || '-' },
+    { key: 'request_method', title: t('chatAnalysisTask.method'), width: 70 },
+    { key: 'request_url', title: t('chatAnalysisTask.url'), render: (v) => <span title={v}>{String(v || '').length > 50 ? String(v).slice(0, 50) + '…' : v}</span> },
+    { key: 'response_status', title: t('common.status'), render: (v) => {
       const ok = String(v).startsWith('2')
       return <span style={{ color: ok ? 'var(--ok)' : 'var(--danger)' }}>{v || '-'}</span>
     } },
-    { key: 'message_count', title: '消息数', render: fmtNum },
-    { key: 'user_message_count', title: '用户消息', render: fmtNum },
-    { key: 'req_size', title: '请求大小', render: fmtBytes },
-    { key: 'resp_size', title: '响应大小', render: fmtBytes },
-    { key: 'elapsed_ms', title: '耗时', render: fmtMs },
-    { key: 'stream', title: '流式', render: (v) => (v ? '是' : '否') },
-    { key: 'has_tool_call', title: '工具调用', render: (v) => (v ? '有' : '无') },
-    { key: 'session_id', title: '所属会话', render: (v) => v || '-' },
-    { key: 'actions', title: '操作', render: (_, r) => (
-      <button className="btn btn-sm" onClick={() => setDetail(r)}>详情</button>
+    { key: 'message_count', title: t('chatAnalysisTask.messageCount'), render: fmtNum },
+    { key: 'user_message_count', title: t('chatAnalysisTask.userMessages'), render: fmtNum },
+    { key: 'req_size', title: t('chatAnalysisTask.reqSize'), render: fmtBytes },
+    { key: 'resp_size', title: t('chatAnalysisTask.respSize'), render: fmtBytes },
+    { key: 'elapsed_ms', title: t('chatAnalysisTask.duration'), render: fmtMs },
+    { key: 'stream', title: t('chatAnalysis.streaming'), render: (v) => (v ? t('common.yes') : t('common.no')) },
+    { key: 'has_tool_call', title: t('chatAnalysis.toolCall'), render: (v) => (v ? t('common.yes') : t('common.no')) },
+    { key: 'session_id', title: t('chatAnalysisTask.belongedSession'), render: (v) => v || '-' },
+    { key: 'actions', title: t('common.action'), render: (_, r) => (
+      <button className="btn btn-sm" onClick={() => setDetail(r)}>{t('chatAnalysis.detail')}</button>
     ) },
   ]
 
   return (
     <div className="page">
-      <h2 className="page-title">任务分析</h2>
+      <h2 className="page-title">{t('chatAnalysisTask.title')}</h2>
 
       <div className="toolbar">
-        {isAdmin ? <label>用户名
+        {isAdmin ? <label>{t('userManage.username')}
           <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName('') }} style={{ width: 150 }}>
-            <option value="">请选择用户</option>
+            <option value="">{t('userManage.selectUser')}</option>
             {userOptions.map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
           </select>
         </label> : null}
-        <label>模型名
+        <label>{t('userManage.modelName')}
           <select value={modelName} onChange={(e) => setModelName(e.target.value)} style={{ width: 170 }}>
-            <option value="">请选择模型</option>
+            <option value="">{t('chatDialog.selectModel')}</option>
             {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </label>
-        <label>时间跨度
+        <label>{t('chatAnalysisTask.timeRange')}
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? '全部时间' : `最近${d}天`}</option>)}
+            {DAYS_OPTIONS.map((d) => <option key={d} value={d}>{d === 0 ? t('chatAnalysisTask.allTime') : t('chatAnalysisTask.lastNDays', { days: d })}</option>)}
           </select>
         </label>
-        <button className="btn btn-primary" onClick={doQuery} disabled={loading}>查询</button>
+        <button className="btn btn-primary" onClick={doQuery} disabled={loading}>{t('common.search')}</button>
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
 
       {data ? (
         <div className="card-grid kpi-grid">
-          <div className="card"><h3>总任务数</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.total_tasks)}</div></div>
-          <div className="card"><h3>流式 / 非流式</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.stream_count)} / {fmtNum(data.non_stream_count)}</div></div>
-          <div className="card"><h3>含系统提示词</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.has_system_prompt)}</div></div>
-          <div className="card"><h3>含工具调用</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.has_tool_call)}</div></div>
-          <div className="card"><h3>平均耗时</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtMs(data.avg_elapsed_ms)}</div></div>
-          <div className="card"><h3>平均消息数</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{Number(data.avg_messages || 0).toFixed(2)}</div></div>
+          <div className="card"><h3>{t('chatAnalysisTask.totalTasks')}</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.total_tasks)}</div></div>
+          <div className="card"><h3>{t('chatAnalysisTask.streamAndNonStream')}</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.stream_count)} / {fmtNum(data.non_stream_count)}</div></div>
+          <div className="card"><h3>{t('chatAnalysisTask.hasSystemPrompt')}</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.has_system_prompt)}</div></div>
+          <div className="card"><h3>{t('chatAnalysisTask.hasToolCall')}</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtNum(data.has_tool_call)}</div></div>
+          <div className="card"><h3>{t('chatAnalysisTask.avgDuration')}</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{fmtMs(data.avg_elapsed_ms)}</div></div>
+          <div className="card"><h3>{t('chatAnalysisTask.avgMessageCount')}</h3><div style={{ fontSize: 24, fontWeight: 700 }}>{Number(data.avg_messages || 0).toFixed(2)}</div></div>
         </div>
       ) : null}
 
       {data ? (
         <div className="card">
-          <h3>任务模型分布</h3>
+          <h3>{t('chatAnalysisTask.taskModelDistribution')}</h3>
           <DataTable
             columns={[
-              { key: 'k', title: '模型' },
-              { key: 'v', title: '任务数', render: fmtNum },
+              { key: 'k', title: t('chatAnalysis.model') },
+              { key: 'v', title: t('chatAnalysisTask.tasks'), render: fmtNum },
             ]}
             rows={Object.entries(data.model_stats || {}).map(([k, v]) => ({ k, v }))}
-            empty="暂无数据" />
+            empty={t('datatable.noData')} />
         </div>
       ) : null}
 
       <DataTable columns={columns} rows={pageRows} loading={loading} rowKey="id"
-                 empty="暂无数据（需选择用户名 + 模型名后查询）" />
+                 empty={t('chatAnalysisTask.noData')} />
 
       {tasks.length > 0 ? (
         <div className="pager">
-          <span>共 {fmtNum(tasks.length)} 条 · 第 {page} / {totalPages} 页</span>
-          <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
-          <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一页</button>
+          <span>{t('toolbar.pagination', { count: fmtNum(tasks.length), page, totalPages })}</span>
+          <button className="btn btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>{t('datatable.previous')}</button>
+          <button className="btn btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>{t('datatable.next')}</button>
         </div>
       ) : null}
 
       {detail ? (
-        <Modal title={`任务详情 #${detail.id}`} onClose={() => setDetail(null)}>
+        <Modal title={`${t('chatAnalysisTask.taskDetail')} #${detail.id}`} onClose={() => setDetail(null)}>
           <dl className="kv">
-            <dt>时间</dt><dd>{fmtTime(detail.created_at)}</dd>
-            <dt>任务模型</dt><dd>{detail.model || '-'}</dd>
-            <dt>请求</dt><dd>{detail.request_method} {detail.request_url}</dd>
-            <dt>状态</dt><dd>{detail.response_status || '-'}（耗时 {fmtMs(detail.elapsed_ms)}）</dd>
-            <dt>消息数</dt><dd>总 {fmtNum(detail.message_count)} / 用户 {fmtNum(detail.user_message_count)}</dd>
-            <dt>大小</dt><dd>请求 {fmtBytes(detail.req_size)} / 响应 {fmtBytes(detail.resp_size)}</dd>
-            <dt>特征</dt><dd>{detail.has_system_prompt ? '含系统提示词 ' : ''}{detail.has_tool_call ? '含工具调用 ' : ''}{detail.stream ? '流式' : '非流式'}</dd>
-            <dt>来源地址</dt><dd>{detail.remote_addr || '-'}</dd>
-            <dt>所属会话</dt><dd>{detail.session_id || '-'}（#{detail.session_first_record_id} ~ #{detail.session_last_record_id}，共 {fmtNum(detail.session_record_count)} 条）</dd>
+            <dt>{t('chatAnalysisTask.time')}</dt><dd>{fmtTime(detail.created_at)}</dd>
+            <dt>{t('chatAnalysisTask.taskModel')}</dt><dd>{detail.model || '-'}</dd>
+            <dt>{t('chatAnalysisTask.request')}</dt><dd>{detail.request_method} {detail.request_url}</dd>
+            <dt>{t('common.status')}</dt><dd>{detail.response_status || '-'}（{t('chatAnalysisTask.duration')} {fmtMs(detail.elapsed_ms)}）</dd>
+            <dt>{t('chatAnalysisTask.messageCount')}</dt><dd>{t('common.total')} {fmtNum(detail.message_count)} / {t('chatAnalysisTask.user')} {fmtNum(detail.user_message_count)}</dd>
+            <dt>{t('chatAnalysisTask.size')}</dt><dd>{t('chatAnalysisTask.request')} {fmtBytes(detail.req_size)} / {t('chatAnalysis.response')} {fmtBytes(detail.resp_size)}</dd>
+            <dt>{t('chatAnalysisTask.features')}</dt><dd>{detail.has_system_prompt ? t('chatAnalysisTask.hasSystemPrompt') + ' ' : ''}{detail.has_tool_call ? t('chatAnalysisTask.hasToolCall') + ' ' : ''}{detail.stream ? t('chatAnalysisTask.streaming') : t('chatAnalysisTask.nonStreaming')}</dd>
+            <dt>{t('chatAnalysisTask.sourceAddr')}</dt><dd>{detail.remote_addr || '-'}</dd>
+            <dt>{t('chatAnalysisTask.belongedSession')}</dt><dd>{detail.session_id || '-'}（#{detail.session_first_record_id} ~ #{detail.session_last_record_id}，{t('common.total')} {fmtNum(detail.session_record_count)} {t('chatAnalysisTask.records')}）</dd>
           </dl>
         </Modal>
       ) : null}

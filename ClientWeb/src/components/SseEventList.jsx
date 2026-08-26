@@ -3,20 +3,15 @@
 // SSE 事件列表组件：把 parseSSEEvents 的结果按 event 拆卡片，每张卡片可折叠。
 // v2.0.7x 阶段AM：对话详情 Modal 的「SSE 解析」视图专用。
 // v2.0.7x 阶段AP：增加事件类型颜色区分与统计摘要栏。
-//
-// 设计要点：
-//   - 默认展开前 5 张卡片，超出折叠避免一次渲染过多 DOM；
-//   - 每张卡片：序号 / event 名 / 可折叠 data（parsed 优先 JSON 展示，回退 raw）；
-//   - 不同 event 类型使用不同左边框颜色便于快速识别；
-//   - 顶部显示事件统计摘要。
 
 import { useState } from 'react'
+import { useI18n } from '../i18n'
 
 // 事件类型 → 颜色分类（阶段AP）
 function sseColorClass(eventName) {
   const name = (eventName || '').toLowerCase()
-  if (name.startsWith('message')) return 'sse-color-message'   // message_start/message_stop/message_delta
-  if (name.startsWith('content_block')) return 'sse-color-content'  // content_block_start/stop/delta
+  if (name.startsWith('message')) return 'sse-color-message'
+  if (name.startsWith('content_block')) return 'sse-color-content'
   if (name.includes('delta')) return 'sse-color-delta'
   if (name.includes('error')) return 'sse-color-error'
   return 'sse-color-default'
@@ -33,11 +28,11 @@ function sseDotColor(eventName) {
 }
 
 export default function SseEventList({ events }) {
+  const { t } = useI18n()
   if (!events || !events.length) {
-    return <div className="sse-empty">（未解析出 SSE 事件）</div>
+    return <div className="sse-empty">({t('common.noData')})</div>
   }
 
-  // 统计各事件类型数量（阶段AP）
   const typeCounts = {}
   events.forEach(e => {
     const name = e.event || '(default)'
@@ -46,9 +41,8 @@ export default function SseEventList({ events }) {
 
   return (
     <>
-      {/* 事件统计摘要 */}
       <div className="sse-event-summary">
-        <span className="ses-total">共 {events.length} 个事件</span>
+        <span className="ses-total">{t('common.total', { count: events.length })}</span>
         <span className="ses-divider" />
         {Object.entries(typeCounts).map(([name, count]) => (
           <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -61,14 +55,14 @@ export default function SseEventList({ events }) {
 
       <div className="sse-event-list">
         {events.map((e, i) => (
-          <SseEventCard key={`sse-${i}`} index={i + 1} event={e} />
+          <SseEventCard key={`sse-${i}`} index={i + 1} event={e} t={t} />
         ))}
       </div>
     </>
   )
 }
 
-function SseEventCard({ index, event }) {
+function SseEventCard({ index, event, t }) {
   const [open, setOpen] = useState(index <= 5)
   const [showRaw, setShowRaw] = useState(false)
   const hasParsed = event.parsed !== null && event.parsed !== undefined
@@ -83,7 +77,7 @@ function SseEventCard({ index, event }) {
           type="button"
           className="btn btn-sm sse-event-toggle"
           onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }}
-          aria-label={open ? '折叠' : '展开'}
+          aria-label={open ? t('common.collapse') : t('common.expand')}
         >
           {open ? '▾' : '▸'}
         </button>
@@ -93,15 +87,15 @@ function SseEventCard({ index, event }) {
           {hasParsed ? (
             <pre className="log-box sse-event-data">{JSON.stringify(event.parsed, null, 2)}</pre>
           ) : (
-            <pre className="log-box sse-event-data">{event.raw || '（空 data）'}</pre>
+            <pre className="log-box sse-event-data">{event.raw || `(${t('common.noData')})`}</pre>
           )}
           <div className="sse-event-raw-toggle">
             <button type="button" className="btn btn-sm" onClick={() => setShowRaw((s) => !s)}>
-              {showRaw ? '隐藏原始块' : '显示原始块'}
+              {showRaw ? t('common.hide') : t('common.show')}
             </button>
           </div>
           {showRaw ? (
-            <pre className="log-box sse-event-raw">{event.raw || '（空）'}</pre>
+            <pre className="log-box sse-event-raw">{event.raw || `(${t('common.none')})`}</pre>
           ) : null}
         </div>
       ) : null}

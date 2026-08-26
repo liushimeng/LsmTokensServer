@@ -4,12 +4,14 @@ import {
   NAV_TREES, findMenuEntry,
   loadCollapsedGroups, saveCollapsedGroups,
 } from '../shared/navConfig'
+import { useI18n } from '../i18n'
 
 // 分级侧边菜单：一级分组可折叠（localStorage 按角色记忆），二级页面项激活高亮。
-// 激活项所在组若被折叠则“临时展开”（不写回记忆），保证当前页始终可见。
+// 激活项所在组若被折叠则"临时展开"（不写回记忆），保证当前页始终可见。
 export default function SideNav({ role, route, collapsed, open, onClose, onExpand }) {
   const tree = NAV_TREES[role] || NAV_TREES.user
   const [collapsedGroups, setCollapsedGroups] = useState(() => loadCollapsedGroups(role))
+  const { t } = useI18n()
 
   // 角色切换（登录信息加载完成）时重载该角色的折叠记忆
   useEffect(() => {
@@ -48,7 +50,7 @@ export default function SideNav({ role, route, collapsed, open, onClose, onExpan
             // 图标栏模式：组图标点击展开侧栏并定位到该组
             <button
               className={'nav-group-mini' + (g.isActiveGroup ? ' active' : '')}
-              title={g.label}
+              title={t(g.label)}
               onClick={onExpand}
             >{g.icon}</button>
           ) : (
@@ -58,7 +60,7 @@ export default function SideNav({ role, route, collapsed, open, onClose, onExpan
                 onClick={() => toggleGroup(g.id)}
               >
                 <span className="nav-group-icon">{g.icon}</span>
-                <span className="nav-group-label">{g.label}</span>
+                <span className="nav-group-label">{t(g.label)}</span>
                 {g.isActiveGroup && g.isCollapsed && <span className="nav-active-dot" />}
                 <span className={'nav-arrow' + (g.isCollapsed ? '' : ' down')}>▸</span>
               </button>
@@ -70,7 +72,7 @@ export default function SideNav({ role, route, collapsed, open, onClose, onExpan
                       href={`#/${it.key}`}
                       className={'nav-item' + (active && active.itemKey === it.key ? ' active' : '')}
                       onClick={onClose}
-                    >{it.label}</a>
+                    >{t(it.label)}</a>
                   ))}
                 </div>
               )}

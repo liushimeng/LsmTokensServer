@@ -1,11 +1,12 @@
 // 通用数据表格：columns = [{key,title,render?,width?,sortable?,sortValue?,nowrap?}]
 // cardMode（默认 true）：≤600px 时行转卡片，依赖 td 的 data-label 显示列名；
-// 传 false 退回横向滚动（docs/Web页面手机端UI设计以及美化方案/00 §3.5）
+// 传 false 退回横向滚动（docs/Web页面手机端UI设计以及优化方案/00 §3.5）
 // sortable: true 时表头可点击排序（升序→降序→取消 三态循环，纯前端实现）；
 // sortValue(row) 可选，提供排序取值（默认取 row[key]）；nowrap: true 时该列单元格不换行（cell-nowrap）；
 // rowClass(row) 用于状态行高亮。td 默认可换行（长内容多行展示、无横向滚动）。
 // collapsible: true 启用折叠行；collapsedIds: Set 折叠的 rowKey 集合；onToggleCollapse(rowKey)：切换回调。
 import { useMemo, useState } from 'react'
+import { useI18n } from '../i18n'
 
 // 数值优先数值比较，其余中文 localeCompare；null/undefined 恒排末尾
 function compare(a, b) {
@@ -19,9 +20,12 @@ function compare(a, b) {
   return String(a).localeCompare(String(b), 'zh-CN')
 }
 
-export default function DataTable({ columns, rows, loading, empty = '暂无数据', rowKey, cardMode = true, rowClass,
+export default function DataTable({ columns, rows, loading, empty, rowKey, cardMode = true, rowClass,
   collapsible, collapsedIds, onToggleCollapse, renderCollapsedRow }) {
+  const { t } = useI18n()
   const [sort, setSort] = useState(null) // {key, dir: 1|-1}
+
+  if (!empty) empty = t('datatable.noData')
 
   const sorted = useMemo(() => {
     if (!sort || !rows) return rows
@@ -36,7 +40,7 @@ export default function DataTable({ columns, rows, loading, empty = '暂无数�
     setSort((s) => (s && s.key === c.key ? (s.dir === 1 ? { key: c.key, dir: -1 } : null) : { key: c.key, dir: 1 }))
   }
 
-  if (loading) return <div className="table-loading">加载中…</div>
+  if (loading) return <div className="table-loading">{t('common.loading')}</div>
   if (!rows || !rows.length) return <div className="table-empty">{empty}</div>
   const keyOf = (r, i) => (rowKey ? r[rowKey] : i)
   return (
@@ -44,12 +48,12 @@ export default function DataTable({ columns, rows, loading, empty = '暂无数�
       <table className={'data-table' + (cardMode ? ' card-mode' : '')}>
         <thead>
           <tr>
-            {collapsible ? <th style={{ width: 40 }} title="展开/折叠"></th> : null}
+            {collapsible ? <th style={{ width: 40 }} title={t('common.expand') + '/' + t('common.collapse')}></th> : null}
             {columns.map((c) => (
               <th key={c.key} style={c.width ? { width: c.width } : undefined}
                 className={c.sortable ? 'sortable' : undefined}
                 onClick={() => clickSort(c)}
-                title={c.sortable ? '点击排序' : undefined}>
+                title={c.sortable ? t('datatable.sortAsc') + ' / ' + t('datatable.sortDesc') : undefined}>
                 {c.title}{c.sortable && sort && sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
               </th>
             ))}
@@ -74,7 +78,7 @@ export default function DataTable({ columns, rows, loading, empty = '暂无数�
                 {collapsible ? (
                   <td className="cell-collapse-toggle">
                     <button type="button" className="collapse-btn" onClick={() => onToggleCollapse && onToggleCollapse(k)}
-                      title={collapsed ? '展开' : '折叠'} aria-label={collapsed ? '展开' : '折叠'}>
+                      title={collapsed ? t('common.expand') : t('common.collapse')} aria-label={collapsed ? t('common.expand') : t('common.collapse')}>
                       {collapsed ? '▶' : '▼'}
                     </button>
                   </td>

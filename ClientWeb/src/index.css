@@ -534,3 +534,17 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---- 语言切换器 ---- */
+.lang-switcher { position: relative; display: inline-block; }
+.lang-switcher-btn { display: flex; align-items: center; gap: 6px; background: #374151; border: 1px solid #4b5563; color: #e5e7eb; font-size: 13px; padding: 4px 10px; border-radius: 8px; cursor: pointer; transition: background .15s; }
+.lang-switcher-btn:hover { background: #4b5563; }
+.lang-switcher-flag { font-size: 16px; line-height: 1; }
+.lang-switcher-label { font-weight: 500; }
+.lang-switcher-arrow { font-size: 10px; opacity: .7; }
+.lang-switcher-dropdown { position: absolute; top: calc(100% + 4px); right: 0; background: #1f2937; border: 1px solid #4b5563; border-radius: 10px; min-width: 180px; box-shadow: 0 8px 24px rgba(0,0,0,.35); z-index: 100; overflow: hidden; }
+.lang-switcher-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px; background: none; border: none; color: #e5e7eb; font-size: 14px; cursor: pointer; text-align: left; transition: background .12s; }
+.lang-switcher-item:hover { background: #374151; }
+.lang-switcher-item.active { background: #2563eb; color: #fff; }
+.lang-switcher-item-label { flex: 1; }
+.lang-switcher-check { font-size: 14px; color: #34d399; }
