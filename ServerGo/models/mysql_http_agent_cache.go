@@ -511,6 +511,20 @@ func GetCachedDstEndPointByID(id uint64) (*TAgentDstEndPoint, bool) {
 	return ep, true
 }
 
+// GetAllCachedDstEndPoints 从缓存查询所有源站接入点（返回副本，安全用于外部遍历）
+func GetAllCachedDstEndPoints() []*TAgentDstEndPoint {
+	agentCache.mu.RLock()
+	defer agentCache.mu.RUnlock()
+	result := make([]*TAgentDstEndPoint, 0, len(agentCache.endpoints))
+	for _, ep := range agentCache.endpoints {
+		if ep != nil {
+			epCopy := *ep
+			result = append(result, &epCopy)
+		}
+	}
+	return result
+}
+
 // addDstEndPointToCache 将源站接入点添加到缓存
 func addDstEndPointToCache(e *TAgentDstEndPoint) {
 	agentCache.mu.Lock()

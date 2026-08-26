@@ -3,6 +3,7 @@ package models
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -21,11 +22,33 @@ func (e *StatsCacheEntry) IsExpired(ttl time.Duration) bool {
 	return time.Since(e.CachedAt) > ttl
 }
 
+// StatsCacheMetrics 缓存运行指标（原子操作，无锁热点路径友好）
+type StatsCacheMetrics struct {
+	Hits      int64 `json:"hits"`      // 缓存命中次数
+	Misses    int64 `json:"misses"`    // 缓存未命中次数
+	Evictions int64 `json:"evictions"` // 过期淘汰次数
+	Size      int64 `json:"size"`      // 当前缓存条目数
+}
+
+// HitRate 计算缓存命中率（0.0~1.0）
+func (m *StatsCacheMetrics) HitRate() float64 {
+	total := m.Hits + m.Misses
+	if total == 0 {
+		return 0
+	}
+	return float64(m.Hits) / float64(total)
+}
+
 // StatsCache 统计查询内存缓存
 // 为 /ChatAnalysisTotal 等页面的聚合查询提供缓存，避免每次刷新都直接查询MySQL分表
 type StatsCache struct {
 	entries map[string]*StatsCacheEntry
 	mu      sync.RWMutex
+
+	// 运行指标（原子计数器，避免读缓存路径加锁）
+	hits      atomic.Int64
+	misses    atomic.Int64
+	evictions atomic.Int64
 }
 
 var statsCache StatsCache
@@ -55,18 +78,22 @@ func getStatsFromCache(key string) (interface{}, bool) {
 	defer statsCache.mu.RUnlock()
 
 	if statsCache.entries == nil {
+		statsCache.misses.Add(1)
 		return nil, false
 	}
 
 	entry, ok := statsCache.entries[key]
 	if !ok || entry == nil {
+		statsCache.misses.Add(1)
 		return nil, false
 	}
 
 	if entry.IsExpired(statsCacheTTL) {
+		statsCache.misses.Add(1)
 		return nil, false
 	}
 
+	statsCache.hits.Add(1)
 	return entry.Data, true
 }
 
@@ -171,9 +198,28 @@ func cleanExpiredStatsCache() {
 	}
 
 	now := time.Now()
+	evicted := int64(0)
 	for key, entry := range statsCache.entries {
 		if now.Sub(entry.CachedAt) > statsCacheTTL {
 			delete(statsCache.entries, key)
+			evicted++
 		}
+	}
+	if evicted > 0 {
+		statsCache.evictions.Add(evicted)
+	}
+}
+
+// GetStatsCacheMetrics 获取缓存运行指标（命中率、大小、淘汰数）
+func GetStatsCacheMetrics() StatsCacheMetrics {
+	statsCache.mu.RLock()
+	size := int64(len(statsCache.entries))
+	statsCache.mu.RUnlock()
+
+	return StatsCacheMetrics{
+		Hits:      statsCache.hits.Load(),
+		Misses:    statsCache.misses.Load(),
+		Evictions: statsCache.evictions.Load(),
+		Size:      size,
 	}
 }

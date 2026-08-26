@@ -104,6 +104,7 @@ type toolAgg struct {
 
 // chatStatsAggregator 7 个维度共享的单遍增量累加器。
 // 一次扫描把每行同时喂给它，任意时刻都能 snapshot 出 7 个 stage 的当前累计数据。
+// 阶段 7.5 新增：error_stats（错误率维度）聚合。
 type chatStatsAggregator struct {
 	days       int
 	timeIsHour bool
@@ -145,6 +146,12 @@ type chatStatsAggregator struct {
 	protoSamples   int64
 	reqSizeTotal   int64
 	respSizeTotal  int64
+
+	// error_stats（阶段 7.5 新增）：按状态码分桶统计错误率
+	error2xx   int64 // 2xx 成功
+	error4xx   int64 // 4xx 客户端错误
+	error5xx   int64 // 5xx 服务端错误
+	errorNet   int64 // 网络错误（状态码为空或非标准）
 }
 
 type dayBucket struct {
@@ -283,6 +290,21 @@ func (a *chatStatsAggregator) addRow(r *streamScanRow) {
 	}
 	a.reqSizeTotal += int64(r.RequestContentLength)
 	a.respSizeTotal += int64(r.ResponseContentLength)
+
+	// error_stats（阶段 7.5 新增）：按状态码分桶统计
+	status := strings.TrimSpace(r.ResponseStatus)
+	if status == "" {
+		a.errorNet++
+	} else if strings.HasPrefix(status, "2") {
+		a.error2xx++
+	} else if strings.HasPrefix(status, "4") {
+		a.error4xx++
+	} else if strings.HasPrefix(status, "5") {
+		a.error5xx++
+	} else {
+		// 非标准状态码（如网络错误导致的空响应）
+		a.errorNet++
+	}
 }
 
 // ---- 快照函数：任意时刻把当前累计状态转成各 stage 的数据形状 ----
@@ -518,6 +540,38 @@ func (a *chatStatsAggregator) snapshotAgent() *models.AgentToolStatsResponse {
 		TotalAgentCount: totalCount,
 		UniqueTools:     len(a.tools),
 		ToolStats:       stats,
+	}
+}
+
+// ---- 阶段 7.5 新增：错误率快照 ----
+
+// ErrorStats 错误率统计（阶段 7.5 新增）
+type ErrorStats struct {
+	TotalCalls int64   `json:"total_calls"`
+	Success2xx int64   `json:"success_2xx"`
+	Error4xx   int64   `json:"error_4xx"`
+	Error5xx   int64   `json:"error_5xx"`
+	ErrorNet   int64   `json:"error_net"` // 网络错误（状态码为空或非标准)
+	SuccessPct float64 `json:"success_pct"`
+	ErrorPct   float64 `json:"error_pct"`
+}
+
+// snapshotErrorStats 错误率快照（阶段 7.5 新增）
+func (a *chatStatsAggregator) snapshotErrorStats() *ErrorStats {
+	total := a.totalCalls
+	var successPct, errorPct float64
+	if total > 0 {
+		successPct = float64(a.error2xx) / float64(total) * 100.0
+		errorPct = float64(a.error4xx+a.error5xx+a.errorNet) / float64(total) * 100.0
+	}
+	return &ErrorStats{
+		TotalCalls: total,
+		Success2xx: a.error2xx,
+		Error4xx:   a.error4xx,
+		Error5xx:   a.error5xx,
+		ErrorNet:   a.errorNet,
+		SuccessPct: successPct,
+		ErrorPct:   errorPct,
 	}
 }
 

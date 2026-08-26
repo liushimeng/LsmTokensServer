@@ -67,10 +67,12 @@ func (s *StableAlgorithmSelector) Select(route *CachedAIRoute) (uint64, bool) {
 	}
 	for i, id := range route.DstEndPointIDs {
 		if i < len(route.DstEndPointIDStatuses) && route.DstEndPointIDStatuses[i] == 1 {
+			RecordSelection(AlgorithmStrategyType_Stable)
 			return id, true
 		}
 		// 兼容：状态列表缺失或长度不足时，默认启用
 		if i >= len(route.DstEndPointIDStatuses) {
+			RecordSelection(AlgorithmStrategyType_Stable)
 			return id, true
 		}
 	}
@@ -86,6 +88,8 @@ func (s *StableAlgorithmSelector) OnRequestSuccess(routeID uint64) {
 // route 仅用于早期短路（单源站时不滚动）。
 // 滚动时跳过状态为0的源站，只滚动可用源站。
 func (s *StableAlgorithmSelector) OnRequestFailure(routeID uint64, route *CachedAIRoute) {
+	RecordFailure(AlgorithmStrategyType_Stable)
+
 	if route == nil || len(route.DstEndPointIDs) <= 1 {
 		// 没有可滚动的对象，直接清零，避免计数无限增长
 		resetStableFailureCounter(routeID)
@@ -102,5 +106,7 @@ func (s *StableAlgorithmSelector) OnRequestFailure(routeID uint64, route *Cached
 	resetStableFailureCounter(routeID)
 	if err := RotateAIRouteEndpointList(routeID); err != nil {
 		logger.Printf("[ROUTE] Stable rotate failed for routeID=%d: %v", routeID, err)
+	} else {
+		RecordRotation()
 	}
 }

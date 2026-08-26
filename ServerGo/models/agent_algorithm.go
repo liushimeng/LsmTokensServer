@@ -4,6 +4,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 )
 
 // ============================================================================
@@ -46,6 +48,63 @@ const (
 	AlgorithmStrategyType_Economic    = 3 // 经济型：Session 负载均衡（仅 Anthropic）
 	AlgorithmStrategyType_Intelligent = 4 // 智能型：开发中
 )
+
+// ============================================================================
+// 路由决策指标（原子计数器，无锁热点路径友好）
+// ============================================================================
+// 用于采集各算法的选择/失败/冷却/旋转事件计数，便于运维观测路由健康状态。
+
+// RoutingMetrics 路由决策运行指标
+type RoutingMetrics struct {
+	Selections int64 `json:"selections"` // 算法选择次数
+	Failures   int64 `json:"failures"`   // 请求失败次数
+	Cooldowns  int64 `json:"cooldowns"`  // 经济型冷却次数
+	Rotations  int64 `json:"rotations"`  // 稳定型滚动次数
+}
+
+// routingMetrics 全局路由指标实例
+var routingMetrics struct {
+	selections atomic.Int64
+	failures   atomic.Int64
+	cooldowns  atomic.Int64
+	rotations  atomic.Int64
+}
+
+// RecordSelection 记录一次算法选择
+func RecordSelection(strategyType int) {
+	routingMetrics.selections.Add(1)
+}
+
+// RecordFailure 记录一次请求失败
+func RecordFailure(strategyType int) {
+	routingMetrics.failures.Add(1)
+}
+
+// RecordCooldown 记录一次经济型冷却
+func RecordCooldown() {
+	routingMetrics.cooldowns.Add(1)
+}
+
+// RecordRotation 记录一次稳定型滚动
+func RecordRotation() {
+	routingMetrics.rotations.Add(1)
+}
+
+// GetRoutingMetrics 获取路由决策运行指标
+func GetRoutingMetrics() RoutingMetrics {
+	return RoutingMetrics{
+		Selections: routingMetrics.selections.Load(),
+		Failures:   routingMetrics.failures.Load(),
+		Cooldowns:  routingMetrics.cooldowns.Load(),
+		Rotations:  routingMetrics.rotations.Load(),
+	}
+}
+
+// routingMetricsMu 保护 perRouteMetrics 的读写
+var routingMetricsMu sync.RWMutex
+
+// perRouteMetrics 按路由 ID 维护的详细指标（可选，用于细粒度观测）
+var perRouteMetrics = make(map[uint64]*RoutingMetrics)
 
 // GetAlgorithmName 获取算法名称
 func GetAlgorithmName(t int) string {
@@ -154,10 +213,12 @@ func (s *FirstIDAlgorithmSelector) Select(route *CachedAIRoute) (uint64, bool) {
 	}
 	for i, id := range route.DstEndPointIDs {
 		if i < len(route.DstEndPointIDStatuses) && route.DstEndPointIDStatuses[i] == 1 {
+			RecordSelection(AlgorithmStrategyType_FirstID)
 			return id, true
 		}
 		// 兼容：状态列表缺失或长度不足时，默认启用
 		if i >= len(route.DstEndPointIDStatuses) {
+			RecordSelection(AlgorithmStrategyType_FirstID)
 			return id, true
 		}
 	}

@@ -285,6 +285,7 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 						route.ID, sessionID, entry.EndPointID)
 				} else if deadline, cooling := state.cooldownEndpoints[entry.EndPointID]; !cooling || time.Now().After(deadline) {
 					// 粘性源站正处于冷却期（连续失败被摘除）：清理映射走重新分配
+					RecordSelection(AlgorithmStrategyType_Economic)
 					return entry.EndPointID, true
 				}
 			}
@@ -361,6 +362,7 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 		delete(state.sessionIndex, evicted.SessionID)
 	}
 
+	RecordSelection(AlgorithmStrategyType_Economic)
 	return endpointID, true
 }
 
@@ -426,11 +428,51 @@ func (s *EconomicAlgorithmSelector) OnEndpointFailure(routeID uint64, endpointID
 	return true, endpointID
 }
 
+// EndpointCooldownHook 经济型源站冷却事件回调钩子类型。
+// 参数：routeID 路由ID，endpointID 被冷却的源站ID，duration 冷却时长。
+// 钩子函数应快速返回，避免阻塞代理转发热路径。
+type EndpointCooldownHook func(routeID uint64, endpointID uint64, duration time.Duration)
+
+// onEndpointCooldownHook 全局冷却事件回调钩子（可选，nil 表示不触发）
+var onEndpointCooldownHook struct {
+	mu   sync.RWMutex
+	hook EndpointCooldownHook
+}
+
+// SetEndpointCooldownHook 设置经济型源站冷却事件回调钩子（阶段 7.6 新增）。
+// 用于外部订阅冷却事件（如日志记录、指标上报、通知推送）。
+// 传入 nil 表示清除钩子。
+func SetEndpointCooldownHook(hook EndpointCooldownHook) {
+	onEndpointCooldownHook.mu.Lock()
+	defer onEndpointCooldownHook.mu.Unlock()
+	onEndpointCooldownHook.hook = hook
+}
+
+// triggerEndpointCooldownHook 触发冷却事件回调（内部使用，非阻塞）
+func triggerEndpointCooldownHook(routeID uint64, endpointID uint64, duration time.Duration) {
+	onEndpointCooldownHook.mu.RLock()
+	hook := onEndpointCooldownHook.hook
+	onEndpointCooldownHook.mu.RUnlock()
+	if hook != nil {
+		// 异步触发，避免阻塞代理转发热路径
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Printf("[ECONOMIC] cooldown hook panic: %v", r)
+				}
+			}()
+			hook(routeID, endpointID, duration)
+		}()
+	}
+}
+
 // CooldownEndpoint 把指定源站从 livePool 摘除并进入冷却期（默认 EconomicEndpointCooldownDuration）。
 // 冷却为纯内存状态：不写 database.DB、不改路由配置，到期后自动回归 livePool。
 // 同时清零该源站的失败计数，避免恢复后因历史计数被立即再次摘除。
 func (s *EconomicAlgorithmSelector) CooldownEndpoint(routeID uint64, endpointID uint64) {
 	s.cooldownEndpointForDuration(routeID, endpointID, EconomicEndpointCooldownDuration)
+	RecordCooldown()
+	triggerEndpointCooldownHook(routeID, endpointID, EconomicEndpointCooldownDuration)
 }
 
 // cooldownEndpointForDuration CooldownEndpoint 的可指定时长版本（供测试使用）。

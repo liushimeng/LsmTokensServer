@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -521,4 +522,206 @@ func testOpenAIEndpoint(urlAddr, apiKey, modelName string, authType int) (*TestR
 
 	cleanBody := cleanErrorBody(string(respBody))
 	return result, fmt.Errorf("请求 URL: %s | API 返回错误 (HTTP %d): %s", testURL, resp.StatusCode, cleanBody)
+}
+
+// ============================================================================
+// 上游定期健康检查（阶段 7.3 新增）
+// ============================================================================
+
+// EndpointHealth 单个端点的健康状态
+type EndpointHealth struct {
+	EndpointID   uint64    `json:"endpoint_id"`
+	LastChecked  time.Time `json:"last_checked"`
+	SuccessCount int64     `json:"success_count"`
+	FailCount    int64     `json:"fail_count"`
+	AvgLatencyMs int64     `json:"avg_latency_ms"`
+	LastError    string    `json:"last_error,omitempty"`
+}
+
+// healthCheckState 健康检查全局状态
+var healthCheckState struct {
+	mu       sync.RWMutex
+	running  bool
+	stopChan chan struct{}
+	results  map[uint64]*EndpointHealth
+}
+
+// healthCheckClient 健康检查专用 HTTP 客户端（短超时，不占用代理连接池）
+var healthCheckClient = &http.Client{
+	Timeout: 10 * time.Second,
+	Transport: &http.Transport{
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     30 * time.Second,
+	},
+}
+
+// StartEndpointHealthCheck 启动上游端点定期健康检查后台 goroutine
+// intervalSec 检查间隔（秒），默认 60s
+func StartEndpointHealthCheck(intervalSec int) {
+	if intervalSec <= 0 {
+		intervalSec = 60
+	}
+
+	healthCheckState.mu.Lock()
+	if healthCheckState.running {
+		healthCheckState.mu.Unlock()
+		logger.Printf("[HEALTH] Endpoint health check already running")
+		return
+	}
+	healthCheckState.running = true
+	healthCheckState.stopChan = make(chan struct{})
+	healthCheckState.results = make(map[uint64]*EndpointHealth)
+	healthCheckState.mu.Unlock()
+
+	logger.Printf("[HEALTH] Starting endpoint health check (interval=%ds)", intervalSec)
+
+	go func() {
+		ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
+		defer ticker.Stop()
+
+		// 启动后立即执行一次
+		runEndpointHealthCheck()
+
+		for {
+			select {
+			case <-ticker.C:
+				runEndpointHealthCheck()
+			case <-healthCheckState.stopChan:
+				logger.Printf("[HEALTH] Endpoint health check stopped")
+				return
+			}
+		}
+	}()
+}
+
+// StopEndpointHealthCheck 停止上游端点定期健康检查
+func StopEndpointHealthCheck() {
+	healthCheckState.mu.Lock()
+	defer healthCheckState.mu.Unlock()
+	if healthCheckState.running && healthCheckState.stopChan != nil {
+		close(healthCheckState.stopChan)
+		healthCheckState.running = false
+	}
+}
+
+// runEndpointHealthCheck 执行一轮健康检查（遍历所有启用源站）
+func runEndpointHealthCheck() {
+	// 获取所有启用的源站（通过导出函数安全访问缓存）
+	allEndpoints := modelsdb.GetAllCachedDstEndPoints()
+	var endpoints []*modelsdb.TAgentDstEndPoint
+	for _, ep := range allEndpoints {
+		if ep != nil && ep.Status == 1 {
+			endpoints = append(endpoints, ep)
+		}
+	}
+
+	if len(endpoints) == 0 {
+		return
+	}
+
+	logger.Printf("[HEALTH] Running health check for %d endpoints", len(endpoints))
+
+	for _, ep := range endpoints {
+		latencyMs, err := probeEndpoint(ep)
+
+		healthCheckState.mu.Lock()
+		h, ok := healthCheckState.results[ep.ID]
+		if !ok {
+			h = &EndpointHealth{EndpointID: ep.ID}
+			healthCheckState.results[ep.ID] = h
+		}
+		h.LastChecked = time.Now()
+		if err != nil {
+			h.FailCount++
+			h.LastError = err.Error()
+		} else {
+			h.SuccessCount++
+			// 移动平均计算延迟
+			totalSuccess := h.SuccessCount
+			if totalSuccess == 1 {
+				h.AvgLatencyMs = latencyMs
+			} else {
+				h.AvgLatencyMs = (h.AvgLatencyMs*(totalSuccess-1) + latencyMs) / totalSuccess
+			}
+			h.LastError = ""
+		}
+		healthCheckState.mu.Unlock()
+	}
+}
+
+// probeEndpoint 探测单个端点的连通性，返回延迟（ms）和错误
+func probeEndpoint(ep *modelsdb.TAgentDstEndPoint) (int64, error) {
+	if ep == nil {
+		return 0, fmt.Errorf("endpoint is nil")
+	}
+
+	// 构造简单探测请求
+	reqBody := map[string]interface{}{
+		"model":      ep.ModelName,
+		"max_tokens": 1,
+		"messages": []map[string]string{
+			{"role": "user", "content": "hi"},
+		},
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return 0, fmt.Errorf("marshal failed: %w", err)
+	}
+
+	testURL := strings.TrimSpace(ep.URLAddress)
+	testURL = strings.TrimSuffix(testURL, "/")
+	if !strings.HasSuffix(testURL, "/chat/completions") {
+		testURL += "/chat/completions"
+	}
+
+	req, err := http.NewRequest(http.MethodPost, testURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return 0, fmt.Errorf("create request failed: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	authName, authValue := resolveAuthHeaders(ep.ProtocolType, ep.AuthType, ep.APIKey)
+	req.Header.Set(authName, authValue)
+
+	start := time.Now()
+	resp, err := healthCheckClient.Do(req)
+	elapsedMs := time.Since(start).Milliseconds()
+	if err != nil {
+		return elapsedMs, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 消耗响应体以保持连接复用
+	_, _ = io.ReadAll(io.LimitReader(resp.Body, 1024))
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return elapsedMs, nil
+	}
+	return elapsedMs, fmt.Errorf("HTTP %d", resp.StatusCode)
+}
+
+// GetEndpointHealth 查询指定端点的健康状态
+func GetEndpointHealth(endpointID uint64) (*EndpointHealth, bool) {
+	healthCheckState.mu.RLock()
+	defer healthCheckState.mu.RUnlock()
+	h, ok := healthCheckState.results[endpointID]
+	if !ok {
+		return nil, false
+	}
+	// 返回副本避免外部修改
+	hCopy := *h
+	return &hCopy, true
+}
+
+// GetAllEndpointHealth 查询所有端点的健康状态
+func GetAllEndpointHealth() []*EndpointHealth {
+	healthCheckState.mu.RLock()
+	defer healthCheckState.mu.RUnlock()
+	result := make([]*EndpointHealth, 0, len(healthCheckState.results))
+	for _, h := range healthCheckState.results {
+		hCopy := *h
+		result = append(result, &hCopy)
+	}
+	return result
 }
