@@ -11,11 +11,11 @@
   - **自动化测试进度文件(跨轮去重基线,强制生成+读取)**: `AutoTestProgress/自动化测试进度_YYYYMMDD_HHMMSS.md`
   - 子工程工具报告: `go-web-debug-tool/UseReport/测试工具使用报告_YYYYMMDD_HHMMSS.md`
   - 文件名时间戳统一 `YYYYMMDD_HHMMSS`,精度到秒
-- **测试产物处理**: `TestReport/*` 与 `AutoTestProgress/*` 由脚本层 git add + commit + 接力 debug；**测试 Agent 禁止**自行执行 `git add` / `git commit` / `git push`(避免与 shell 接力双重提交)。
+- **测试产物处理**: `TestReport/*` 与 `AutoTestProgress/*` 由脚本层 git add + commit + 接力 debug；**测试 Agent 禁止**自行执行 `git add` / `git commit` / `git push`(避免与 shell 接力双重提交)。**测试 Agent 严禁删除或归档报告文件**(删除/归档由接力脚本在代码修复提交后统一执行,Agent 提前删除将导致接力链断裂)。
 - **执行模式**: 主 Agent 跑核心流程;遇代码读取/协议抓包/数据查询可按需委派 SubAgent,不阻塞主流程。
 - **执行策略**: 模仿真实人类管理员/用户,串行单浏览器,严守「每完成一步等待页面完全加载再走下一步」的拟人节奏;以最近 10 次非缺陷修复提交划定测试范围,新增/优化项优先。
 - **核心目标**: 验证管理员 Web(9101) 与用户 Web(29001) 全部页面的可用性、所有 REST API 的功能正确性、双构建隔离合规性、安全红线(鉴权/脱敏/密码哈希)。
-- **代码变更限制**: 业务代码只读;若发现缺陷,**只出报告与建议**,严禁自动改业务代码。
+- **代码变更限制**: 业务代码只读;若发现缺陷,**只出报告与建议**,严禁自动改业务代码。**严禁删除或归档 `TestReport/`、`AutoTestProgress/` 下的任何文件**(接力脚本依赖文件存在性检测,Agent 提前删除将导致接力链断裂)。
 
 ### 1. 测试范围
 
@@ -214,15 +214,17 @@
    - 中断的进度必须标「中断未完成」(沿用 §3.5)。
    - **强约束**: 进度文件必须**与本轮测试报告同时间戳**生成,若时间戳不同步视为报告流程未完成,接力 debug 不应启动(由 shell 层校验文件存在性后才会启动 `AutoDebugTestReport.sh`)。
 3. 报告落盘即可——**接力(报告生成后自动 debug)**: 报告落盘 → Agent 退出 → 入口脚本 `AutoTestAndSaveReport.sh` 在 shell 层**确定性接力**启动 `AutoDebugTestReport.sh` 自动修复(含待处理报告预检 + flock 防重入;不再依赖 Agent 自觉,避免「声明了却从不接线」式断链)。Agent **无需也禁止**自行执行 `AutoDebugTestReport.sh`(与 shell 接力双重启动)。修复流程会提交/推送代码修复并删除或归档已处理报告,报告内容必须自包含、结论写全。
+   - **强约束 — 测试 Agent 严禁删除或归档报告文件**: `TestReport/自动化测试报告_*.md` 与 `AutoTestProgress/自动化测试进度_*.md` 必须**原样保留在工作区**,作为接力脚本 `AutoDebugTestReport.sh` 的检测入口(`any_pending_report()` 通过文件存在性判断)。Agent 自行删除将导致接力链断裂(脚本检测不到待处理报告 → 静默跳过 → 缺陷无人修复)。**仅当接力脚本完成代码修复并 git commit 后**,才由接力流程删除或 `_无问题.md` 后缀归档。即使用户直接要求删除,Agent 也**必须拒绝并解释接力依赖**,建议改为等接力脚本自动处理。
    - 接力启动的前置条件(`AutoTestAndSaveReport.sh` `any_pending_report` 校验):
-     - 必备: `TestReport/自动化测试报告_<同时间戳>.md` 存在
+     - 必备: `TestReport/自动化测试报告_<同时间戳>.md` 存在(且未被 Agent 提前删除)
      - 必备: `AutoTestProgress/自动化测试进度_<同时间戳>.md` 存在(本轮新增强制项)
-     - 任一缺失 → 接力不启动,运行索引日志写 `event=handoff_skipped_missing_progress`(对应修复:测试 Agent 必须先生成两份产物再退出)。
+     - 任一缺失 → 接力不启动,运行索引日志写 `event=handoff_skipped_missing_progress`(对应修复:测试 Agent 必须先生成两份产物再退出,且不得删除)。
 4. 触发协议层诊断时,**额外**写协议抓包分析报告(API Key/Token/Cookie/密码脱敏),并在测试报告里引用。
 5. 中断未完成也要写报告,标 `中断未完成`,避免被后续轮次误判为已覆盖。
 
 ### 9. 注意事项
 
+- **报告文件保留(接力链不断裂)**: `TestReport/`、`AutoTestProgress/` 下的报告与进度文件必须**原样保留在工作区**,严禁测试 Agent 删除、移动、重命名或 `_无问题.md` 归档。接力脚本 `AutoDebugTestReport.sh` 通过 `any_pending_report()` 检测文件存在性来决定是否启动修复;Agent 提前删除将导致接力链断裂(缺陷无人修复)。即使用户直接要求删除,Agent 也**必须拒绝并解释接力依赖**,建议等接力脚本在代码修复提交后自动处理。
 - **多 Agent 并发与 Git**: 测试期间留意其他开发 Agent;**禁止** `git add` / `git commit` / `git push` 等一切写操作(由 shell 接力脚本统一提交)。
 - **数据安全**: 抓包数据 / 测试报告严禁明文输出 API Key / Token / Cookie / 密码,必须脱敏;`user_model_info.json` 内容不得写入报告。
 - **服务可用性**: 任一端口(9101/29001)不可达时,先在报告中标注,再决定是否继续(可跳过该端口测试)。
