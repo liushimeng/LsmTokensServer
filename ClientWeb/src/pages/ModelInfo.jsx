@@ -126,6 +126,8 @@ export default function ModelInfo(props) {
                   call: t('modelInfo.trendCallSeries'),
                   token: t('modelInfo.trendTokenSeries'),
                   tooltip: t('modelInfo.trendTooltip'),
+                  zoomHint: t('modelInfo.trendZoomHint'),
+                  reset: t('modelInfo.trendReset'),
                 }}
               />
             </div>

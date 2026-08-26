@@ -112,6 +112,8 @@ export default function AgentInfo(props) {
                   call: t('agentInfo.trendCallSeries'),
                   token: t('agentInfo.trendTokenSeries'),
                   tooltip: t('agentInfo.trendTooltip'),
+                  zoomHint: t('agentInfo.trendZoomHint'),
+                  reset: t('agentInfo.trendReset'),
                 }}
               />
             </div>
