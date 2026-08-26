@@ -381,7 +381,6 @@ function WikiDialog({ onClose }) {
         <span className="wiki-stats">共 {totalFiles} 个 .md 文件</span>
       </div>
       {treeErr ? <div className="alert alert-error">{treeErr}</div> : null}
-      {fileErr ? <div className="alert alert-error">{fileErr}</div> : null}
       <div className="wiki-layout">
         <div className="wiki-tree-pane">
           {!tree && !treeErr ? <div className="table-loading">加载中…</div> :
@@ -413,14 +412,26 @@ function WikiDialog({ onClose }) {
                 {fileMeta ? <span className="wiki-content-meta"> · {formatWikiSize(fileMeta.size)} · {formatWikiTime(fileMeta.modified_time)}</span> : null}
               </div>
               <div className="wiki-content">
-                <MarkdownView md={content} />
-                {hasMore ? (
+                {loading && !content ? (
+                  <div className="wiki-loading-indicator">
+                    <span className="wiki-loading-spinner" /> 加载中…
+                  </div>
+                ) : fileErr ? (
+                  <div className="alert alert-error">{fileErr}</div>
+                ) : content ? (
+                  <MarkdownView md={content} />
+                ) : (
+                  <div className="wiki-welcome">
+                    <p>文件内容为空</p>
+                  </div>
+                )}
+                {hasMore && content ? (
                   <div className="wiki-loadmore">
                     <button className="btn" onClick={loadMore} disabled={loading}>
                       {loading ? '加载中…' : `加载更多（已加载 ${loadedLines} / ${totalLines} 行）`}
                     </button>
                   </div>
-                ) : loadedLines > 0 ? <div className="wiki-content-end">— 已加载全部 {loadedLines} 行 —</div> : null}
+                ) : loadedLines > 0 && content ? <div className="wiki-content-end">— 已加载全部 {loadedLines} 行 —</div> : null}
               </div>
             </>
           ) : (
