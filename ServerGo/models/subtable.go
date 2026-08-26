@@ -923,6 +923,13 @@ func GetAgentHttpTransactionFieldByID(userName, modelName string, subTableNum in
 	if field == "request_headers" || field == "response_headers" {
 		value = RedactAuthorizationBearerHeaderText(value)
 	}
+	// 请求体字段落库时做了 base64 编码（见 proxy server_http_ai_proxy_utils.go），
+	// 查询详情时自动解码为明文，便于前端 JSON 美化正确展示。
+	if field == "request_body" || field == "request_src_protocol_body" {
+		if decoded, err := base64.StdEncoding.DecodeString(value); err == nil {
+			value = string(decoded)
+		}
+	}
 	return value, nil
 }
 

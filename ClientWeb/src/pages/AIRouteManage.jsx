@@ -512,14 +512,24 @@ export default function AIRouteManage() {
               <select style={{ flex: 1 }} value="" onChange={(e) => { if (e.target.value) addEndpoint(parseInt(e.target.value, 10)) }}>
                 <option value="">{form.protocol_type ? t('aiRouteManage.pleaseSelectEndpoint') : t('aiRouteManage.pleaseSelectProtocolFirst')}</option>
                 {form.protocol_type
-                  ? formEndpoints
-                      .filter((ep) => ep.status == 1 && !form.endpoints.some((x) => x.id === ep.id)) // eslint-disable-line eqeqeq
-                      .sort((a, b) => ((a.platform_name || '') + (a.model_name || '')).localeCompare((b.platform_name || '') + (b.model_name || ''), 'zh-Hans-CN'))
-                      .map((ep) => (
+                  ? (() => {
+                      const available = formEndpoints
+                        .filter((ep) => ep.status == 1 && !form.endpoints.some((x) => x.id === ep.id)) // eslint-disable-line eqeqeq
+                        .sort((a, b) => ((a.platform_name || '') + (a.model_name || '')).localeCompare((b.platform_name || '') + (b.model_name || ''), 'zh-Hans-CN'))
+                      const directEps = available.filter((ep) => epAlgoForProtocol(ep, form.protocol_type) === 1)
+                      const converterEps = available.filter((ep) => epAlgoForProtocol(ep, form.protocol_type) === 2)
+                      const renderOptions = (eps) => eps.map((ep) => (
                         <option key={ep.id} value={ep.id}>
-                          {ep.platform_name} / {ep.model_name} [{protocolName(ep.protocol_type)} · {epAlgoForProtocol(ep, form.protocol_type) === 1 ? t('aiRouteManage.protocolDirect') : t('aiRouteManage.protocolConverter')}]
+                          {ep.platform_name} / {ep.model_name} [{protocolName(ep.protocol_type)}]
                         </option>
                       ))
+                      return (
+                        <>
+                          {directEps.length > 0 ? <optgroup label={t('aiRouteManage.protocolDirect')}>{renderOptions(directEps)}</optgroup> : null}
+                          {converterEps.length > 0 ? <optgroup label={t('aiRouteManage.protocolConverter')}>{renderOptions(converterEps)}</optgroup> : null}
+                        </>
+                      )
+                    })()
                   : null}
               </select>
             </div>

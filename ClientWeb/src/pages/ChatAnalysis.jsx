@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { post, get } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } from '../shared/userModelOptions'
@@ -66,29 +66,67 @@ const VIEW_JSON = 'json'
 const VIEW_SSE = 'sse'
 const VIEW_AGG = 'agg'
 
+// localStorage 工具（带容错）
+const safeGet = (k) => { try { return window.localStorage.getItem(k) } catch { return null } }
+const safeSet = (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* 忽略 */ } }
+
+// 从 localStorage 恢复筛选参数（按角色隔离 key）
+function loadFiltersFromStorage(isAdmin) {
+  const key = `lsm:chat_analysis:filters:${isAdmin ? 'manager' : 'user'}`
+  try {
+    const raw = safeGet(key)
+    if (!raw) return null
+    const saved = JSON.parse(raw)
+    return saved && typeof saved === 'object' ? saved : null
+  } catch { return null }
+}
+
 export default function ChatAnalysis({ route }) {
   const { t } = useI18n()
   const VIEW_LABELS = { [VIEW_RAW]: t('chatAnalysis.raw'), [VIEW_JSON]: t('chatAnalysis.jsonBeautify'), [VIEW_SSE]: t('chatAnalysis.sseParse'), [VIEW_AGG]: t('chatAnalysis.aggParse') }
 
   const init = pickRouteQuery(route && route.query)
   const isAdmin = isAdminRole() // 用户端：服务端强制 claims.UserName，隐藏用户名输入与批量删除
-  // 筛选条件
-  const [userName, setUserName] = useState(isAdmin ? init.userName : '')
-  const [modelName, setModelName] = useState(init.modelName)
-  const [days, setDays] = useState(3)
+
+  // 从 localStorage 恢复筛选参数；路由带入的初始值优先
+  const saved = loadFiltersFromStorage(isAdmin)
+
+  // 筛选条件（路由 > localStorage > 默认值）
+  const [userName, setUserName] = useState(init.userName || (isAdmin && saved && saved.userName) || '')
+  const [modelName, setModelName] = useState(init.modelName || (saved && saved.modelName) || '')
+  const [days, setDays] = useState((saved && saved.days != null) ? saved.days : 3)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
-  const [filterUrl, setFilterUrl] = useState('')
-  const [filterMethod, setFilterMethod] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-  const [filterStatusNot, setFilterStatusNot] = useState(false)
-  const [filterProtocolType, setFilterProtocolType] = useState(0)
-  const [filterAlgorithmType, setFilterAlgorithmType] = useState(0) // 0=全部, 1=直连, 2=转换
-  const [filterDstModel, setFilterDstModel] = useState('')
-  const [filterTools, setFilterTools] = useState('')
-  const [filterAgentTool, setFilterAgentTool] = useState('')
-  const [filterInTok, setFilterInTok] = useState(0)
-  const [filterOutTok, setFilterOutTok] = useState(0)
+  const [pageSize, setPageSize] = useState((saved && saved.pageSize) || 10)
+  const [filterUrl, setFilterUrl] = useState((saved && saved.filterUrl) || '')
+  const [filterMethod, setFilterMethod] = useState((saved && saved.filterMethod) || '')
+  const [filterStatus, setFilterStatus] = useState((saved && saved.filterStatus) || '')
+  const [filterStatusNot, setFilterStatusNot] = useState((saved && saved.filterStatusNot) || false)
+  const [filterProtocolType, setFilterProtocolType] = useState((saved && saved.filterProtocolType) || 0)
+  const [filterAlgorithmType, setFilterAlgorithmType] = useState((saved && saved.filterAlgorithmType) || 0) // 0=全部, 1=直连, 2=转换
+  const [filterDstModel, setFilterDstModel] = useState((saved && saved.filterDstModel) || '')
+  const [filterTools, setFilterTools] = useState((saved && saved.filterTools) || '')
+  const [filterAgentTool, setFilterAgentTool] = useState((saved && saved.filterAgentTool) || '')
+  const [filterInTok, setFilterInTok] = useState((saved && saved.filterInTok) || 0)
+  const [filterOutTok, setFilterOutTok] = useState((saved && saved.filterOutTok) || 0)
+
+  // debounce 保存筛选参数到 localStorage
+  const saveTimerRef = useRef(null)
+  useEffect(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      const filters = {
+        userName, modelName, days, pageSize,
+        filterUrl, filterMethod, filterStatus, filterStatusNot,
+        filterProtocolType, filterAlgorithmType, filterDstModel,
+        filterTools, filterAgentTool, filterInTok, filterOutTok,
+      }
+      const key = `lsm:chat_analysis:filters:${isAdmin ? 'manager' : 'user'}`
+      safeSet(key, JSON.stringify(filters))
+    }, 300)
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
+  }, [userName, modelName, days, pageSize, filterUrl, filterMethod, filterStatus, filterStatusNot,
+      filterProtocolType, filterAlgorithmType, filterDstModel, filterTools, filterAgentTool,
+      filterInTok, filterOutTok, isAdmin])
   // 下拉选项（接口动态拉取）
   const [dstModels, setDstModels] = useState([])
   const [agentTools, setAgentTools] = useState([])
