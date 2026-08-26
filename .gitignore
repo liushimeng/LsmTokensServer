@@ -12,6 +12,9 @@ server.key
 # ===== 本地方案文档（含安全审计细节，禁止提交）=====
 tmpPlan/
 
+# ===== 本地测试凭证（含 API Key / 模型名，禁止提交）=====
+user_model_info.json
+
 # ===== Go =====
 ServerGo/LsmTokensServer
 ServerGo/LsmTokensServer.exe
