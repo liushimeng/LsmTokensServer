@@ -30,6 +30,8 @@ const (
 	maxLoginFailures        = 3
 	loginLockDuration       = 10 * time.Minute
 	loginFailureWindow      = time.Minute
+	// 阶段AP：loginAttempts 惰性清理阈值，超过后在下一次失败记录时清理全部过期条目
+	loginAttemptsCleanupThreshold = 1024
 )
 
 // ========== JWT 密钥管理（v2.0.56 安全加固 + 持久化兜底） ==========
@@ -219,14 +221,25 @@ func checkLoginAttempt(ip string) error {
 }
 
 // recordLoginFailure 记录登录失败
-func recordLoginFailure(ip string) {
+func recordLoginFailure(key string) {
 	loginAttemptsMu.Lock()
 	defer loginAttemptsMu.Unlock()
 
-	attempt, exists := loginAttempts[ip]
+	// 惰性清理：攻击者轮换 IP/账号名可制造大量一次性 key，map 超过阈值时
+	// 清掉已过锁定且超出失败窗口的条目，防止长期运行内存缓慢增长。
+	if len(loginAttempts) > loginAttemptsCleanupThreshold {
+		now := time.Now()
+		for k, a := range loginAttempts {
+			if a.lockedUntil.Before(now) && now.Sub(a.lastFailedTime) > loginFailureWindow {
+				delete(loginAttempts, k)
+			}
+		}
+	}
+
+	attempt, exists := loginAttempts[key]
 	if !exists {
 		attempt = &loginAttempt{}
-		loginAttempts[ip] = attempt
+		loginAttempts[key] = attempt
 	}
 
 	now := time.Now()
@@ -248,6 +261,28 @@ func clearLoginAttempt(ip string) {
 	loginAttemptsMu.Lock()
 	defer loginAttemptsMu.Unlock()
 	delete(loginAttempts, ip)
+}
+
+// loginAttemptAccountKey 计算账号维度防爆破 key（用户名或模型名）；未知登录类型返回空串（不参与账号维度锁定）
+// 阶段AP（OBS-4）：trustProxyHeaders=true 时攻击者可轮换 X-Forwarded-For 绕过 IP 锁定，
+// 账号维度计数与 IP 维度互补——IP 锁定防「喷洒」（同 IP 试多账号），账号锁定防「撞库」（换 IP 试同账号）。
+// DoS 权衡：攻击者可借机锁定他人账号 10 分钟；因登录前置验证码（每次尝试均需打码），
+// 恶意锁定成本远高于收益，且 IP 维度本就存在同类锁定，语义可接受。
+func loginAttemptAccountKey(loginType, userName, modelName string) string {
+	switch loginType {
+	case "user":
+		if userName == "" {
+			return ""
+		}
+		return "user:" + userName
+	case "model":
+		if modelName == "" {
+			return ""
+		}
+		return "model:" + modelName
+	default:
+		return ""
+	}
 }
 
 // ========== 验证码接口 ==========
@@ -316,11 +351,18 @@ func userLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clientIP := getClientIP(r)
+	accountKey := loginAttemptAccountKey(req.LoginType, req.UserName, req.ModelName)
 
-	// 检查是否被锁定
+	// 检查是否被锁定（IP 维度 + 账号维度，任一命中即拒绝）
 	if err := checkLoginAttempt(clientIP); err != nil {
 		json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: err.Error()})
 		return
+	}
+	if accountKey != "" {
+		if err := checkLoginAttempt(accountKey); err != nil {
+			json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: err.Error()})
+			return
+		}
 	}
 
 	// 校验验证码
@@ -351,7 +393,11 @@ func userLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	isFormSubmit := strings.Contains(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded")
 
 	if err != nil {
+		// 凭据错误：IP 与账号双维度记录（验证码已通过，属真实撞库尝试）
 		recordLoginFailure(clientIP)
+		if accountKey != "" {
+			recordLoginFailure(accountKey)
+		}
 		if isFormSubmit {
 			http.Redirect(w, r, "UserLogin?error="+url.QueryEscape(err.Error()), http.StatusFound)
 		} else {
@@ -384,6 +430,9 @@ func userLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, cookie)
 
 	clearLoginAttempt(clientIP)
+	if accountKey != "" {
+		clearLoginAttempt(accountKey)
+	}
 
 	// 记录登录日志
 	loginTypeStr := "用户登录"
