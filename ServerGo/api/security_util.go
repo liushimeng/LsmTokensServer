@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
+
+	modelsdb "github.com/lishimeng/LsmTokensServer/models"
 )
 
 // ValidateField 通用字段校验：仅做长度限制（SQL 注入防护由 GORM 参数化查询保证，
@@ -64,4 +66,24 @@ func MaskPhone(phone string) string {
 		return "****"
 	}
 	return phone[:3] + "****" + phone[len(phone)-4:]
+}
+
+// MaskAPIKey 模型 API Key 掩码（前 8 位 + ****；不足 8 位全掩码）。
+// v2 安全加固（测试报告 20260826 BUG-4/SUG-1）：列表与 config 响应默认脱敏，
+// 完整 Key 仅经 reveal_key 显式获取（前端展示前缀与旧版打码格式一致）。
+func MaskAPIKey(key string) string {
+	if len(key) > 8 {
+		return key[:8] + "****"
+	}
+	if key != "" {
+		return "****"
+	}
+	return ""
+}
+
+// maskUserModelAPIKeys 原地脱敏模型列表的 API Key（查询函数每次返回全新切片，无缓存共享）
+func maskUserModelAPIKeys(models []modelsdb.TAgentHttpUserModelInfo) {
+	for i := range models {
+		models[i].APIKey = MaskAPIKey(models[i].APIKey)
+	}
 }

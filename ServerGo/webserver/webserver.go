@@ -59,6 +59,26 @@ func clientWebDist(cfg *config.LsmTokensServerConfig, role string) (string, erro
 	return "", fmt.Errorf("ClientWeb/dist-%s not found (candidates: %v)", role, candidates)
 }
 
+// isAPIShapedPath 判断路径是否为 API 形态（未注册时不应回落 SPA）。
+// REST 约定：JSON 接口以 Interface 后缀命名；协议转换分析器是唯一不以 Interface
+// 结尾的 API 家族（/ProtocolConvertAnalyzer* 前缀统一）。前端页面为 hash 路由
+// （#/Xxx），无任何页面路径命中这两种形态。
+func isAPIShapedPath(p string) bool {
+	last := strings.Trim(p, "/")
+	if i := strings.LastIndex(last, "/"); i >= 0 {
+		last = last[i+1:]
+	}
+	return strings.HasSuffix(last, "Interface") || strings.HasPrefix(last, "ProtocolConvertAnalyzer")
+}
+
+// writeAPINotFound 未注册的 API 形态路径统一 404 JSON（测试报告 20260826 BUG-3/SUG-2：
+// 此前回落 SPA index.html 返回 200+HTML，前端无法区分"接口不存在"与正常页面）
+func writeAPINotFound(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprintf(w, `{"success":false,"message":"接口不存在"}`)
+}
+
 // spaFileServer SPA 静态文件服务：存在则返回文件，否则回落 index.html
 type spaFileServer struct {
 	root http.FileSystem
@@ -71,6 +91,12 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := s.root.Open(path)
 	if err != nil {
+		// 未注册的 API 形态路径（如用户端访问管理专属 /UserManageInterface）：
+		// 返回 404 JSON 而非 SPA HTML，语义明确且无管理端信息泄漏
+		if isAPIShapedPath(r.URL.Path) {
+			writeAPINotFound(w)
+			return
+		}
 		// 页面导航（Accept 含 text/html）回落 index.html 前先 301 补尾斜杠，
 		// 保证页面内相对资源（./assets/...）以目录为基准解析（网关子路径代理兼容）
 		if strings.Contains(r.Header.Get("Accept"), "text/html") &&

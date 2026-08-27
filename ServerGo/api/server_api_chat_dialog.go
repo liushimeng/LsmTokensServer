@@ -44,6 +44,8 @@ func chatDialogInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		handleChatDialogModels(w, req.UserName)
 	case "config":
 		handleChatDialogConfig(w, req.UserName, req.ModelName)
+	case "reveal_key":
+		handleChatDialogRevealKey(w, req.UserName, req.ModelName)
 	default:
 		json.NewEncoder(w).Encode(ChatDialogInterfaceResponse{Success: false, Message: "未知操作: " + req.Action})
 	}
@@ -84,6 +86,16 @@ func userChatDialogInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		handleChatDialogConfigByUserID(w, claims.UserID, req.ModelName)
+	case "reveal_key":
+		if req.ModelName == "" {
+			json.NewEncoder(w).Encode(ChatDialogInterfaceResponse{Success: false, Message: "缺少 model_name 参数"})
+			return
+		}
+		if err := verifyUserModelAccess(claims, req.ModelName); err != nil {
+			json.NewEncoder(w).Encode(ChatDialogInterfaceResponse{Success: false, Message: err.Error()})
+			return
+		}
+		handleChatDialogRevealKeyByUserID(w, claims.UserID, req.ModelName)
 	default:
 		json.NewEncoder(w).Encode(ChatDialogInterfaceResponse{Success: false, Message: "未知操作: " + req.Action})
 	}
@@ -113,16 +125,10 @@ func handleChatDialogModelsByUserID(w http.ResponseWriter, userID uint64) {
 
 	var result []map[string]interface{}
 	for _, m := range models {
-		keyDisplay := ""
-		if len(m.APIKey) > 8 {
-			keyDisplay = m.APIKey[:8] + "****"
-		} else if m.APIKey != "" {
-			keyDisplay = "****"
-		}
 		result = append(result, map[string]interface{}{
 			"id":             m.ID,
 			"model_name":     m.ModelName,
-			"api_key_masked": keyDisplay,
+			"api_key_masked": MaskAPIKey(m.APIKey),
 		})
 	}
 
@@ -141,6 +147,38 @@ func handleChatDialogConfig(w http.ResponseWriter, userName, modelName string) {
 		return
 	}
 	handleChatDialogConfigByUserID(w, user.ID, modelName)
+}
+
+// handleChatDialogRevealKey 管理员显式获取完整 API Key（config 默认脱敏，测试报告 SUG-1）
+func handleChatDialogRevealKey(w http.ResponseWriter, userName, modelName string) {
+	if userName == "" {
+		json.NewEncoder(w).Encode(ChatDialogInterfaceResponse{Success: false, Message: "缺少 user_name 参数"})
+		return
+	}
+	user, err := modelsdb.GetUserByName(userName)
+	if err != nil {
+		json.NewEncoder(w).Encode(ChatDialogInterfaceResponse{Success: false, Message: "用户不存在"})
+		return
+	}
+	handleChatDialogRevealKeyByUserID(w, user.ID, modelName)
+}
+
+// handleChatDialogRevealKeyByUserID 根据用户ID显式获取完整 API Key
+// （发送对话/查看 Key 时前端按需调用，Key 只存在于页面内存，不落 localStorage）
+func handleChatDialogRevealKeyByUserID(w http.ResponseWriter, userID uint64, modelName string) {
+	if modelName == "" {
+		json.NewEncoder(w).Encode(ChatDialogInterfaceResponse{Success: false, Message: "缺少 model_name 参数"})
+		return
+	}
+	model, err := modelsdb.GetUserModelByUserIDAndModelName(userID, modelName)
+	if err != nil {
+		json.NewEncoder(w).Encode(ChatDialogInterfaceResponse{Success: false, Message: "模型不存在: " + err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(ChatDialogInterfaceResponse{
+		Success: true,
+		Data:    map[string]interface{}{"api_key": model.APIKey},
+	})
 }
 
 // handleChatDialogConfigByUserID 根据用户ID获取模型对话配置
@@ -212,7 +250,8 @@ func handleChatDialogConfigByUserID(w http.ResponseWriter, userID uint64, modelN
 		Data: map[string]interface{}{
 			"model_id":             model.ID,
 			"model_name":           model.ModelName,
-			"api_key":              model.APIKey,
+			"api_key":              MaskAPIKey(model.APIKey), // 默认脱敏；完整 Key 经 action=reveal_key 按需获取
+			"api_key_masked":       MaskAPIKey(model.APIKey),
 			"protocol_type":        protocolType,
 			"agent_addr":           config.G.AgentProductListenAddr,
 			"agent_port":           config.G.AgentListenPort,

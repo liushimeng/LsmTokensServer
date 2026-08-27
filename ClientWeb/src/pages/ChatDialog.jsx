@@ -26,6 +26,7 @@ export default function ChatDialog({ route }) {
   const [loadingConfig, setLoadingConfig] = useState(false)
   const [error, setError] = useState('')
   const [showKey, setShowKey] = useState(false)
+  const [fullKey, setFullKey] = useState('') // 完整 Key 经 reveal_key 按需获取，仅存页面内存（不落 localStorage）
 
   // 对话状态
   const [messages, setMessages] = useState([]) // [{role:'user'|'assistant'|'system', content}]
@@ -70,7 +71,7 @@ export default function ChatDialog({ route }) {
   // 拉取选中模型的对话配置（用户端不传 user_name，后端按登录态鉴权）
   const loadConfig = async (u = userName, m = modelName) => {
     if ((!u.trim() && !userMode) || !m) { setError(t('chatDialog.selectModelFirst')); return }
-    setLoadingConfig(true); setError(''); setConfig(null); setShowKey(false)
+    setLoadingConfig(true); setError(''); setConfig(null); setShowKey(false); setFullKey('')
     try {
       const cfgBody = { action: 'config', model_name: m }
       if (!userMode) cfgBody.user_name = u.trim()
@@ -161,6 +162,29 @@ export default function ChatDialog({ route }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages])
 
+  // 显式获取完整 API Key（config 默认脱敏；「显示」与发送对话时按需调用，结果仅存页面内存）
+  const revealKey = async () => {
+    if (!config) return ''
+    if (fullKey) return fullKey
+    const body = { action: 'reveal_key', model_name: config.model_name }
+    if (!userMode) body.user_name = (config.user_name || userName || '').trim()
+    const d = await post('ChatDialogInterface', body)
+    const k = (d && d.data && d.data.api_key) || ''
+    setFullKey(k)
+    return k
+  }
+
+  // 「显示 / 隐藏」完整 Key：首次显示先走 reveal_key 二次获取
+  const toggleShowKey = async () => {
+    if (!showKey && !fullKey) {
+      try { await revealKey() } catch (e) {
+        setError((e && e.message) || t('chatDialog.getConfigFailed'))
+        return
+      }
+    }
+    setShowKey(!showKey)
+  }
+
   const proxyPath = config
     ? (protocolType === 1 ? (config.anthropic_proxy_path || t('chatDialog.anthropic')) : (config.openai_proxy_path || t('chatDialog.openai')))
     : ''
@@ -224,11 +248,15 @@ export default function ChatDialog({ route }) {
     const msgIndex = next.length - 1
     const sys = systemPrompt.trim()
     try {
+      // 完整 API Key 按需揭示（config 响应默认脱敏，仅在此刻获取并暂存页面内存）
+      let key = fullKey
+      if (!key) key = await revealKey()
+      if (!key) throw new Error(t('chatDialog.getConfigFailed'))
       const isAnthropic = protocolType === 1
       const apiPath = isAnthropic ? `${proxyPath}/v1/messages` : `${proxyPath}/chat/completions`
       const headers = {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + config.api_key,
+        'Authorization': 'Bearer ' + key,
       }
       if (isAnthropic) headers['anthropic-version'] = '2023-06-01'
       abortRef.current = new AbortController()
@@ -373,8 +401,8 @@ export default function ChatDialog({ route }) {
               <dt>{t('chatDialog.apiKey')}</dt>
               <dd>
                 <span className="field-inline">
-                  <code>{showKey ? config.api_key : '••••••••••••'}</code>
-                  <button className="btn btn-link" onClick={() => setShowKey(!showKey)}>{showKey ? t('chatDialog.hide') : t('chatDialog.show')}</button>
+                  <code>{showKey ? fullKey : (config.api_key_masked || config.api_key || '••••••••••••')}</code>
+                  <button className="btn btn-link" onClick={toggleShowKey}>{showKey ? t('chatDialog.hide') : t('chatDialog.show')}</button>
                 </span>
               </dd>
               <dt>{t('chatDialog.proxyAddr')}</dt><dd>{config.agent_addr || '-'}:{config.agent_port}</dd>

@@ -190,6 +190,8 @@ func userModelManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})
 			return
 		}
+		// 响应脱敏：API Key 仅返回前 8 位掩码（前端仅展示前缀，编辑回传空值表示未修改）
+		maskUserModelAPIKeys(models)
 		json.NewEncoder(w).Encode(userManageResp{Success: true, Data: models})
 	case "add":
 		modelName, err := ValidateField(strings.TrimSpace(req.ModelName), 64, "模型名称")

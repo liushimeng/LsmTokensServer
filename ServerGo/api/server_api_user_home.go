@@ -55,6 +55,9 @@ func userModelListInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 响应脱敏：API Key 仅返回前 8 位掩码（完整 Key 经 ChatDialogInterface reveal_key 按需获取）
+	maskUserModelAPIKeys(models)
+
 	json.NewEncoder(w).Encode(userLoginResp{
 		Success: true,
 		Data:    models,
