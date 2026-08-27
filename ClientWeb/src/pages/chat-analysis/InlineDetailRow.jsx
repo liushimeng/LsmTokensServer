@@ -1,10 +1,11 @@
 // 内联展开详情面板：替代 Modal 弹窗，在表格行下方展开显示
 // 支持多条记录同时展开，按需加载 + 内存缓存
-import { useEffect } from 'react'
-import { parseSSEEvents, aggregateSSE, aggregateToText, sseEventsToText } from '../../shared/sse'
-import { prettyJSON } from '../../shared/json'
+// 2026-08-27 升级：工具栏新增 查找 / 复制 / 全屏；Esc 退出全屏；复制所见即所得。
+import { useEffect, useRef, useState } from 'react'
+import { buildViewText } from '../../shared/viewText'
 import { useI18n } from '../../i18n'
-import { VIEW_RAW, VIEW_JSON, VIEW_SSE, VIEW_AGG, DETAIL_FIELDS, viewLabels, protocolBadgeText } from './constants'
+import { protocolBadgeText } from './constants'
+import SearchBar from '../../components/SearchBar'
 import DetailHeader from './DetailHeader'
 import DetailTabs from './DetailTabs'
 import DetailBody from './DetailBody'
@@ -21,6 +22,15 @@ export default function InlineDetailRow({
 }) {
   const { t } = useI18n()
 
+  // 全屏状态
+  const [fullscreen, setFullscreen] = useState(false)
+  // 查找状态
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [matchCount, setMatchCount] = useState(0)
+  const rootRef = useRef(null)
+
   // 首次展开时自动加载默认字段
   useEffect(() => {
     if (detailState && !detailState.value && !detailState.loading && !detailState.cache['request_body']) {
@@ -29,27 +39,41 @@ export default function InlineDetailRow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 全屏时锁定背景滚动；卸载/退出全屏时复位
+  useEffect(() => {
+    if (!fullscreen) return undefined
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [fullscreen])
+
+  // Esc 退出全屏（SearchBar 内的 Esc 已 stopPropagation，互不干扰）
+  useEffect(() => {
+    if (!fullscreen) return undefined
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setFullscreen(false)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [fullscreen])
+
   if (!detailState) return null
 
-  const { tab, view, value, loading: isLoading, cache } = detailState
+  const { tab, view, value, loading: isLoading } = detailState
 
-  // 获取当前视图的"实际显示文本"（用于复制）
-  const getShownContent = () => {
-    const v = value || ''
-    if (!tab.includes('body')) return v
-    if (view === VIEW_RAW) return v
-    if (view === VIEW_JSON) return prettyJSON(v)
-    if (view === VIEW_SSE) return sseEventsToText(parseSSEEvents(v))
-    if (view === VIEW_AGG) return aggregateToText(aggregateSSE(v))
-    return v
-  }
+  // 当前视图的"实际显示文本"（查找与复制共用，保证所见即所得）
+  const getShownContent = () => buildViewText(tab, view, value)
 
   const handleTabChange = (field) => {
-    // 切换字段时，如果缓存中有数据则直接使用，否则加载
+    setActiveIndex(0)
     onTabChange(field)
   }
 
   const handleViewChange = (v) => {
+    setActiveIndex(0)
     onViewChange(v)
   }
 
@@ -59,16 +83,43 @@ export default function InlineDetailRow({
     }).catch(() => {})
   }
 
+  // 查找交互
+  const handleQueryChange = (q) => { setQuery(q); setActiveIndex(0) }
+  const handlePrev = () => { if (matchCount > 0) setActiveIndex((i) => (i - 1 + matchCount) % matchCount) }
+  const handleNext = () => { if (matchCount > 0) setActiveIndex((i) => (i + 1) % matchCount) }
+  const handleCount = (n) => {
+    setMatchCount(n)
+    setActiveIndex((i) => (n === 0 ? 0 : Math.min(i, n - 1)))
+  }
+  const handleSearchToggle = () => {
+    if (searchOpen) { setSearchOpen(false); setQuery(''); setActiveIndex(0); setMatchCount(0) } else { setSearchOpen(true) }
+  }
+
+  const search = { query, activeIndex, onCount: handleCount }
+
   return (
-    <div className="inline-detail-row">
-      {/* 详情头部：标题 + 关闭按钮 */}
+    <div ref={rootRef} className={`inline-detail-row${fullscreen ? ' inline-detail-fullscreen' : ''}`}>
+      {/* 详情头部：标题 + 工具栏（查找/复制/全屏/关闭） */}
       <div className="inline-detail-title">
         <span className="inline-detail-title-text">
           {t('chatAnalysis.conversationDetail')} #{row.id} · {protocolBadgeText(row.dst_endpoint_algorithm_type, t)}
         </span>
-        <button className="btn btn-sm inline-detail-close" onClick={onClose} title={t('common.collapse')}>
-          ✕ {t('common.collapse')}
-        </button>
+        <div className="inline-detail-actions">
+          <button className={`btn btn-sm${searchOpen ? ' btn-active' : ''}`} onClick={handleSearchToggle}
+                  title={t('chatAnalysis.search')}>
+            🔍 {t('chatAnalysis.search')}
+          </button>
+          <button className="btn btn-sm" onClick={handleCopy} title={t('chatAnalysis.copyView')}>
+            {copyOk ? '📋 ' + t('common.copied') + ' ✓' : '📋 ' + t('chatAnalysis.copyView')}
+          </button>
+          <button className="btn btn-sm" onClick={() => setFullscreen((f) => !f)}
+                  title={fullscreen ? t('chatAnalysis.exitFullscreen') : t('chatAnalysis.fullscreen')}>
+            {fullscreen ? '🗗 ' + t('chatAnalysis.exitFullscreen') : '⛶ ' + t('chatAnalysis.fullscreen')}
+          </button>
+          <button className="btn btn-sm inline-detail-close" onClick={onClose} title={t('common.collapse')}>
+            ✕ {t('common.collapse')}
+          </button>
+        </div>
       </div>
 
       {/* 协议流向 + KPI 卡片 + 请求信息 */}
@@ -82,9 +133,22 @@ export default function InlineDetailRow({
         onViewChange={handleViewChange}
       />
 
+      {/* 查找栏 */}
+      {searchOpen ? (
+        <SearchBar
+          query={query}
+          onQueryChange={handleQueryChange}
+          activeIndex={activeIndex}
+          matchCount={matchCount}
+          onPrev={handlePrev}
+          onNext={handleNext}
+          onClose={handleSearchToggle}
+        />
+      ) : null}
+
       {/* 详情主体 */}
       <main className="detail-body">
-        <DetailBody tab={tab} view={view} value={value} loading={isLoading} />
+        <DetailBody tab={tab} view={view} value={value} loading={isLoading} search={search} />
       </main>
 
       {/* 底部状态栏 */}
@@ -92,8 +156,6 @@ export default function InlineDetailRow({
         tab={tab}
         view={view}
         value={value}
-        copyOk={copyOk}
-        onCopy={handleCopy}
       />
     </div>
   )

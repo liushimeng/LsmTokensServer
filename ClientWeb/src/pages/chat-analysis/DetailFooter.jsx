@@ -1,9 +1,10 @@
-// 详情底部状态栏：字段名、视图类型、大小、行数、复制按钮
+// 详情底部状态栏：字段名、视图类型、大小、行数
+// 2026-08-27 升级：复制按钮上移至详情工具栏，本栏仅保留元信息。
 import { fmtBytes } from '../../shared/format'
 import { useI18n } from '../../i18n'
 import { DETAIL_FIELDS, viewLabels } from './constants'
 
-export default function DetailFooter({ tab, view, value, copyOk, onCopy }) {
+export default function DetailFooter({ tab, view, value }) {
   const { t } = useI18n()
   const isBody = tab.includes('body')
   const labels = viewLabels(t)
@@ -22,11 +23,6 @@ export default function DetailFooter({ tab, view, value, copyOk, onCopy }) {
         {isBody ? <span>{labels[view]}</span> : null}
         <span className="muted">{t('chatAnalysis.size')}</span><span>{byteSize}</span>
         <span className="muted">{t('chatAnalysis.lines')}</span><span>{lineCount}</span>
-      </div>
-      <div className="detail-foot-actions">
-        <button className="btn btn-sm" onClick={onCopy}>
-          {copyOk ? t('common.copied') + ' ✓' : t('chatAnalysis.copyView')}
-        </button>
       </div>
     </footer>
   )

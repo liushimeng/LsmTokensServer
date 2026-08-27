@@ -29,6 +29,20 @@ func TestGetAgentHttpTransactionFieldByID_ValidatesBeforeDB(t *testing.T) {
 	}
 }
 
+// 2026-08-27 升级：src_protocol 原始协议字段从详情白名单移除，必须在 DB 前被拒绝。
+func TestChatAnalysisDetailField_SrcProtocolRejected(t *testing.T) {
+	for _, field := range []string{"request_src_protocol_body", "response_src_protocol_body", "request_src_protocol_headers", "response_src_protocol_headers"} {
+		if _, ok := modelsdb.ResolveChatAnalysisDetailColumn(field); ok {
+			t.Fatalf("src_protocol 字段不应在白名单中: %s", field)
+		}
+	}
+	for _, field := range []string{"request_headers", "request_body", "response_headers", "response_body"} {
+		if _, ok := modelsdb.ResolveChatAnalysisDetailColumn(field); !ok {
+			t.Fatalf("核心字段应在白名单中: %s", field)
+		}
+	}
+}
+
 func TestChatAnalysisDetailHandler_FieldValidation(t *testing.T) {
 	tests := []struct {
 		name string

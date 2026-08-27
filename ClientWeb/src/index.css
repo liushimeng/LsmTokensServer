@@ -600,3 +600,35 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
 .lang-switcher-item.active { background: #2563eb; color: #fff; }
 .lang-switcher-item-label { flex: 1; }
 .lang-switcher-check { font-size: 14px; color: #34d399; }
+
+/* ===== 2026-08-27 对话分析记录查看器升级：工具栏 / 查找栏 / 高亮 / 全屏 ===== */
+.inline-detail-actions { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* 查找栏 */
+.detail-search-bar { display: flex; gap: 6px; align-items: center; padding: 6px 16px; border-bottom: 1px solid var(--border); background: #fffbeb; }
+.detail-search-bar .dsb-icon { font-size: 13px; }
+.detail-search-bar .dsb-input { flex: 1; min-width: 120px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; font-family: inherit; }
+.detail-search-bar .dsb-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+.detail-search-bar .dsb-count { font-size: 12px; color: var(--muted); min-width: 44px; text-align: center; white-space: nowrap; }
+.detail-search-bar .dsb-count.dsb-nomatch { color: var(--danger); font-weight: 600; }
+
+/* 查找高亮（只读文本模式） */
+.highlight-text { margin: 0; }
+.highlight-text mark { background: #fde68a; color: inherit; border-radius: 2px; padding: 0 1px; }
+.highlight-text mark.mark-active { background: #f59e0b; color: #1f2937; outline: 1px solid #b45309; }
+
+/* 全屏覆盖层：面板占满视口，内容区自滚动 */
+.inline-detail-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  margin: 0;
+  border-radius: 0;
+  border-width: 0;
+  display: flex;
+  flex-direction: column;
+  animation: none;
+}
+.inline-detail-fullscreen .detail-body { flex: 1; max-height: none; min-height: 0; overflow: auto; }
+.inline-detail-fullscreen .log-box { max-height: none; }
+.inline-detail-fullscreen .detail-foot { flex-shrink: 0; }

@@ -879,13 +879,12 @@ func GetDistinctDstModelNames(userName, modelName string, subTableNum int) ([]st
 
 // chatAnalysisDetailFieldColumns 是 /ChatAnalysis 展开区块允许按需读取的字段白名单。
 // map value 仅由服务端常量提供，禁止把客户端 field 直接传给 Select。
+// 注：*_src_protocol_* 原始协议字段因协议转换未启用，自 2026-08-27 起不再对白名单开放。
 var chatAnalysisDetailFieldColumns = map[string]string{
-	"request_headers":            "request_headers",
-	"request_body":               "request_body",
-	"request_src_protocol_body":  "request_src_protocol_body",
-	"response_headers":           "response_headers",
-	"response_body":              "response_body",
-	"response_src_protocol_body": "response_src_protocol_body",
+	"request_headers":  "request_headers",
+	"request_body":     "request_body",
+	"response_headers": "response_headers",
+	"response_body":    "response_body",
 }
 
 func ResolveChatAnalysisDetailColumn(field string) (string, bool) {
