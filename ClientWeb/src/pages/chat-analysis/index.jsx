@@ -172,6 +172,7 @@ export default function ChatAnalysis({ route }) {
         onQuery={handleQuery} loading={loading}
         selectedCount={selected.length} onDeleteSelected={batchDelete} deleting={deleting}
         dstModels={dstModels} agentTools={agentTools}
+        userOptions={userOptions} myModelNames={myModelNames}
       />
 
       {error ? <div className="alert alert-error">{error}</div> : null}

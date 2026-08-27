@@ -6,8 +6,9 @@ export function baseUrl() {
   return p.substring(0, p.lastIndexOf('/') + 1)
 }
 
-// 请求超时上限（毫秒）：服务重启期间避免请求永久挂起（5 秒平衡用户体验与网络波动容忍）
-const REQUEST_TIMEOUT_MS = 5000
+// 默认请求超时上限（毫秒）：服务重启期间避免请求永久挂起（5 秒平衡用户体验与网络波动容忍）
+// 调用方可通过 options.timeout 覆盖（如源站保存需要等待后端连通性测试，最长 60 秒）
+const DEFAULT_TIMEOUT_MS = 5000
 
 export async function request(path, options = {}) {
   const opts = { credentials: 'include', ...options }
@@ -17,9 +18,9 @@ export async function request(path, options = {}) {
   } else {
     opts.headers = { ...(opts.headers || {}) }
   }
-  // 超时控制：服务端重启/网络异常时避免请求永久挂起
+  // 超时控制：服务端重启/网络异常时避免请求永久挂起（可由调用方 options.timeout 覆盖）
   const controller = new AbortController()
-  const tid = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const tid = setTimeout(() => controller.abort(), options.timeout || DEFAULT_TIMEOUT_MS)
   opts.signal = controller.signal
   let res
   try {
@@ -42,12 +43,16 @@ export async function request(path, options = {}) {
     }
     throw new Error((data && data.message) || `HTTP ${res.status}`)
   }
-  if (data && data.success === false) throw new Error(data.message || '请求失败')
+  if (data && data.success === false) {
+    const err = new Error(data.message || '请求失败')
+    err.data = data.data
+    throw err
+  }
   return data
 }
 
-export const get = (path) => request(path, { method: 'GET' })
-export const post = (path, body) => request(path, { method: 'POST', body })
+export const get = (path, opts) => request(path, { method: 'GET', ...opts })
+export const post = (path, body, opts) => request(path, { method: 'POST', body, ...opts })
 export const postForm = (path, formData) =>
   request(path, { method: 'POST', body: formData })
 

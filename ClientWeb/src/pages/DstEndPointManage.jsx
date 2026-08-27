@@ -84,7 +84,7 @@ export default function DstEndPointManage() {
     }
     if (!form.id || form.api_key) body.api_key = form.api_key
     try {
-      await post('DstEndPointManageInterface', body)
+      await post('DstEndPointManageInterface', body, { timeout: 60000 })
       setForm(null)
       loadData()
     } catch (e) {

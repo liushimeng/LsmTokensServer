@@ -29,6 +29,7 @@ export default function ChatAnalysisToolbar({
   selectedCount, onDeleteSelected, deleting,
   // 下拉选项
   dstModels, agentTools,
+  userOptions, myModelNames,
 }) {
   const { t } = useI18n()
   const PAGE_SIZES = [3, 5, 10, 15, 20, 50, 100]
@@ -38,11 +39,13 @@ export default function ChatAnalysisToolbar({
       {isAdmin ? <label>{t('chatAnalysis.userNameLabel')}
         <select value={userName} onChange={(e) => { setUserName(e.target.value); setModelName('') }} style={{ width: 140 }}>
           <option value="">{t('chatAnalysis.selectUser')}</option>
+          {(userOptions || []).map((u) => <option key={u.user_name} value={u.user_name}>{u.user_name}</option>)}
         </select>
       </label> : null}
       <label>{t('chatAnalysis.modelNameLabel')}
         <select value={modelName} onChange={(e) => setModelName(e.target.value)} style={{ width: 170 }}>
           <option value="">{t('chatAnalysis.selectModel')}</option>
+          {(isAdmin ? modelNamesOf(userOptions, userName) : (myModelNames || [])).map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
       </label>
       <label>{t('chatAnalysis.timeRange')}

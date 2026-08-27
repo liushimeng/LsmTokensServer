@@ -130,7 +130,7 @@ a { color: var(--primary); text-decoration: none; }
 .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .modal-title { font-weight: 600; font-size: 15px; letter-spacing: 0.02em; }
 .modal-close { border: none; background: none; font-size: 16px; cursor: pointer; color: var(--muted); }
-.modal-body { padding: 16px 18px; overflow: auto; flex: 1; min-height: 0; }
+.modal-body { padding: 16px 18px; overflow: auto; flex: 1; min-height: 0; color: var(--text); }
 .modal-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
 .modal-full { max-width: none !important; max-height: none !important; width: 100vw; height: 100vh; border-radius: 0; }
 
