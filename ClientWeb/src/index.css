@@ -335,10 +335,14 @@ a { color: var(--primary); text-decoration: none; }
 }
 
 /* ===== 阶段AM：JSON 美化可折叠树 ===== */
+/* 阶段AR：根级容器不再用 <details>，每个对象/数组节点都有独立 <details>
+   折叠按钮；深层嵌套时也要保留 summary 的展开箭头与可点击样式。 */
 .json-tree { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.7; padding: 4px 0; }
+.json-tree details.json-tree-container { margin: 0; }
+.json-tree details.json-tree-container > summary { list-style: disclosure-closed; cursor: pointer; color: #475569; font-weight: 500; padding: 2px 4px; border-radius: 4px; display: list-item; }
+.json-tree details.json-tree-container[open] > summary { list-style: disclosure-open; }
 .json-tree .json-tree-body { margin-left: 16px; padding-left: 8px; border-left: 1px dashed #e2e8f0; }
 .json-tree .json-tree-row { padding: 1px 0; }
-.json-tree summary { cursor: pointer; color: #475569; font-weight: 500; padding: 2px 4px; border-radius: 4px; }
 .json-tree summary:hover { background: #f1f5f9; }
 .json-tree .key { color: #2563eb; font-weight: 600; }
 .json-tree .string { color: #16a34a; }

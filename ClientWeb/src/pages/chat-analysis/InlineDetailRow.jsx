@@ -3,6 +3,7 @@
 // 2026-08-27 升级：工具栏新增 查找 / 复制 / 全屏；Esc 退出全屏；复制所见即所得。
 import { useEffect, useRef, useState } from 'react'
 import { buildViewText } from '../../shared/viewText'
+import { copyToClipboard } from '../../shared/clipboard'
 import { useI18n } from '../../i18n'
 import { protocolBadgeText } from './constants'
 import SearchBar from '../../components/SearchBar'
@@ -78,9 +79,9 @@ export default function InlineDetailRow({
   }
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(getShownContent() || '').then(() => {
-      onCopy()
-    }).catch(() => {})
+    copyToClipboard(getShownContent() || '').then((ok) => {
+      if (ok) onCopy()
+    })
   }
 
   // 查找交互
