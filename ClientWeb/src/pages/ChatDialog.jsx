@@ -49,18 +49,20 @@ export default function ChatDialog({ route }) {
     : ''
 
   // 拉取用户的模型列表（管理端按选中用户名查询；用户端登录态即身份，不传 user_name）
-  const loadModels = async (u = userName) => {
-    if (!u.trim() && !userMode) { setError(t('chatDialog.selectUserFirst')); return }
+  // modeOverride：显式传入用户模式，避免挂载 effect 内 setUserMode 同 tick 调用时读到旧闭包值（BUG-2）
+  const loadModels = async (u = userName, modeOverride) => {
+    const isUserMode = modeOverride !== undefined ? modeOverride : userMode
+    if (!u.trim() && !isUserMode) { setError(t('chatDialog.selectUserFirst')); return }
     setLoadingModels(true); setError('')
     try {
       const body = { action: 'models' }
-      if (!userMode) body.user_name = u.trim()
+      if (!isUserMode) body.user_name = u.trim()
       const d = await post('ChatDialogInterface', body)
       setModels(d.data || [])
       // 默认选中路由带入的模型
       if (init.modelName && (d.data || []).some((m) => m.model_name === init.modelName)) {
         setModelName(init.modelName)
-        loadConfig(u.trim(), init.modelName)
+        loadConfig(u.trim(), init.modelName, isUserMode)
       }
     } catch (e) {
       setError(e.message || t('chatDialog.getModelsFailed'))
@@ -69,12 +71,13 @@ export default function ChatDialog({ route }) {
   }
 
   // 拉取选中模型的对话配置（用户端不传 user_name，后端按登录态鉴权）
-  const loadConfig = async (u = userName, m = modelName) => {
-    if ((!u.trim() && !userMode) || !m) { setError(t('chatDialog.selectModelFirst')); return }
+  const loadConfig = async (u = userName, m = modelName, modeOverride) => {
+    const isUserMode = modeOverride !== undefined ? modeOverride : userMode
+    if ((!u.trim() && !isUserMode) || !m) { setError(t('chatDialog.selectModelFirst')); return }
     setLoadingConfig(true); setError(''); setConfig(null); setShowKey(false); setFullKey('')
     try {
       const cfgBody = { action: 'config', model_name: m }
-      if (!userMode) cfgBody.user_name = u.trim()
+      if (!isUserMode) cfgBody.user_name = u.trim()
       const d = await post('ChatDialogInterface', cfgBody)
       const cfg = d.data || {}
       setConfig(cfg)
@@ -85,7 +88,7 @@ export default function ChatDialog({ route }) {
         if (saved === '1' || saved === '2') pt = parseInt(saved, 10)
       } catch { /* 忽略 */ }
       setProtocolType(pt)
-      loadHistory(cfg, pt)
+      loadHistory(cfg, pt, isUserMode)
     } catch (e) {
       setError(e.message || t('chatDialog.getConfigFailed'))
     } finally { setLoadingConfig(false) }
@@ -96,8 +99,9 @@ export default function ChatDialog({ route }) {
   const HISTORY_MAX_MESSAGES = 200
   const HISTORY_EXPIRE_MS = 30 * 24 * 60 * 60 * 1000
 
-  const loadHistory = (cfg, pt) => {
-    const key = userMode
+  const loadHistory = (cfg, pt, modeOverride) => {
+    const isUserMode = modeOverride !== undefined ? modeOverride : userMode
+    const key = isUserMode
       ? `lsm_chat_history_user_${cfg.model_name}`
       : `lsm_chat_history_${cfg.user_name || userName}_${cfg.model_name}`
     try {
@@ -148,7 +152,7 @@ export default function ChatDialog({ route }) {
     post('UserInfoInterface').then((d) => {
       const isUser = d && d.data && d.data.login_type && d.data.login_type !== 'manager'
       setUserMode(isUser)
-      if (isUser) loadModels('')
+      if (isUser) loadModels('', true)
     }).catch(() => { /* 探测失败按管理端处理 */ })
     // 路由带 user_name 时自动拉取模型列表
     if (init.userName) loadModels(init.userName)

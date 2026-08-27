@@ -122,7 +122,7 @@ export default function ChatAnalysisTask({ route }) {
         <label>{t('chatAnalysisTask.timeRange')}
           <TimeRangeSelector span={days ?? 3} onChange={setDays} levels={levels} loading={levelsLoading} />
         </label>
-        <button className="btn btn-primary" onClick={doQuery} disabled={loading}>{t('common.search')}</button>
+        <button className="btn btn-primary" onClick={() => doQuery()} disabled={loading}>{t('common.search')}</button>
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
