@@ -356,6 +356,39 @@ a { color: var(--primary); text-decoration: none; }
 .json-tree-deep > summary { color: var(--muted); }
 .json-tree-truncated-more { color: #b45309; font-style: italic; padding: 2px 8px; font-size: 12px; }
 
+/* ===== 阶段AR：SSE 非流式完整响应卡片 ===== */
+.sse-event-card.sse-color-complete { border-left-color: #7c3aed; }
+.sse-event-card.sse-complete-card .sse-event-card-head { background: #faf5ff; }
+.agg-complete-banner {
+  background: #faf5ff;
+  border: 1px solid #c4b5fd;
+  border-radius: 6px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #5b21b6;
+  font-weight: 500;
+}
+.agg-empty-detail {
+  padding: 6px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+.agg-cache-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+.agg-cache-tag {
+  font-size: 11px;
+  background: rgba(124, 58, 237, 0.08);
+  color: #5b21b6;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
 /* ===== 阶段AP：SSE 事件卡片列表（增强版） ===== */
 .sse-event-summary { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0 8px; font-size: 12px; color: var(--muted); }
 .sse-event-summary .ses-total { font-weight: 600; color: var(--text); }
