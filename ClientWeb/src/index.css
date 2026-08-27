@@ -336,11 +336,13 @@ a { color: var(--primary); text-decoration: none; }
 
 /* ===== 阶段AM：JSON 美化可折叠树 ===== */
 /* 阶段AR：根级容器不再用 <details>，每个对象/数组节点都有独立 <details>
-   折叠按钮；深层嵌套时也要保留 summary 的展开箭头与可点击样式。 */
+   折叠按钮；深层嵌套时也要保留 summary 的展开箭头与可点击样式；
+   节点数过载时（truncated）summary 标橙，展开后可继续浏览前 N 项。 */
 .json-tree { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.7; padding: 4px 0; }
 .json-tree details.json-tree-container { margin: 0; }
 .json-tree details.json-tree-container > summary { list-style: disclosure-closed; cursor: pointer; color: #475569; font-weight: 500; padding: 2px 4px; border-radius: 4px; display: list-item; }
 .json-tree details.json-tree-container[open] > summary { list-style: disclosure-open; }
+.json-tree details.json-tree-container.json-tree-truncated > summary { color: #b45309; background: #fffbeb; }
 .json-tree .json-tree-body { margin-left: 16px; padding-left: 8px; border-left: 1px dashed #e2e8f0; }
 .json-tree .json-tree-row { padding: 1px 0; }
 .json-tree summary:hover { background: #f1f5f9; }
@@ -352,6 +354,7 @@ a { color: var(--primary); text-decoration: none; }
 .json-tree .json-tree-empty { color: var(--muted); padding: 2px 8px; }
 .json-tree-overflow { color: var(--muted); padding: 4px 8px; font-size: 12px; font-style: italic; }
 .json-tree-deep > summary { color: var(--muted); }
+.json-tree-truncated-more { color: #b45309; font-style: italic; padding: 2px 8px; font-size: 12px; }
 
 /* ===== 阶段AP：SSE 事件卡片列表（增强版） ===== */
 .sse-event-summary { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0 8px; font-size: 12px; color: var(--muted); }

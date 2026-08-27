@@ -64,12 +64,21 @@ export default function JsonTree({ value }) {
       )
     }
     if (node.kind === NODE_KIND_CONTAINER) {
-      const summaryText = node.key ? `${node.key}: ${node.typeLabel}` : node.typeLabel
+      const baseLabel = node.key ? `${node.key}: ${node.typeLabel}` : node.typeLabel
+      // 截断模式 summary 加上"对象过大"提示，summary 仍可点击展开。
+      const summaryText = node.truncated
+          ? (node.key ? `${node.key}: ${node.typeLabel} · 对象过大（已截断）` : `${node.typeLabel} · 对象过大（已截断）`)
+          : baseLabel
       return (
-        <details key={key} className="json-tree-container" open={node.open}>
+        <details key={key} className={`json-tree-container${node.truncated ? ' json-tree-truncated' : ''}`} open={node.open}>
           <summary>{summaryText}</summary>
           <div className="json-tree-body">
             {node.children.map((c, ci) => renderChild(c, `${key}-${ci}`))}
+            {node.truncated && node.truncatedRemain > 0 ? (
+              <div className="json-tree-truncated-more">
+                … 剩余 {node.truncatedRemain} 项未渲染（防止浏览器卡顿）
+              </div>
+            ) : null}
           </div>
         </details>
       )

@@ -4,7 +4,10 @@
 // 通过 react-dom/server 的 renderToStaticMarkup 校验：
 //   1) 根级容器不渲染 <details>（避免遮蔽所有子级折叠按钮）；
 //   2) 每个对象/数组节点都有独立的 <details> 折叠按钮；
-//   3) 所有 summary 都有 list-style: disclosure-closed（保证三角箭头）。
+//   3) 所有 summary 都有 list-style: disclosure-closed（保证三角箭头）；
+//   4) 阶段AR：节点数过载（truncated）时容器仍为 CONTAINER 而非 OVERFLOW，
+//      summary 可点击展开，children 按 truncatedRender 截断构建；
+//      剩余项数正确填入 truncatedRemain，可在前端展示"剩余 N 项未渲染"。
 //
 // 运行：
 //   cd ClientWeb && node --experimental-vm-modules src/shared/jsonTree.test.js
@@ -25,6 +28,7 @@ ok(nodes[0].kind === 'container', '根级是容器类型')
 
 const root = nodes[0]
 ok(root.children.length === 3, '根容器下有 3 个直接子项 (a/b/d)')
+ok(!root.truncated, '小对象根节点不触发 truncated')
 
 // 验证每个对象/数组子项独立有可折叠结构
 const bChild = root.children.find((c) => c.childKey === 'b')
@@ -43,6 +47,34 @@ arrChildren.forEach((c, i) => {
   ok(c.childKey === `[${i}]`, `[${i}] 元素 childKey 正确`)
   ok(c.nodes[0].kind === 'primitive', `[${i}] 元素是 primitive（值）`)
 })
+
+// ===== 阶段AR：节点数过载场景 =====
+const huge = { messages: [] }
+for (let i = 0; i < 402; i++) huge.messages.push({ role: 'user', content: `msg ${i}` })
+huge.tools = Array.from({ length: 300 }, (_, i) => ({ type: 'function', name: `tool${i}` }))
+huge.stream = true
+huge.stream_options = { include_usage: true }
+huge.tool_choice = { type: 'auto' }
+huge.max_tokens = 32000
+huge.model = 'LongCat-2.0'
+huge.reasoning_effort = 'medium'
+
+const bigNodes = buildJsonTreeNodes(huge, { maxNodes: 50, truncatedRender: 50 })
+const bigRoot = bigNodes[0]
+ok(bigRoot.kind === 'container', '大对象根节点仍是 container（不再是 OVERFLOW）')
+ok(bigRoot.children.length === 8, '大对象根节点 8 个直接子项全部展开（不截断根级）')
+
+// messages: Array(402) 在阈值 50 节点下应触发 truncated
+const messagesChild = bigRoot.children.find((c) => c.childKey === 'messages')
+ok(messagesChild.nodes[0].kind === 'container', 'messages 节点是 container（可折叠）')
+ok(messagesChild.nodes[0].truncated === true, 'messages 触发 truncated 标记')
+ok(messagesChild.nodes[0].open === false, 'truncated 容器默认折叠')
+ok(messagesChild.nodes[0].children.length === 50, 'truncated 容器只构建前 50 个子项')
+ok(messagesChild.nodes[0].truncatedRemain === 352, '剩余 352 项未渲染 (402-50)')
+
+// tools/stream_options 等也都是 truncated
+const toolsChild = bigRoot.children.find((c) => c.childKey === 'tools')
+ok(toolsChild.nodes[0].truncated === true, 'tools 也触发 truncated')
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
