@@ -38,11 +38,10 @@ export default function CleanupReport() {
 
   function statusTag(status, errMsg) {
     const s = String(status || 'unknown')
-    const lowDisk = String(errMsg || '').indexOf(t('cleanup.diskSpaceLow')) >= 0
     if (s === 'success') return <span style={{ background: '#d1fae5', color: '#065f46', padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{t('common.success')}</span>
-    if (s === 'partial') return lowDisk
-      ? <span style={{ background: '#e0f2fe', color: '#075985', padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{t('cleanup.deletedNotRebuilt')}</span>
-      : <span style={{ background: '#fef3c7', color: '#92400e', padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{t('cleanup.partial')}</span>
+    if (s === 'partial') return (
+      <span style={{ background: '#fef3c7', color: '#92400e', padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{t('cleanup.partial')}</span>
+    )
     if (s === 'failed') return (
       <span>
         <span style={{ background: '#fee2e2', color: '#991b1b', padding: '3px 9px', borderRadius: 6, fontSize: 11, fontWeight: 700 }}>{t('cleanup.failed')}</span>
@@ -130,14 +129,13 @@ export default function CleanupReport() {
     { key: 'deleted_tokens_in', title: t('cleanup.inputTokens'), render: fmt },
     { key: 'deleted_tokens_out', title: t('cleanup.outputTokens'), render: fmt },
     { key: 'deleted_tokens_all', title: t('cleanup.totalTokens'), render: (v) => <b>{fmt(v)}</b> },
-    { key: 'freed_bytes', title: t('cleanup.freedSpace'), render: (v) => <b style={{ color: '#0ea5e9' }}>{fmtBytes(v)}</b> },
     { key: 'duration_ms', title: t('cleanup.duration'), render: (v) => (v || 0) + t('cleanup.ms') },
     { key: 'retention_days', title: t('cleanup.retentionDaysCol'), render: (v) => (v || 0) + ' ' + t('cleanup.daysUnit') },
     { key: 'cutoff_time', title: t('cleanup.cutoffTime'), render: fmtTime },
     { key: 'status', title: t('cleanup.status'), render: (v, r) => (
       <span>
         {statusTag(v, r.error_msg)}
-        {r.error_msg ? <div style={{ fontSize: 11, marginTop: 4, color: String(r.error_msg).indexOf(t('cleanup.diskSpaceLow')) >= 0 ? '#0369a1' : '#b91c1c' }}>{r.error_msg}</div> : null}
+        {r.error_msg ? <div style={{ fontSize: 11, marginTop: 4, color: '#b91c1c' }}>{r.error_msg}</div> : null}
       </span>
     ) },
   ]
@@ -169,8 +167,41 @@ export default function CleanupReport() {
         <>
           <div className="card-grid kpi-grid">
             <div className="card"><h3>{t('cleanup.totalDeletedRows')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.total_deleted_rows)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('cleanup.allTasksCumulative')}</div></div>
-            <div className="card"><h3>{t('cleanup.totalFreedSpace')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtBytes(summary.total_freed_bytes)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('cleanup.fromDataFree')}</div></div>
             <div className="card"><h3>{t('cleanup.totalRecoveredTokens')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.total_tokens_all)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('cleanup.inputOutputCumulative')}</div></div>
+            <div className="card">
+              <h3>{t('cleanup.dataCoverage')}</h3>
+              {(() => {
+                const earliest = state && state.earliest_transaction_at
+                const latest = state && state.latest_transaction_at
+                if (!earliest || !latest) {
+                  return <div style={{ fontSize: 24, fontWeight: 800, color: '#cbd5e1' }}>-</div>
+                }
+                const d1 = new Date(earliest)
+                const d2 = new Date(latest)
+                const days = Math.max(1, Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)))
+                const retDays = state && typeof state.retention_days === 'number' ? state.retention_days : 0
+                let color = '#059669' // green: normal
+                let label = t('cleanup.coverageNormal')
+                if (retDays > 0) {
+                  if (days > retDays + 7) { color = '#dc2626'; label = t('cleanup.coverageAbnormal') }
+                  else if (days > retDays + 1) { color = '#d97706'; label = t('cleanup.coverageBacklog') }
+                }
+                const fmtDate = (v) => {
+                  const d = new Date(v)
+                  if (isNaN(d.getTime())) return '-'
+                  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+                }
+                return (
+                  <>
+                    <div style={{ fontSize: 24, fontWeight: 800, color }}>{days} <span style={{ fontSize: 14 }}>{t('cleanup.daysUnit')}</span></div>
+                    <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                      <span style={{ color, fontWeight: 700 }}>{label}</span>
+                      <div style={{ marginTop: 2 }}>{fmtDate(earliest)} ~ {fmtDate(latest)}</div>
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
             <div className="card"><h3>{t('cleanup.currentRetentionConfig')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{retention}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('cleanup.recordsAutoDeleted')}</div></div>
           </div>
 
@@ -181,7 +212,7 @@ export default function CleanupReport() {
                 {daily.map((s) => (
                   <div key={s.date} className="trend-bar"
                        onClick={() => setSelDay(selDay === s.date ? null : s.date)}
-                       title={t('cleanup.dailyBarDetail', { date: s.date, rows: fmt(s.deleted_rows), freed: fmtBytes(s.freed_bytes), tokens: fmt(s.deleted_tokens_all) })} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end', cursor: 'pointer' }}>
+                       title={t('cleanup.dailyBarDetail', { date: s.date, rows: fmt(s.deleted_rows), tokens: fmt(s.deleted_tokens_all) })} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end', cursor: 'pointer' }}>
                     <div style={{ width: '70%', height: Math.max(2, ((s.deleted_rows || 0) / dailyMax) * 130), background: selDay === s.date ? 'linear-gradient(180deg,#059669,#047857)' : 'linear-gradient(180deg,#34d399,#10b981)', borderRadius: 4 }} />
                     <span style={{ fontSize: 10, color: selDay === s.date ? '#047857' : '#888', whiteSpace: 'nowrap' }}>{(s.date || '').substring(5)}</span>
                   </div>
@@ -189,14 +220,14 @@ export default function CleanupReport() {
               </div>
               {selDay ? (
                 <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted)' }}>
-                  {(() => { const s = daily.find((x) => x.date === selDay); return s ? t('cleanup.dailyBarDetail', { date: s.date, rows: fmt(s.deleted_rows), freed: fmtBytes(s.freed_bytes), tokens: fmt(s.deleted_tokens_all) }) : '' })()}
+                  {(() => { const s = daily.find((x) => x.date === selDay); return s ? t('cleanup.dailyBarDetail', { date: s.date, rows: fmt(s.deleted_rows), tokens: fmt(s.deleted_tokens_all) }) : '' })()}
                 </div>
               ) : null}
             </div>
           ) : null}
 
           <div className="card">
-            <h3>{t('cleanup.subTableStats')}</h3>
+            <h3>{t('cleanup.capacityMonitor')}</h3>
             <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 12 }}>
               {t('cleanup.rowCountNote')}
             </div>

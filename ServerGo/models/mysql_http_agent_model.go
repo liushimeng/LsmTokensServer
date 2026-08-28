@@ -168,15 +168,16 @@ type TAgentHttpAgentInfo struct {
 //
 // 后台清理服务（mysql_http_agent_cleanup.go）每天凌晨执行一次：
 //  1. 遍历 8 张分表（TAgentHttpTransactionDataItem_00 ~ _07）
-//  2. 按 created_at < cutoff 删除过期记录
-//  3. OPTIMIZE TABLE 释放磁盘空间
-//  4. 本表写一行报告（按 cleanup_date + sub_table_index 唯一索引）
+//  2. 按 created_at < cutoff 删除过期记录（keyset 分页 + 分批硬删除）
+//  3. 本表写一行报告（按 cleanup_date + sub_table_index 唯一索引）
 //
 // 字段语义：
 //   - CleanupDate: 清理日期（YYYY-MM-DD），便于按天聚合展示
 //   - SubTableIndex: 分表索引 0~7
 //   - DeletedRows/DeletedTokensIn/Out/All: 本次清理的统计指标
-//   - FreedBytes: 释放磁盘空间字节数（来自 information_schema.TABLES DATA_FREE）
+//   - FreedBytes: 历史遗留字段（v2.0.x 起不再写入，恒为 0）。旧版本中记录
+//     ALTER TABLE 重建释放的磁盘空间字节数（来自 DATA_FREE 估算）。数据库列
+//     保留不删，兼容历史数据查询。
 //   - DurationMs: 本次清理总耗时
 //   - Status: success/failed/partial（单表清理状态，不影响其他表继续）
 //   - ErrorMsg: 失败时的错误信息（成功时为空）

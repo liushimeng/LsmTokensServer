@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"gorm.io/gorm/clause"
@@ -30,13 +29,16 @@ import (
 //   2. 调度：每天 LSM_CLEANUP_HOUR 触发（默认凌晨 3 点），服务启动 30s 后
 //      先跑一次（让 MySQL/缓存就绪）
 //   3. 清理策略：
-//      a) Step 1: 统计待删记录的 COUNT + Tokens（删除前先 SELECT SUM）
-//      b) Step 2: 分批硬删除（Unscoped + LIMIT 5000，参考 v2.0.29 约定）
-//      c) Step 3: ALTER TABLE ... ENGINE=InnoDB 重建释放磁盘空间（MySQL 8.0
-//         对 InnoDB 的 OPTIMIZE TABLE 等价于 ALTER 重建，普通用户权限即可）
-//      d) Step 4: 写清理报告 TAgentHttpTransactionCleanupReport
+//      a) Step 1: 边扫边删（keyset 分页 + 分批硬删除，Unscoped + 小事务节流）
+//      b) Step 2: 写清理报告 TAgentHttpTransactionCleanupReport
 //   4. 容错：单张分表清理失败 → 写 status=failed 报告 + 继续下一张表，不中断
 //   5. 优雅退出：通过 getAppContext() 监听 SIGINT/SIGTERM
+//
+// 历史备注（v2.0.x 起移除表重建）：
+//   早期版本在删除后会执行 ALTER TABLE ... ENGINE=InnoDB 重建表来释放磁盘
+//   空间。因重建风险高（大表锁表、磁盘写满）且必要性不足（InnoDB 内部空闲
+//   链表会复用已删除行空间），该功能已彻底移除。清理报告中的 freed_bytes
+//   字段保留但不再写入（恒为 0），用于兼容历史数据查询。
 //
 // 数据流：8 张分表 × 每天 1 行报告 → 8 行/天，1 年 ≈ 2920 行可忽略
 // ============================================================================
@@ -236,9 +238,9 @@ func runDailyCleanup(cfg *config.LsmTokensServerConfig) int {
 			// 报告写入失败不影响清理结果（删除已生效）
 		}
 
-		logger.Printf("[CLEANUP] table=%s status=%s deleted=%d freed=%.2fMB duration=%dms%s",
+		logger.Printf("[CLEANUP] table=%s status=%s deleted=%d tokens=%d duration=%dms%s",
 			tableName, report.Status, report.DeletedRows,
-			float64(report.FreedBytes)/1024/1024, report.DurationMs,
+			report.DeletedTokensAll, report.DurationMs,
 			func() string {
 				if report.ErrorMsg != "" {
 					return " err=" + report.ErrorMsg
@@ -274,7 +276,7 @@ func saveCleanupReport(report *TAgentHttpTransactionCleanupReport) error {
 			"deleted_tokens_in",
 			"deleted_tokens_out",
 			"deleted_tokens_all",
-			"freed_bytes",
+			// freed_bytes: v2.0.x 起不再写入（历史字段，数据库列保留兼容旧数据）
 			"duration_ms",
 			"cutoff_time",
 			"retention_days",
@@ -322,10 +324,16 @@ func GetTransactionTimeBoundaries(subTableNum int) (time.Time, time.Time, error)
 	return earliest, latest, nil
 }
 
-// cleanupOneSubTable 清理单张分表：统计 → 删 → 释放空间 → 构建报告
+// cleanupOneSubTable 清理单张分表：边扫边删 → 构建报告
 //
-// 顺序不可换：必须先 SELECT SUM 再 DELETE（删了就拿不到 Tokens）。
-// 失败处理：单步失败 → 累积错误信息到 ErrorMsg，status=failed，其他表继续。
+// 流程：
+//   1. scanAndDeleteExpired: keyset 分页扫描 + 分批硬删除（小事务 + 节流）
+//   2. 构建清理报告（freed_bytes 恒为 0 — v2.0.x 起不再执行表重建）
+//
+// 状态语义：
+//   - success: 全部过期行删除完成
+//   - partial: ctx 超时，部分行未处理（下次运行自动继续）
+//   - failed: 扫描/删除出错（已删条数仍在报告中记录）
 func cleanupOneSubTable(tableName string, index int, cutoff time.Time, retentionDays int, today string) TAgentHttpTransactionCleanupReport {
 	start := time.Now()
 	report := TAgentHttpTransactionCleanupReport{
@@ -336,24 +344,13 @@ func cleanupOneSubTable(tableName string, index int, cutoff time.Time, retention
 		RetentionDays: retentionDays,
 		Status:        "success",
 		CreatedAt:     time.Now(),
+		FreedBytes:    0, // v2.0.x 起不再执行表重建，恒为 0（字段保留用于兼容历史数据）
 	}
 
-	// Step 1: 统计待删记录的 COUNT + Tokens
+	// Step 1: 边扫边删（keyset 分页 + 分批硬删除）
 	//
-	// 重要：`rows` 是 MariaDB 保留字，因此 SQL 别名用 `row_count`。
-	//
-	// v2.0.62 严重缺陷修复：这里必须写显式 `gorm:"column:..."` tag。
-	//   原实现字段名为 `Rows`（无 tag），GORM NamingStrategy 会把它映射到列 `rows`，
-	//   而 SQL 别名是 `row_count` —— 两者对不上，Scan 后 stats.Rows 恒为 0。
-	//   结果：下方 `if stats.Rows == 0 { return }` 永远命中，Step 2 删除与
-	//   Step 3 释放空间被完全跳过，清理服务上线以来从未真正删除过任何一行。
-	//   （生产实证：报告表里 deleted_tokens_in 有 20 亿，deleted_rows 却是 0 ——
-	//     因为 TokensIn→tokens_in 恰好映射正确，唯独行数字段错位。）
-	//   四个字段一律加显式 tag，杜绝同类隐式映射再次埋雷。
-	// Step 1+2 合流：v2.0.62 之前的实现先单 SQL COUNT 整张分表，对 172GB 的
-	// shard_00 / 64GB 的 shard_01 会被 database.StatsDB() 25s ctx 杀掉，导致 deleted=0。
-	// 现在改成 keyset 分页边扫边删（与 v2.0.58 scanShardPaged 同款模式）：
-	//   - 每批 SELECT 5000 行（仅小字段，禁 longtext），ctx 友好
+	// keyset 分页模式解决大表单 SQL COUNT/DELETE 超时问题：
+	//   - 每批 SELECT 1000 行（仅小字段，禁 longtext），ctx 友好
 	//   - 累积 tokens 统计 + 立即删除该批 id
 	//   - ctx 取消时返回「partial」状态与已删条数，不是失败
 	deleted, tIn, tOut, tAll, partial, err := scanAndDeleteExpired(tableName, cutoff, getCleanupBatchSize())
@@ -369,35 +366,10 @@ func cleanupOneSubTable(tableName string, index int, cutoff time.Time, retention
 		return report
 	}
 
-	if deleted == 0 && !partial {
-		// 无过期数据：跳过重建（避免不必要的锁表）
-		report.DurationMs = time.Since(start).Milliseconds()
-		return report
-	}
-
 	if partial {
 		report.Status = "partial"
 		report.ErrorMsg = fmt.Sprintf("已删除 %d 行；本次 ctx 超时，分表下次继续清理", deleted)
 	}
-
-	// Step 3: 释放磁盘空间（ALTER TABLE ... ENGINE=InnoDB 重建）
-	freedBytes, err := releaseTableSpace(tableName)
-	if err != nil {
-		// 删除成功但 OPTIMIZE 未完成：标记 partial，不影响其他表
-		report.Status = "partial"
-		report.FreedBytes = freedBytes // 即便失败也记录返回的估算值
-		report.DurationMs = time.Since(start).Milliseconds()
-
-		// v2.0.62: 区分「磁盘不足主动跳过」与「重建真的出错」。
-		// 前者是预期内的安全降级（删除已生效），文案要让运维一眼看懂不是故障。
-		if errors.Is(err, errSkipRebuildLowDisk) {
-			report.ErrorMsg = fmt.Sprintf("已删除 %d 行并生效；%v", deleted, err)
-		} else {
-			report.ErrorMsg = fmt.Sprintf("step3 optimize failed (deleted=%d still applied): %v", deleted, err)
-		}
-		return report
-	}
-	report.FreedBytes = freedBytes
 
 	report.DurationMs = time.Since(start).Milliseconds()
 	return report
@@ -823,214 +795,6 @@ func cleanupSleepRetryable(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// ============================================================================
-// v2.0.62: 表重建磁盘预检守卫
-// ============================================================================
-//
-// 背景：Step 3 的 `ALTER TABLE ... ENGINE=InnoDB` 是「全表复制重建」——
-//   InnoDB 会先把整张表写成一份新的 .ibd，成功后才替换旧文件。因此重建期间
-//   磁盘上同时存在新旧两份数据，需要约等于表大小的额外可用空间。
-//
-// 风险实证（v2.0.62 调查）：shard_00 单表 171.9GB，而磁盘仅剩 84.6GB。
-//   一旦 v2.0.62 修好「删除被跳过」缺陷、删除真正生效，该表就会进入 Step 3
-//   触发 172GB 重建 —— 必然写满磁盘后失败回滚，有拖垮 MySQL 与整机的风险。
-//
-// 策略：重建前预检可用磁盘。空间不足则**跳过重建**并返回哨兵错误，
-//   但**删除结果完全不受影响**（行已归还表内空闲链表供新数据复用，
-//   表不会继续膨胀，只是空间暂不归还操作系统）。
-// ============================================================================
-
-// errSkipRebuildLowDisk 磁盘空间不足以安全重建表时返回的哨兵错误。
-//
-// 调用方（cleanupOneSubTable）据此把报告标记为 partial 而非 failed ——
-// 删除是成功的，只有可选的空间回收步骤被安全跳过。
-var errSkipRebuildLowDisk = fmt.Errorf("磁盘空间不足，已跳过表重建")
-
-// rebuildDiskSafetyMarginBytes 重建所需空间之外的额外安全余量（5GB）。
-//
-// 除了表副本本身，重建过程还需要空间给 online DDL 日志、临时排序文件等；
-// 且必须给 MySQL 其他表的正常写入留出余地，不能把磁盘用到 0。
-const rebuildDiskSafetyMarginBytes int64 = 5 * 1024 * 1024 * 1024
-
-// getMySQLDataDir 查询 MySQL 数据目录路径（用于 statfs 探测所在文件系统）
-//
-// 返回空字符串表示查询失败（调用方按「无法预检」处理）。
-func getMySQLDataDir() string {
-	if database.DB == nil {
-		return ""
-	}
-	var dataDir string
-	if err := database.DB.Raw("SELECT @@datadir").Scan(&dataDir).Error; err != nil {
-		logger.Printf("[WARNING] query @@datadir failed: %v", err)
-		return ""
-	}
-	return strings.TrimSpace(dataDir)
-}
-
-// getTableSizeBytes 查询表在磁盘上的总大小（数据 + 索引，字节）
-//
-// 返回 -1 表示查询失败。
-func getTableSizeBytes(tableName string) int64 {
-	if database.DB == nil {
-		return -1
-	}
-	var size int64
-	err := database.DB.Raw(`
-		SELECT COALESCE(DATA_LENGTH, 0) + COALESCE(INDEX_LENGTH, 0)
-		FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME = ?
-		LIMIT 1
-	`, tableName).Scan(&size).Error
-	if err != nil {
-		logger.Printf("[WARNING] query table size for %s failed: %v", tableName, err)
-		return -1
-	}
-	return size
-}
-
-// getAvailableDiskBytes 返回指定路径所在文件系统的可用字节数
-//
-// 返回 -1 表示探测失败（路径为空 / statfs 报错）。
-// 使用 Bavail（非特权用户可用块）而非 Bfree，与 `df` 的 Avail 列语义一致。
-func getAvailableDiskBytes(path string) int64 {
-	if strings.TrimSpace(path) == "" {
-		return -1
-	}
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(path, &st); err != nil {
-		logger.Printf("[WARNING] statfs %s failed: %v", path, err)
-		return -1
-	}
-	return int64(st.Bavail) * int64(st.Bsize)
-}
-
-// checkDiskSpaceForRebuild 判断磁盘空间是否足够安全重建指定表
-//
-// 返回：
-//   - enough:  true = 可以安全重建；false = 空间不足应跳过
-//   - avail:   可用字节数（-1 = 探测失败）
-//   - needed:  预计所需字节数（-1 = 无法估算）
-//
-// 判据：avail >= tableSize + 5GB 安全余量。
-//
-// 容错语义：任一探测环节失败（拿不到 datadir / 表大小 / statfs 报错）时返回
-//
-//	enough=true —— 不因「诊断能力缺失」阻断主流程，保持与 v2.0.62 之前一致的行为，
-//	但会记 warning 供运维排查。
-func checkDiskSpaceForRebuild(tableName string) (bool, int64, int64) {
-	tableSize := getTableSizeBytes(tableName)
-	if tableSize < 0 {
-		return true, -1, -1 // 无法估算：放行（保持旧行为）
-	}
-
-	dataDir := getMySQLDataDir()
-	avail := getAvailableDiskBytes(dataDir)
-	if avail < 0 {
-		return true, -1, tableSize // 无法探测磁盘：放行（保持旧行为）
-	}
-
-	needed := tableSize + rebuildDiskSafetyMarginBytes
-	if avail < needed {
-		return false, avail, needed
-	}
-
-	// v2.0.62 补充：磁盘够也不代表能重建成功。
-	// 实测 shard_01（63.6GB）在磁盘充足时 ALTER TABLE 仍以 `invalid connection`
-	// 失败 —— 重建耗时远超连接/语句超时。超大表的在线重建应交给运维在维护窗口
-	// 手工执行（可配合 pt-online-schema-change），后台清理不该在这里硬扛。
-	if tableSize > maxAutoRebuildTableBytes {
-		return false, avail, needed
-	}
-	return true, avail, needed
-}
-
-// maxAutoRebuildTableBytes 后台清理允许自动重建的单表大小上限（20GB）。
-//
-// 超过该阈值的表，ALTER TABLE 重建耗时会超过连接超时（实测 63.6GB 的分表必失败），
-// 且长时间锁表影响线上写入。这类表交由运维在维护窗口手工重建。
-const maxAutoRebuildTableBytes int64 = 20 * 1024 * 1024 * 1024
-
-// releaseTableSpace 释放表磁盘空间（通过 information_schema.TABLES DATA_FREE 估算）
-//
-// 实现策略：
-//   - MySQL 8.0 上 InnoDB 的 OPTIMIZE TABLE 等价于 ALTER TABLE ... ENGINE=InnoDB
-//   - 普通用户权限即可（无需 root / SUPER）
-//   - 我们用 ALTER 重建方式（兼容性更好）
-//   - 重建前后通过 information_schema.TABLES 查询 DATA_FREE 估算释放字节数
-//
-// 返回：释放的字节数估算（>= 0）；失败时返回 (0, error)。
-//
-// 注意：DATA_FREE 在 InnoDB 上是近似值（InnoDB 不严格维护空闲空间），但能反映
-//
-//	删除大字段后的释放效果。对于含 4 个 longtext 字段的 TAgentHttpTransactionDataItem，
-//	实际释放可能更大（InnoDB 会释放未使用的 extent）。
-func releaseTableSpace(tableName string) (int64, error) {
-	if database.DB == nil {
-		return 0, fmt.Errorf("database not initialized")
-	}
-
-	// v2.0.62: 重建前安全预检 —— 磁盘不足 or 表过大都跳过，避免写满磁盘 / 超时锁表。
-	// 注意：此时删除已经完成并生效，跳过的只是「把空间归还操作系统」这一可选步骤。
-	if enough, avail, needed := checkDiskSpaceForRebuild(tableName); !enough {
-		const gb = 1024 * 1024 * 1024
-		tableSize := getTableSizeBytes(tableName)
-		// 区分两种跳过原因，让运维知道该扩容磁盘还是该安排维护窗口手工重建
-		reason := fmt.Sprintf("可用 %.1fGB < 需要 %.1fGB", float64(avail)/gb, float64(needed)/gb)
-		if tableSize > maxAutoRebuildTableBytes {
-			reason = fmt.Sprintf("表体积 %.1fGB 超过自动重建上限 %.0fGB，需运维在维护窗口手工重建",
-				float64(tableSize)/gb, float64(maxAutoRebuildTableBytes)/gb)
-		}
-		logger.Printf("[CLEANUP] skip rebuild of %s: %s (deletion already applied)", tableName, reason)
-		return 0, fmt.Errorf("%w（%s）；删除已生效，空间由 InnoDB 内部复用", errSkipRebuildLowDisk, reason)
-	}
-
-	// 1. 查询重建前的 DATA_FREE（基准）
-	beforeFree := queryTableDataFree(tableName)
-
-	// 2. ALTER TABLE 重建（释放空间）
-	//    注意：直接拼接 tableName 需保证安全；项目里表名都是 fmt.Sprintf("%02d") 拼接，
-	//    加上 IsTableExists 预检，不存在 SQL 注入风险。
-	alterSQL := fmt.Sprintf("ALTER TABLE `%s` ENGINE=InnoDB", tableName)
-	if err := database.DB.Exec(alterSQL).Error; err != nil {
-		return 0, fmt.Errorf("ALTER TABLE failed for %s: %w", tableName, err)
-	}
-
-	// 3. 查询重建后的 DATA_FREE
-	afterFree := queryTableDataFree(tableName)
-
-	// 4. 计算释放字节数（beforeFree - afterFree）
-	//    若 afterFree < beforeFree 表示释放了空间；若 afterFree > beforeFree 表示
-	//    InnoDB 内部扩展（罕见，常见于 ALTER 重组后空闲链表重排），返回 0 不报错。
-	freed := beforeFree - afterFree
-	if freed < 0 {
-		freed = 0
-	}
-	return freed, nil
-}
-
-// queryTableDataFree 查询 information_schema.TABLES 的 DATA_FREE（字节）
-//
-// 返回 -1 表示查询失败。DATA_FREE 是字节数。
-func queryTableDataFree(tableName string) int64 {
-	if database.DB == nil {
-		return -1
-	}
-	var dataFree int64
-	err := database.DB.Raw(`
-		SELECT DATA_FREE
-		FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = DATABASE()
-		  AND TABLE_NAME = ?
-		LIMIT 1
-	`, tableName).Scan(&dataFree).Error
-	if err != nil {
-		logger.Printf("[WARNING] query DATA_FREE for %s failed: %v", tableName, err)
-		return -1
-	}
-	return dataFree
-}
-
 // nextCleanupTime 计算下次清理时间
 //
 // 默认凌晨 LSM_CLEANUP_HOUR（默认 3 点）。若当前时间已过今日的 hour:minute，
@@ -1148,14 +912,15 @@ func QueryCleanupReports(page, pageSize, days int) ([]TAgentHttpTransactionClean
 	return reports, total, nil
 }
 
-// GetCleanupReportsDailySummary 按天聚合清理报告（用于 ECharts 时序图）
+// GetCleanupReportsDailySummary 按天聚合清理报告（用于时序图）
 //
-// 返回：日期 → {deleted_rows_sum, freed_bytes_sum, tokens_in_sum, tokens_out_sum, tokens_all_sum}
+// 返回：日期 → {deleted_rows, tokens_in, tokens_out, tokens_all, report_count}
 // 按日期升序排列。
+//
+// v2.0.x 变更：移除 freed_bytes 聚合（不再执行表重建）。
 type CleanupReportsDailySummary struct {
 	Date             string `json:"date"`
 	DeletedRows      int64  `json:"deleted_rows"`
-	FreedBytes       int64  `json:"freed_bytes"`
 	DeletedTokensIn  uint64 `json:"deleted_tokens_in"`
 	DeletedTokensOut uint64 `json:"deleted_tokens_out"`
 	DeletedTokensAll uint64 `json:"deleted_tokens_all"`
@@ -1171,7 +936,6 @@ func GetCleanupReportsDailySummary(days int) ([]CleanupReportsDailySummary, erro
 		Select(`
 			cleanup_date AS date,
 			COALESCE(SUM(deleted_rows), 0) AS deleted_rows,
-			COALESCE(SUM(freed_bytes), 0) AS freed_bytes,
 			COALESCE(SUM(deleted_tokens_in), 0) AS deleted_tokens_in,
 			COALESCE(SUM(deleted_tokens_out), 0) AS deleted_tokens_out,
 			COALESCE(SUM(deleted_tokens_all), 0) AS deleted_tokens_all,
@@ -1196,10 +960,11 @@ func GetCleanupReportsDailySummary(days int) ([]CleanupReportsDailySummary, erro
 
 // GetCleanupReportsTotalSummary 汇总所有清理报告的累计指标（用于 KPI 卡）
 //
-// 返回：total_deleted_rows / total_freed_bytes / total_tokens / total_reports / last_run_at
+// 返回：total_deleted_rows / total_tokens_in/out/all / total_reports / last_run_at
+//
+// v2.0.x 变更：移除 total_freed_bytes（不再执行表重建）。
 type CleanupReportsTotalSummary struct {
 	TotalDeletedRows int64     `json:"total_deleted_rows"`
-	TotalFreedBytes  int64     `json:"total_freed_bytes"`
 	TotalTokensIn    uint64    `json:"total_tokens_in"`
 	TotalTokensOut   uint64    `json:"total_tokens_out"`
 	TotalTokensAll   uint64    `json:"total_tokens_all"`
@@ -1217,7 +982,6 @@ func GetCleanupReportsTotalSummary() (CleanupReportsTotalSummary, error) {
 	err := database.DB.Table(CleanupReportTableName).
 		Select(`
 			COALESCE(SUM(deleted_rows), 0) AS total_deleted_rows,
-			COALESCE(SUM(freed_bytes), 0) AS total_freed_bytes,
 			COALESCE(SUM(deleted_tokens_in), 0) AS total_tokens_in,
 			COALESCE(SUM(deleted_tokens_out), 0) AS total_tokens_out,
 			COALESCE(SUM(deleted_tokens_all), 0) AS total_tokens_all,

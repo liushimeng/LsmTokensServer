@@ -1,28 +1,26 @@
 // v2.0.62: 过期数据清理「真实删除」回归测试
 //
-// 背景（严重缺陷）：v2.0.47 引入清理服务后，Step 1 统计用的匿名结构体字段名为
+// 背景（严重缺陷）：v2.0.47 引入清理服务初期，Step 1 统计用的匿名结构体字段
 //
-//	`Rows`（无 gorm tag），GORM NamingStrategy 将其映射到列 `rows`，而 SQL 别名
-//	是 `row_count`（当初为规避 MariaDB 保留字而改名，却漏改结构体字段）。
-//	两者对不上 → stats.Rows 恒为 0 → `if stats.Rows == 0 { return }` 永远命中
-//	→ Step 2 删除、Step 3 释放空间被完全跳过。
+//	名为 `Rows`（无 gorm tag），GORM NamingStrategy 将其映射到列 `rows`，而
+//	SQL 别名是 `row_count`（当初为规避 MariaDB 保留字而改名，却漏改结构体
+//	字段）。两者对不上 → stats.Rows 恒为 0 → 删除完全跳过，status 却是 success
+//	—— 故障被完全掩盖。
 //
-//	生产实证：报告表 deleted_tokens_in = 20 亿（TokensIn→tokens_in 映射正确），
-//	而 deleted_rows = 0，status 却是 success —— 故障被完全掩盖。
+//	v2.0.x 变更：移除表重建（ALTER TABLE ENGINE=InnoDB）功能，清理仅保留
+//	  "分批硬删除过期记录"。本文件对应的磁盘预检相关测试已删除。
 //
 // 守护：
-//  1. Step 1 统计出的行数必须等于真实过期行数（核心回归，修复前必然失败）
+//  1. 统计出的行数必须等于真实过期行数（核心回归，修复前必然失败）
 //  2. cleanupOneSubTable 必须真的把过期行从表里删掉，且不误删未过期行
-//  3. 磁盘预检守卫：空间充足/不足的判定与哨兵错误语义
-//  4. 保留天数配置 32 天契约（v2.0.63 从 45 调整为 32）
-//  5. 删除批次默认值契约
+//  3. 保留天数配置 32 天契约
+//  4. 删除批次默认值契约
+//  5. 状态快照暴露保留天数
 package models
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -375,95 +373,7 @@ func TestIsCtxTimeout(t *testing.T) {
 }
 
 // ============================================================================
-// 3. 磁盘预检守卫
-// ============================================================================
-
-// TestCheckDiskSpaceForRebuild_NilDBIsPermissive 守护 database.DB=nil 时放行（不阻断主流程）
-func TestCheckDiskSpaceForRebuild_NilDBIsPermissive(t *testing.T) {
-	origDB := database.DB
-	database.DB = nil
-	defer func() { database.DB = origDB }()
-
-	enough, _, _ := checkDiskSpaceForRebuild("TAgentHttpTransactionDataItem_00")
-	if !enough {
-		t.Error("探测失败时应放行（enough=true），避免诊断能力缺失阻断清理主流程")
-	}
-}
-
-// TestGetAvailableDiskBytes 验证 statfs 探测行为
-func TestGetAvailableDiskBytes(t *testing.T) {
-	t.Run("空路径返回 -1", func(t *testing.T) {
-		if got := getAvailableDiskBytes(""); got != -1 {
-			t.Errorf("空路径 got=%d, want -1", got)
-		}
-	})
-	t.Run("空白路径返回 -1", func(t *testing.T) {
-		if got := getAvailableDiskBytes("   "); got != -1 {
-			t.Errorf("空白路径 got=%d, want -1", got)
-		}
-	})
-	t.Run("不存在的路径返回 -1", func(t *testing.T) {
-		if got := getAvailableDiskBytes("/nonexistent/path/for/v2062/test"); got != -1 {
-			t.Errorf("不存在路径 got=%d, want -1", got)
-		}
-	})
-	t.Run("有效路径返回正数", func(t *testing.T) {
-		got := getAvailableDiskBytes(os.TempDir())
-		if got <= 0 {
-			t.Errorf("临时目录可用空间 got=%d, want > 0", got)
-		}
-	})
-}
-
-// TestMaxAutoRebuildTableBytes 守护自动重建体积上限合理
-//
-// 实测 shard_01（63.6GB）即使磁盘充足，ALTER TABLE 重建也会以
-// `invalid connection` 失败（耗时超过连接超时）。上限必须显著低于该值。
-func TestMaxAutoRebuildTableBytes(t *testing.T) {
-	const gb = int64(1024 * 1024 * 1024)
-	if maxAutoRebuildTableBytes < gb {
-		t.Errorf("maxAutoRebuildTableBytes=%d 过小，小表也不给重建了", maxAutoRebuildTableBytes)
-	}
-	// 必须低于实测失败的 63.6GB，留足余量
-	if maxAutoRebuildTableBytes >= 60*gb {
-		t.Errorf("maxAutoRebuildTableBytes=%dGB 不低于实测失败体积 63.6GB，重建仍会超时",
-			maxAutoRebuildTableBytes/gb)
-	}
-}
-
-// TestRebuildDiskSafetyMargin 守护安全余量常量合理（1GB ~ 50GB）
-func TestRebuildDiskSafetyMargin(t *testing.T) {
-	const gb = int64(1024 * 1024 * 1024)
-	if rebuildDiskSafetyMarginBytes < gb || rebuildDiskSafetyMarginBytes > 50*gb {
-		t.Errorf("rebuildDiskSafetyMarginBytes=%d 超出合理区间 [1GB, 50GB]",
-			rebuildDiskSafetyMarginBytes)
-	}
-}
-
-// TestErrSkipRebuildLowDisk_IsIdentifiable 守护哨兵错误可被 errors.Is 识别
-//
-// cleanupOneSubTable 依赖这一点区分「磁盘不足主动跳过」与「重建真的出错」，
-// 前者不应被当成故障上报。
-func TestErrSkipRebuildLowDisk_IsIdentifiable(t *testing.T) {
-	wrapped := errors.New("outer: " + errSkipRebuildLowDisk.Error())
-	if errors.Is(wrapped, errSkipRebuildLowDisk) {
-		t.Error("纯字符串拼接不应被 errors.Is 匹配（说明测试本身写错了）")
-	}
-
-	// 实际包装方式（%w）必须可识别
-	realWrapped := wrapError(errSkipRebuildLowDisk, "可用 10GB < 需要 100GB")
-	if !errors.Is(realWrapped, errSkipRebuildLowDisk) {
-		t.Error("%w 包装后应能被 errors.Is 识别为 errSkipRebuildLowDisk")
-	}
-}
-
-// wrapError 测试辅助：模拟 releaseTableSpace 的 %w 包装方式
-func wrapError(base error, detail string) error {
-	return fmt.Errorf("%w（%s）", base, detail)
-}
-
-// ============================================================================
-// 4. 配置契约
+// 3. 配置契约
 // ============================================================================
 
 // TestTransactionRetentionDays_Is32 守护保留天数为 32 天（v2.0.63 从 45 调整为 32）
