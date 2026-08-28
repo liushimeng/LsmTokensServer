@@ -7,7 +7,7 @@
 // 或在 Node 18+：
 //   node src/shared/sse.test.js
 
-import { parseSSEEvents, aggregateSSE, aggregateToText, sseEventsToText } from './sse.js'
+import { parseSSEEvents, aggregateSSE, aggregateToText, sseEventsToText, tryParseJsonObject, splitAggregateTextParts } from './sse.js'
 
 let pass = 0
 let fail = 0
@@ -200,6 +200,66 @@ eq(openaiCompleteAggText.includes('（非流式完整响应）'), true, 'aggrega
 // 非 JSON 纯文本（非 SSE 格式，非 JSON）→ parseSSEEvents 返回 []
 eq(parseSSEEvents('plain text response'), [], '非 JSON 非 SSE 文本 → []')
 eq(parseSSEEvents('   '), [], '空白文本 → []')
+
+// ===== 阶段AW：聚合文本片段级 JSON 识别 =====
+section('阶段AW：JSON 片段识别（tryParseJsonObject / splitAggregateTextParts）')
+
+// tryParseJsonObject：判定对象/数组
+eq(tryParseJsonObject('{"a":1}').ok, true, '合法对象 → ok=true')
+eq(tryParseJsonObject('[1,2,3]').ok, true, '合法数组 → ok=true')
+eq(tryParseJsonObject('  {"a": 1}  ').ok, true, '前后空白容忍')
+eq(tryParseJsonObject('"hello"').ok, false, '字符串标量 → ok=false（不视为 JSON 片段）')
+eq(tryParseJsonObject('42').ok, false, '数字标量 → ok=false')
+eq(tryParseJsonObject('true').ok, false, '布尔标量 → ok=false')
+eq(tryParseJsonObject('null').ok, false, 'null → ok=false')
+eq(tryParseJsonObject('{not json}').ok, false, '非法对象语法 → ok=false')
+eq(tryParseJsonObject('').ok, false, '空串 → ok=false')
+eq(tryParseJsonObject(undefined).ok, false, '非字符串 → ok=false')
+
+// splitAggregateTextParts：按片段切分
+const parts1 = splitAggregateTextParts(['hello', '{"a":1}', 'world'])
+eq(parts1.length, 3, '3 片段保留顺序')
+eq(parts1[0].kind, 'text', '普通文本片段 → kind=text')
+eq(parts1[1].kind, 'json', '合法 JSON 片段 → kind=json')
+eq(JSON.stringify(parts1[1].value), '{"a":1}', 'JSON 片段 value 为已解析对象')
+eq(parts1[2].kind, 'text', '第二段普通文本 → kind=text')
+
+const parts2 = splitAggregateTextParts(['{incomplete', '"scalar"', '[1,2]'])
+eq(parts2[0].kind, 'text', '不完整对象 → 文本')
+eq(parts2[1].kind, 'text', '字符串标量 → 文本（不美化）')
+eq(parts2[2].kind, 'json', '数组 → JSON')
+
+eq(splitAggregateTextParts([]), [], '空数组 → []')
+eq(splitAggregateTextParts(null), [], 'null → []')
+eq(splitAggregateTextParts(undefined), [], 'undefined → []')
+
+// 混合场景：partial_json 增量片段的独立判定（不做跨片段拼接 —— 跨片段拼接
+// 会要求缓冲整段，对单事件大流量场景不友好；按独立片段检测即可覆盖
+// content_block_delta.delta.partial_json 一次性是完整 JSON 的常见情况）
+const parts3 = splitAggregateTextParts([
+  'tool_call start',
+  '{"name":"get_weather","args":{"city":"北京"}}',
+  'done',
+])
+eq(parts3[0].kind, 'text', 'partial_json 第 1 段（独立）→ 文本')
+eq(parts3[1].kind, 'json', 'partial_json 第 2 段（独立合法 JSON）→ JSON')
+eq(parts3[2].kind, 'text', 'partial_json 末尾 → 文本')
+
+// 完整 JSON 片段在尾部
+const parts4 = splitAggregateTextParts([
+  '普通文本',
+  '{"a":1}',
+])
+eq(parts4[0].kind, 'text', '混合片段第 1 段 → 文本')
+eq(parts4[1].kind, 'json', '混合片段第 2 段 → JSON')
+
+// partial_json 增量片段单段不完整时按文本处理
+const parts5 = splitAggregateTextParts([
+  '{"name":"x",',
+  '"args":{"city":"上海"}}',
+])
+eq(parts5[0].kind, 'text', 'partial_json 单段不完整（不以 { 开头）→ 文本')
+eq(parts5[1].kind, 'text', 'partial_json 单段不完整（不以 { 开头）→ 文本')
 
 // 总结
 // eslint-disable-next-line no-console

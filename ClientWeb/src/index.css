@@ -428,6 +428,26 @@ a { color: var(--primary); text-decoration: none; }
 .agg-block-title { font-weight: 600; margin-bottom: 8px; color: #1e293b; font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .agg-block-body { font-size: 13px; color: #334155; }
 .agg-block-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+/* 阶段AW：聚合文本片段容器（普通片段 + JSON 片段混合展示） */
+.agg-text-fragments { display: flex; flex-direction: column; gap: 8px; }
+.agg-frag { display: flex; flex-direction: column; gap: 4px; }
+.agg-frag-json { border-left: 3px solid #10b981; padding-left: 10px; }
+.agg-frag-label {
+  font-size: 11px;
+  color: #047857;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.agg-frag-json-tree {
+  max-height: 480px;
+  overflow: auto;
+  border: 1px solid #d1fae5;
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: #f0fdf4;
+}
+.agg-frag-text { /* 沿用默认样式 */ }
 /* 阶段AV：聚合文本前置后的汇总信息行（一行 meta） */
 .agg-summary-row {
   display: flex;

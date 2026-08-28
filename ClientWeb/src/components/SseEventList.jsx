@@ -13,11 +13,15 @@
 //      语法高亮、逐节点折叠、超长字符串保护等 JSON 树能力；
 //   2) 新增可选 query prop：事件名 / raw 原文 / parsed JSON 在卡片布局内
 //      查找高亮（计数与焦点滚动由 InlineDetailRow DOM 机制统一处理）。
+// v2.0.77 阶段AW：SSE 事件 parsed 是字符串时二次 JSON 解析 ——
+//   兼容 data: "{\"a\":1}"（合法 JSON 字符串作为 SSE data 行）这类场景，
+//   二次解析后若为 object/array 则走 JsonTree 渲染，与 JSON 美化按钮行为一致。
 
 import { useState } from 'react'
 import { useI18n } from '../i18n'
 import JsonTree from './JsonTree'
 import SearchText from './SearchText'
+import { tryParseJsonObject } from '../shared/sse'
 
 // 事件类型 → 颜色分类（阶段AP）
 function sseColorClass(eventName) {
@@ -89,6 +93,27 @@ function SseEventCard({ index, event, t, query, defaultOpen, isComplete }) {
   const hasParsed = event.parsed !== null && event.parsed !== undefined
   const colorClass = sseColorClass(event.event)
 
+  // 阶段AW：parsed 是字符串时（如 data: "{\"a\":1}" 合法 JSON 字符串场景）
+  // 二次解析若为 object/array 则走 JsonTree 渲染，与 JSON 美化按钮行为一致。
+  let renderValue = null
+  let useJsonTree = false
+  if (hasParsed) {
+    if (typeof event.parsed === 'object' && event.parsed !== null) {
+      renderValue = event.parsed
+      useJsonTree = true
+    } else if (typeof event.parsed === 'string') {
+      const r = tryParseJsonObject(event.parsed)
+      if (r.ok) {
+        renderValue = r.data
+        useJsonTree = true
+      } else {
+        renderValue = event.parsed // 按普通文本渲染
+      }
+    } else {
+      renderValue = event.parsed // 标量
+    }
+  }
+
   const title = isComplete
     ? t('chatAnalysis.sseCompleteResponse')
     : `event: ${event.event || '(default)'}`
@@ -114,11 +139,15 @@ function SseEventCard({ index, event, t, query, defaultOpen, isComplete }) {
       </div>
       {open ? (
         <div className="sse-event-card-body">
-          {hasParsed ? (
+          {useJsonTree ? (
             <div className="sse-event-json">
-              <JsonTree value={event.parsed} query={query} toolbar={false} />
+              <JsonTree value={renderValue} query={query} toolbar={false} />
             </div>
+          ) : hasParsed ? (
+            // 标量值（数字/布尔/null）—— 直接展示
+            <pre className="log-box sse-event-data"><SearchText query={query} text={String(renderValue)} /></pre>
           ) : (
+            // parsed=null —— 展示 raw（可能非 JSON 文本）
             <pre className="log-box sse-event-data"><SearchText query={query} text={event.raw || `(${t('common.noData')})`} /></pre>
           )}
           <div className="sse-event-raw-toggle">

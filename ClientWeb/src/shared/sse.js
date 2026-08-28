@@ -252,3 +252,54 @@ export function sseEventsToText(events) {
     })
     .join('\n\n')
 }
+
+/**
+ * 阶段AW：判定一段字符串是否为合法 JSON object/array。
+ *
+ * 与 `parseJsonSafely` 同源判定 —— 必须是 object / array 才算 JSON 片段，
+ * 避免把纯数字 / 字符串文本误识别为 JSON（例如 textParts 里夹带的 "42" 或
+ * "true" 不应触发美化）。
+ *
+ * @param {string} raw
+ * @returns {{ ok: true, data: object|any[] } | { ok: false }}
+ */
+export function tryParseJsonObject(raw) {
+  if (typeof raw !== 'string') return { ok: false }
+  const s = raw.trim()
+  if (!s) return { ok: false }
+  // 第一个非空白字符必须为 { 或 [ —— 快速过滤标量与格式不一致的输入
+  const head = s[0]
+  if (head !== '{' && head !== '[') return { ok: false }
+  let parsed
+  try { parsed = JSON.parse(s) } catch { return { ok: false } }
+  if (parsed === null || typeof parsed !== 'object') return { ok: false }
+  return { ok: true, data: parsed }
+}
+
+/**
+ * 阶段AW：把聚合出的文本片段数组按"是否为合法 JSON object/array"切分为带类型的
+ * 片段序列，供 AggregateView 渲染时按片段类型选择渲染器（普通片段走 <pre>，
+ * JSON 片段走 JsonTree —— 与 JSON 美化按钮行为一致）。
+ *
+ * 片段顺序与输入一致；不修改原数组；空串片段归为文本片段（不会触发美化）。
+ *
+ * @param {string[]} textParts
+ * @returns {Array<{ kind: 'text'|'json', value: string|object }>}
+ */
+export function splitAggregateTextParts(textParts) {
+  if (!Array.isArray(textParts)) return []
+  const out = []
+  for (const part of textParts) {
+    if (typeof part !== 'string') {
+      out.push({ kind: 'text', value: String(part == null ? '' : part) })
+      continue
+    }
+    const r = tryParseJsonObject(part)
+    if (r.ok) {
+      out.push({ kind: 'json', value: r.data })
+    } else {
+      out.push({ kind: 'text', value: part })
+    }
+  }
+  return out
+}

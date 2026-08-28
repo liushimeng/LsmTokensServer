@@ -16,9 +16,37 @@
 //      聚合解析就铺满统计标签列；保留所有数据可见性（用户主动展开查看）；
 //   3) 新增 .agg-summary-row 汇总行（紧凑 meta：一行展示 tokens / 事件数 / 工具数），
 //      作为元信息补充，避免聚合文本孤立无背景。
+// v2.0.77 阶段AW：聚合文本片段级 JSON 识别 ——
+//   1) 用 splitAggregateTextParts 按"独立片段是否为合法 JSON object/array"切分；
+//   2) JSON 片段改用 JsonTree 渲染（toolbar=false），与 JSON 美化按钮行为一致：
+//      标准排版 / 折叠 / 语法高亮 / 超长字符串保护 / 查找高亮 / 渲染预算；
+//   3) 普通片段保持 <pre> + SearchText 渲染；片段之间细线分隔；
+//   4) buildViewText / aggregateToText 契约不变（复制文本仍为完整拼接）。
 
 import { useI18n } from '../i18n'
 import SearchText from './SearchText'
+import JsonTree from './JsonTree'
+import { splitAggregateTextParts } from '../shared/sse'
+
+// 单片段渲染器（阶段AW）：按片段类型选择渲染器
+function FragmentBlock({ index, frag, query }) {
+  if (frag.kind === 'json') {
+    return (
+      <div className="agg-frag agg-frag-json">
+        <div className="agg-frag-label">📦 JSON 块 #{index + 1}</div>
+        <div className="agg-frag-json-tree">
+          <JsonTree value={frag.value} query={query} toolbar={false} />
+        </div>
+      </div>
+    )
+  }
+  // 普通文本片段
+  return (
+    <div className="agg-frag agg-frag-text">
+      <pre className="log-box agg-text-content"><SearchText query={query} text={frag.value} /></pre>
+    </div>
+  )
+}
 
 // 事件类型颜色映射（阶段AP）
 const EVENT_TYPE_COLORS = {
@@ -56,6 +84,10 @@ export default function AggregateView({ result, query }) {
   const eventTotalCount = Object.values(eventTypes).reduce((s, n) => s + n, 0)
   const hasStats = totalTokens > 0 || eventTotalCount > 0 || toolCalls.length > 0
 
+  // 阶段AW：片段级 JSON 识别
+  const fragments = splitAggregateTextParts(textParts)
+  const jsonFragmentCount = fragments.filter((f) => f.kind === 'json').length
+
   return (
     <div className="aggregate-view">
       {isComplete ? (
@@ -72,12 +104,19 @@ export default function AggregateView({ result, query }) {
 
       {/* 阶段AV：聚合文本前置为主信息（用户最想看的内容） */}
       <div className="agg-block agg-text">
-        <div className="agg-block-title">📝 Text ({textParts.length})</div>
+        <div className="agg-block-title">
+          📝 Text ({textParts.length}
+          {jsonFragmentCount > 0 ? ` · ${jsonFragmentCount} JSON` : ''})
+        </div>
         <div className="agg-block-body">
-          {textParts.length === 0 ? (
+          {fragments.length === 0 ? (
             <span className="muted">({t('common.none')})</span>
           ) : (
-            <pre className="log-box agg-text-content"><SearchText query={query} text={textParts.join('')} /></pre>
+            <div className="agg-text-fragments">
+              {fragments.map((frag, i) => (
+                <FragmentBlock key={`agg-frag-${i}`} index={i} frag={frag} query={query} />
+              ))}
+            </div>
           )}
         </div>
       </div>
