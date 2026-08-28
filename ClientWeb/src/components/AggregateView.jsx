@@ -7,8 +7,11 @@
 //   1) 非流式完整响应（isComplete=true）显示紫色徽标，避免"暂无数据"误导；
 //   2) 对无 usage / 无 text 的纯错误响应（status 非 2xx），给出明确提示；
 //   3) 支持 cache_creation_input_tokens / cache_read_input_tokens 展示（Anthropic）。
+// v2.0.75 阶段AU：新增可选 query prop —— 聚合文本块 / 工具名 / 事件类型标签
+// 在面板布局内查找高亮（计数与焦点滚动由 InlineDetailRow DOM 机制统一处理）。
 
 import { useI18n } from '../i18n'
+import SearchText from './SearchText'
 
 // 事件类型颜色映射（阶段AP）
 const EVENT_TYPE_COLORS = {
@@ -22,7 +25,7 @@ const EVENT_TYPE_COLORS = {
 }
 const DEFAULT_EVENT_COLOR = { bg: '#e0e7ff', color: '#3730a3' }
 
-export default function AggregateView({ result }) {
+export default function AggregateView({ result, query }) {
   const { t } = useI18n()
   if (!result) return <div className="agg-empty">({t('common.noData')})</div>
   const usage = result.usage || {}
@@ -99,7 +102,7 @@ export default function AggregateView({ result }) {
                 const c = EVENT_TYPE_COLORS[k] || DEFAULT_EVENT_COLOR
                 return (
                   <li key={k} className="agg-tag" style={{ background: c.bg, color: c.color }}>
-                    <span className="agg-tag-name">{k || '(default)'}</span>
+                    <span className="agg-tag-name"><SearchText query={query} text={k || '(default)'} /></span>
                     <span className="agg-tag-count">× {v}</span>
                   </li>
                 )
@@ -118,7 +121,7 @@ export default function AggregateView({ result }) {
             <ul className="agg-tag-list">
               {toolCalls.map((tl, i) => (
                 <li key={`${tl}-${i}`} className="agg-tag agg-tag-tool">
-                  <span className="agg-tag-name">{tl || '(unnamed)'}</span>
+                  <span className="agg-tag-name"><SearchText query={query} text={tl || '(unnamed)'} /></span>
                 </li>
               ))}
             </ul>
@@ -132,7 +135,7 @@ export default function AggregateView({ result }) {
           {textParts.length === 0 ? (
             <span className="muted">({t('common.none')})</span>
           ) : (
-            <pre className="log-box agg-text-content">{textParts.join('')}</pre>
+            <pre className="log-box agg-text-content"><SearchText query={query} text={textParts.join('')} /></pre>
           )}
         </div>
       </div>

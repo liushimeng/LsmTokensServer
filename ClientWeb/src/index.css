@@ -416,6 +416,8 @@ a { color: var(--primary); text-decoration: none; }
 .sse-event-toggle { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 0 6px; font-size: 12px; cursor: pointer; }
 .sse-event-card-body { padding: 8px 12px; }
 .sse-event-data { max-height: 360px; margin: 0; }
+/* SSE 事件 parsed JSON 的 JsonTree 容器（阶段AU）：限制高度可滚动 */
+.sse-event-json { max-height: 360px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; }
 .sse-event-raw-toggle { margin-top: 6px; }
 .sse-event-raw { max-height: 200px; margin-top: 6px; }
 .sse-empty { color: var(--muted); padding: 12px; text-align: center; }
@@ -664,6 +666,11 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
 .highlight-text { margin: 0; }
 .highlight-text mark { background: #fde68a; color: inherit; border-radius: 2px; padding: 0 1px; }
 .highlight-text mark.mark-active { background: #f59e0b; color: #1f2937; outline: 1px solid #b45309; }
+
+/* 查找高亮（阶段AU 视图内通用：JSON 树 / SSE 卡片 / 聚合面板 / 纯文本）
+   当前项类名由 InlineDetailRow 的 DOM 机制切换，React 不管理该类 */
+mark.sm-mark { background: #fde68a; color: inherit; border-radius: 2px; padding: 0 1px; }
+mark.sm-mark.sm-mark-active { background: #f59e0b; color: #1f2937; outline: 1px solid #b45309; }
 
 /* 全屏覆盖层：面板占满视口，内容区自滚动 */
 .inline-detail-fullscreen {

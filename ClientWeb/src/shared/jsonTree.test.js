@@ -120,6 +120,10 @@ ok(lv3.has('$["a"]["b"]') && lv3.size === 3, '展开至 3 层 = 根 + a + b')
 const lvAll = collectContainerPaths(deep, 99)
 ok(lvAll.size === 4, '大层数收集全部容器路径（无层级上限）')
 
+// 阶段AU：「展开全部」按钮 = collectContainerPaths(data, Infinity)
+const lvInf = collectContainerPaths(deep, Number.POSITIVE_INFINITY)
+ok(lvInf.size === 4 && lvInf.has('$["a"]["b"]["c"]'), 'Infinity 收集全部容器路径（展开全部）')
+
 // ===== 6) escapeJsonString（与 JSON.stringify 转义对齐） =====
 console.log('\n--- escapeJsonString ---')
 eq(escapeJsonString('plain'), 'plain', '普通文本不变')

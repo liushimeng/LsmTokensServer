@@ -5,7 +5,7 @@
 // 运行：
 //   cd ClientWeb && node src/shared/viewText.test.js
 
-import { buildViewText, VIEW_RAW, VIEW_JSON, VIEW_SSE, VIEW_AGG } from './viewText.js'
+import { buildViewText, viewsForTab, VIEW_RAW, VIEW_JSON, VIEW_SSE, VIEW_AGG } from './viewText.js'
 
 let pass = 0
 let fail = 0
@@ -45,6 +45,17 @@ ok(aggText.includes('input=10'), 'agg 视图含 usage')
 // 空值安全
 ok(buildViewText('request_body', VIEW_JSON, '') === '', '空 body json 安全')
 ok(buildViewText('request_body', undefined, 'x') === 'x', '缺省视图按 raw')
+
+// ===== viewsForTab（阶段AU：视图按钮按字段语义裁剪） =====
+const wantReq = [VIEW_RAW, VIEW_JSON]
+const wantResp = [VIEW_RAW, VIEW_SSE, VIEW_AGG]
+ok(JSON.stringify(viewsForTab('request_body')) === JSON.stringify(wantReq), 'request_body 仅 raw/json（无 SSE/聚合）')
+ok(JSON.stringify(viewsForTab('response_body')) === JSON.stringify(wantResp), 'response_body 仅 raw/sse/agg（无 JSON 美化）')
+ok(JSON.stringify(viewsForTab('request_headers')) === JSON.stringify([VIEW_RAW]), 'headers 仅 raw')
+ok(JSON.stringify(viewsForTab('response_headers')) === JSON.stringify([VIEW_RAW]), 'response headers 仅 raw')
+ok(viewsForTab('request_body').includes(VIEW_JSON) === true, 'request_body 保留 JSON 美化')
+ok(viewsForTab('response_body').includes(VIEW_JSON) === false, 'response_body 裁掉 JSON 美化')
+ok(viewsForTab('request_body').includes(VIEW_SSE) === false, 'request_body 裁掉 SSE 解析')
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

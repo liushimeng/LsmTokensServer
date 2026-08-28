@@ -107,6 +107,24 @@ func TestSaveAndQueryTransaction(t *testing.T) {
 		t.Fatalf("request_headers detail should be masked, got %q", reqHeaders)
 	}
 
+	// 阶段AU：response_body 落库时被 SaveAgentHttpTransaction base64 编码，
+	// 详情读取必须解码回明文（此前漏解码导致前端 Base64 乱码 + SSE/聚合解析失效）。
+	respBodyDetail, err := modelsdb.GetAgentHttpTransactionFieldByID("testuser", "model-a", config.G.DBMysqlSubTableNumber, r.ID, "response_body")
+	if err != nil {
+		t.Fatalf("get response_body by id failed: %v", err)
+	}
+	if respBodyDetail != `{"ok":true}` {
+		t.Fatalf("response_body detail should be decoded plaintext, got %q", respBodyDetail)
+	}
+	// 请求体同样解码（既有行为回归保护）
+	reqBodyDetail, err := modelsdb.GetAgentHttpTransactionFieldByID("testuser", "model-a", config.G.DBMysqlSubTableNumber, r.ID, "request_body")
+	if err != nil {
+		t.Fatalf("get request_body by id failed: %v", err)
+	}
+	if !strings.Contains(reqBodyDetail, `"model":"claude-3"`) {
+		t.Fatalf("request_body detail should be decoded plaintext, got %q", reqBodyDetail)
+	}
+
 	// 按 ID 查询
 	found, err := modelsdb.GetAgentHttpTransactionByID("testuser", "model-a", config.G.DBMysqlSubTableNumber, r.ID)
 	if err != nil {

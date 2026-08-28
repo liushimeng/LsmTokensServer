@@ -13,13 +13,19 @@
 //      按需加载到末尾，剩余项永不丢失；
 //   4) 超长字符串：超过 JSON_STRING_INLINE_LIMIT 默认截断 + 「显示全部」按需展开；
 //   5) 渲染预算：单次渲染超过 JSON_RENDER_BUDGET 行即停止并提示，防级联卡死；
-//   6) 工具栏：折叠全部 / 展开至 2、3、5 层（确定性路径收集）。
+//   6) 工具栏：折叠全部 / 展开至 2、3、5 层 / 展开全部（阶段AU 新增）。
+//
+// 2026-08-28 阶段AU：
+//   - 新增可选 query prop：key 名 / 字符串值 / 标量字面量经 SearchText 渲染，
+//     在当前树布局内做查找高亮（计数与焦点滚动由 InlineDetailRow DOM 机制统一处理）；
+//   - 新增可选 toolbar prop（默认 true）：嵌入 SSE 事件卡片等紧凑场景可隐藏工具栏。
 //
 // 旧版（阶段AM/AR）问题：配额制 buildJsonTreeNodes 在构建期截断数据，
 // 导致"显示不全、只有第一个元素可折叠、Object{3} 标签式排版"。
 
 import { useCallback, useMemo, useState } from 'react'
 import { useI18n } from '../i18n'
+import SearchText from './SearchText'
 import {
   parseJsonSafely,
   escapeJsonString,
@@ -37,7 +43,7 @@ const JT_INDENT_PX = 20
 /** 工具栏"展开至 N 层"档位 */
 const JT_EXPAND_LEVELS = [2, 3, 5]
 
-export default function JsonTree({ value }) {
+export default function JsonTree({ value, query, toolbar = true }) {
   const { t } = useI18n()
   const parsed = useMemo(() => parseJsonSafely(value), [value])
 
@@ -49,7 +55,7 @@ export default function JsonTree({ value }) {
     return <pre className="log-box">{String(value)}</pre>
   }
 
-  return <JsonTreeInner data={parsed.data} />
+  return <JsonTreeInner data={parsed.data} query={query} toolbar={toolbar} />
 }
 
 /**
@@ -58,7 +64,7 @@ export default function JsonTree({ value }) {
  *   expanded —— 展开的容器路径集合（$ / $["key"] / $[0]）
  *   limits   —— 各容器的分页上限（path → 可见子项数；缺省 JSON_TREE_PAGE_SIZE）
  */
-function JsonTreeInner({ data }) {
+function JsonTreeInner({ data, query, toolbar }) {
   const { t } = useI18n()
   const [expanded, setExpanded] = useState(() => collectDefaultExpandedPaths(data))
   const [limits, setLimits] = useState({})
@@ -81,6 +87,9 @@ function JsonTreeInner({ data }) {
 
   const collapseAll = () => setExpanded(new Set(['$']))
   const expandToLevel = (level) => setExpanded(collectContainerPaths(data, level))
+  // 展开全部：收集全部容器路径（纯数据遍历，毫秒级）；DOM 防卡顿由渲染预算 +
+  // 大数组分页兜底（阶段AU）
+  const expandAll = () => setExpanded(collectContainerPaths(data, Number.POSITIVE_INFINITY))
 
   // 单次渲染通行的预算（每次 render 重建；渲染过程同步扣减）。
   // 扣减封装为 tryTake() 方法：语义即"尝试占用 1 个预算行，耗尽返回 false"。
@@ -96,6 +105,7 @@ function JsonTreeInner({ data }) {
   const ctx = {
     t,
     budget,
+    query,
     isExpanded: (path) => expanded.has(path),
     toggle,
     getLimit: (path) => limits[path] || JSON_TREE_PAGE_SIZE,
@@ -104,21 +114,26 @@ function JsonTreeInner({ data }) {
 
   return (
     <div className="json-tree">
-      <div className="json-tree-toolbar">
-        <button type="button" className="jt-tool-btn" onClick={collapseAll}>
-          {t('chatAnalysis.jsonCollapseAll')}
-        </button>
-        {JT_EXPAND_LEVELS.map((level) => (
-          <button
-            key={level}
-            type="button"
-            className="jt-tool-btn"
-            onClick={() => expandToLevel(level)}
-          >
-            {t('chatAnalysis.jsonExpandLevel', { n: level })}
+      {toolbar ? (
+        <div className="json-tree-toolbar">
+          <button type="button" className="jt-tool-btn" onClick={collapseAll}>
+            {t('chatAnalysis.jsonCollapseAll')}
           </button>
-        ))}
-      </div>
+          {JT_EXPAND_LEVELS.map((level) => (
+            <button
+              key={level}
+              type="button"
+              className="jt-tool-btn"
+              onClick={() => expandToLevel(level)}
+            >
+              {t('chatAnalysis.jsonExpandLevel', { n: level })}
+            </button>
+          ))}
+          <button type="button" className="jt-tool-btn" onClick={expandAll}>
+            {t('chatAnalysis.jsonExpandAll')}
+          </button>
+        </div>
+      ) : null}
       <div className="json-tree-code">
         <JsonNode value={data} path="$" depth={0} name={undefined} hasKey={false} isLast ctx={ctx} />
       </div>
@@ -135,7 +150,9 @@ function JsonNode({ value, path, depth, name, hasKey, isLast, ctx }) {
   const comma = !isLast ? <span className="jt-punct">,</span> : null
   const keyPart = hasKey ? (
     <>
-      <span className="jt-key">"{escapeJsonString(name)}"</span>
+      <span className="jt-key">
+        <SearchText query={ctx.query} text={`"${escapeJsonString(name)}"`} />
+      </span>
       <span className="jt-punct">: </span>
     </>
   ) : null
@@ -145,7 +162,7 @@ function JsonNode({ value, path, depth, name, hasKey, isLast, ctx }) {
     return (
       <Line depth={depth}>
         {keyPart}
-        <PrimitiveValue value={value} />
+        <PrimitiveValue value={value} query={ctx.query} />
         {comma}
       </Line>
     )
@@ -266,27 +283,27 @@ function Line({ depth, toggle, open, onToggle, children }) {
   )
 }
 
-/** 标量值渲染（字符串/数字/布尔/null） */
-function PrimitiveValue({ value }) {
-  if (value === null) return <span className="jt-null">null</span>
-  if (typeof value === 'number') return <span className="jt-number">{String(value)}</span>
-  if (typeof value === 'boolean') return <span className="jt-boolean">{String(value)}</span>
-  if (typeof value === 'string') return <StringValue text={value} />
-  return <span className="jt-string">{escapeJsonString(String(value))}</span>
+/** 标量值渲染（字符串/数字/布尔/null）— 查找词非空时经 SearchText 高亮 */
+function PrimitiveValue({ value, query }) {
+  if (value === null) return <span className="jt-null"><SearchText query={query} text="null" /></span>
+  if (typeof value === 'number') return <span className="jt-number"><SearchText query={query} text={String(value)} /></span>
+  if (typeof value === 'boolean') return <span className="jt-boolean"><SearchText query={query} text={String(value)} /></span>
+  if (typeof value === 'string') return <StringValue text={value} query={query} />
+  return <span className="jt-string"><SearchText query={query} text={escapeJsonString(String(value))} /></span>
 }
 
-/** 字符串值：超长默认截断，「显示全部 / 收起」按需切换 */
-function StringValue({ text }) {
+/** 字符串值：超长默认截断，「显示全部 / 收起」按需切换；截断态仅高亮可见部分 */
+function StringValue({ text, query }) {
   const { t } = useI18n()
   const [showAll, setShowAll] = useState(false)
 
   if (text.length <= JSON_STRING_INLINE_LIMIT) {
-    return <span className="jt-string">"{escapeJsonString(text)}"</span>
+    return <span className="jt-string"><SearchText query={query} text={`"${escapeJsonString(text)}"`} /></span>
   }
   const shown = showAll ? text : text.slice(0, JSON_STRING_INLINE_LIMIT)
   return (
     <>
-      <span className="jt-string">"{escapeJsonString(shown)}{showAll ? '' : '…'}"</span>
+      <span className="jt-string"><SearchText query={query} text={`"${escapeJsonString(shown)}${showAll ? '' : '…'}"`} /></span>
       <button type="button" className="jt-inline-btn" onClick={() => setShowAll((s) => !s)}>
         {showAll
           ? t('chatAnalysis.jsonStringCollapse')

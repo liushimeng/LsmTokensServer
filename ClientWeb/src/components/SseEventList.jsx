@@ -8,9 +8,16 @@
 //      避免"暂无数据"误导；
 //   2) 大响应体时卡片默认折叠，避免一次性渲染过多内容；
 //   3) 所有卡片均支持点击展开/折叠，内容可读可复制。
+// v2.0.75 阶段AU：SSE 事件 data 本质是 JSON ——
+//   1) parsed JSON 改用 JsonTree 渲染（无卡片内工具栏），自动获得标准排版、
+//      语法高亮、逐节点折叠、超长字符串保护等 JSON 树能力；
+//   2) 新增可选 query prop：事件名 / raw 原文 / parsed JSON 在卡片布局内
+//      查找高亮（计数与焦点滚动由 InlineDetailRow DOM 机制统一处理）。
 
 import { useState } from 'react'
 import { useI18n } from '../i18n'
+import JsonTree from './JsonTree'
+import SearchText from './SearchText'
 
 // 事件类型 → 颜色分类（阶段AP）
 function sseColorClass(eventName) {
@@ -34,7 +41,7 @@ function sseDotColor(eventName) {
   return '#94a3b8'
 }
 
-export default function SseEventList({ events }) {
+export default function SseEventList({ events, query }) {
   const { t } = useI18n()
   if (!events || !events.length) {
     return <div className="sse-empty">({t('common.noData')})</div>
@@ -61,7 +68,7 @@ export default function SseEventList({ events }) {
         {Object.entries(typeCounts).map(([name, count]) => (
           <span key={name} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <span className="sse-event-type-dot" style={{ background: sseDotColor(name) }} />
-            <span>{name}</span>
+            <span><SearchText query={query} text={name} /></span>
             <span style={{ color: '#6366f1', fontSize: 11, background: 'rgba(99,102,241,.08)', borderRadius: 6, padding: '0 5px' }}>×{count}</span>
           </span>
         ))}
@@ -69,14 +76,14 @@ export default function SseEventList({ events }) {
 
       <div className="sse-event-list">
         {events.map((e, i) => (
-          <SseEventCard key={`sse-${i}`} index={i + 1} event={e} t={t} defaultOpen={i < 5} isComplete={isCompleteSingle} />
+          <SseEventCard key={`sse-${i}`} index={i + 1} event={e} t={t} query={query} defaultOpen={i < 5} isComplete={isCompleteSingle} />
         ))}
       </div>
     </>
   )
 }
 
-function SseEventCard({ index, event, t, defaultOpen, isComplete }) {
+function SseEventCard({ index, event, t, query, defaultOpen, isComplete }) {
   const [open, setOpen] = useState(defaultOpen)
   const [showRaw, setShowRaw] = useState(false)
   const hasParsed = event.parsed !== null && event.parsed !== undefined
@@ -91,7 +98,11 @@ function SseEventCard({ index, event, t, defaultOpen, isComplete }) {
       <div className="sse-event-card-head" onClick={() => setOpen((o) => !o)}>
         {!isComplete ? <span className="sse-event-index">#{index}</span> : null}
         <span className="sse-event-type-dot" style={{ background: sseDotColor(event.event) }} />
-        <span className="sse-event-name">{title}</span>
+        <span className="sse-event-name">
+          {isComplete ? title : (
+            <>event: <SearchText query={query} text={event.event || '(default)'} /></>
+          )}
+        </span>
         <button
           type="button"
           className="btn btn-sm sse-event-toggle"
@@ -104,9 +115,11 @@ function SseEventCard({ index, event, t, defaultOpen, isComplete }) {
       {open ? (
         <div className="sse-event-card-body">
           {hasParsed ? (
-            <pre className="log-box sse-event-data">{JSON.stringify(event.parsed, null, 2)}</pre>
+            <div className="sse-event-json">
+              <JsonTree value={event.parsed} query={query} toolbar={false} />
+            </div>
           ) : (
-            <pre className="log-box sse-event-data">{event.raw || `(${t('common.noData')})`}</pre>
+            <pre className="log-box sse-event-data"><SearchText query={query} text={event.raw || `(${t('common.noData')})`} /></pre>
           )}
           <div className="sse-event-raw-toggle">
             <button type="button" className="btn btn-sm" onClick={() => setShowRaw((s) => !s)}>
@@ -114,7 +127,7 @@ function SseEventCard({ index, event, t, defaultOpen, isComplete }) {
             </button>
           </div>
           {showRaw ? (
-            <pre className="log-box sse-event-raw">{event.raw || `(${t('common.none')})`}</pre>
+            <pre className="log-box sse-event-raw"><SearchText query={query} text={event.raw || `(${t('common.none')})`} /></pre>
           ) : null}
         </div>
       ) : null}

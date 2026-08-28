@@ -204,6 +204,7 @@
   "chatAnalysis.jsonBeautify": "JSON Beautify",
   "chatAnalysis.jsonBudgetHint": "Render limit reached ({n} lines). Collapse some nodes before expanding more.",
   "chatAnalysis.jsonCollapseAll": "Collapse all",
+  "chatAnalysis.jsonExpandAll": "Expand all",
   "chatAnalysis.jsonExpandLevel": "Expand to level {n}",
   "chatAnalysis.jsonItemsSuffix": "// {n} items",
   "chatAnalysis.jsonShowAll": "Show all ({n} items)",

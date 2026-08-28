@@ -204,6 +204,7 @@
   "chatAnalysis.jsonBeautify": "JSON整形",
   "chatAnalysis.jsonBudgetHint": "レンダリング上限（{n} 行）に達しました。一部のノードを折りたたんでから展開してください",
   "chatAnalysis.jsonCollapseAll": "すべて折りたたむ",
+  "chatAnalysis.jsonExpandAll": "すべて展開",
   "chatAnalysis.jsonExpandLevel": "{n} 階層まで展開",
   "chatAnalysis.jsonItemsSuffix": "// {n} 件",
   "chatAnalysis.jsonShowAll": "すべて表示（{n} 件）",

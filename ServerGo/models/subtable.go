@@ -922,14 +922,30 @@ func GetAgentHttpTransactionFieldByID(userName, modelName string, subTableNum in
 	if field == "request_headers" || field == "response_headers" {
 		value = RedactAuthorizationBearerHeaderText(value)
 	}
-	// 请求体字段落库时做了 base64 编码（见 proxy server_http_ai_proxy_utils.go），
-	// 查询详情时自动解码为明文，便于前端 JSON 美化正确展示。
-	if field == "request_body" || field == "request_src_protocol_body" {
-		if decoded, err := base64.StdEncoding.DecodeString(value); err == nil {
-			value = string(decoded)
-		}
+	// 请求体字段落库时做了 base64 编码（见 proxy server_http_ai_proxy_utils.go）；
+	// 响应体字段自 v2.0.5x 起同样 base64 编码落库（SaveAgentHttpTransaction 内
+	// respBodyForLog，规避 MySQL utf8 Error 1366）。查询详情时统一解码为明文，
+	// 便于前端 JSON 美化 / SSE 解析 / 聚合解析正确展示（阶段AU 修复：此前
+	// response_body 漏了解码，前端拿到 Base64 乱码且 SSE/聚合解析全部失效）。
+	if field == "request_body" || field == "request_src_protocol_body" || field == "response_body" {
+		value = tryDecodeBase64Text(value)
 	}
 	return value, nil
+}
+
+// tryDecodeBase64Text 严格校验的 base64 解码：仅当 value 非空、长度为 4 的倍数、
+// 标准 base64 字符集合法且解码结果为合法 UTF-8 文本时才返回解码值，否则原样返回。
+// 防止误伤"恰好由 base64 字母表字符组成的明文"（JSON/SSE 明文含 { } : " 等非法
+// base64 字符，实际不可能通过校验；UTF-8 校验再兜底二进制场景）。
+func tryDecodeBase64Text(value string) string {
+	if value == "" || len(value)%4 != 0 {
+		return value
+	}
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil || !utf8.Valid(decoded) {
+		return value
+	}
+	return string(decoded)
 }
 
 // GetAgentHttpTransactionByID 根据 ID 查询单条记录

@@ -204,6 +204,7 @@
   "chatAnalysis.jsonBeautify": "JSON 美化",
   "chatAnalysis.jsonBudgetHint": "已达单次渲染上限（{n} 行），请先折叠部分节点再展开剩余内容",
   "chatAnalysis.jsonCollapseAll": "折叠全部",
+  "chatAnalysis.jsonExpandAll": "展开全部",
   "chatAnalysis.jsonExpandLevel": "展开至 {n} 层",
   "chatAnalysis.jsonItemsSuffix": "// {n} 项",
   "chatAnalysis.jsonShowAll": "显示全部（共 {n} 项）",
