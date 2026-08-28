@@ -428,6 +428,39 @@ a { color: var(--primary); text-decoration: none; }
 .agg-block-title { font-weight: 600; margin-bottom: 8px; color: #1e293b; font-size: 13px; display: flex; align-items: center; gap: 6px; }
 .agg-block-body { font-size: 13px; color: #334155; }
 .agg-block-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+/* 阶段AV：聚合文本前置后的汇总信息行（一行 meta） */
+.agg-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 12px;
+  color: #475569;
+  align-items: center;
+}
+.agg-summary-item { display: inline-flex; align-items: baseline; gap: 6px; }
+.agg-summary-label { color: var(--muted); font-weight: 600; }
+.agg-summary-val { color: #1e293b; font-weight: 500; }
+.agg-summary-sub { color: var(--muted); font-weight: 400; }
+/* 阶段AV：详细统计折叠块（Tokens/Events/Tools 三块合并默认折叠） */
+.agg-details { border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.agg-details-summary {
+  cursor: pointer;
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--muted);
+  user-select: none;
+  list-style: none;
+  border-radius: 6px;
+}
+.agg-details-summary::-webkit-details-marker { display: none; }
+.agg-details-summary::before { content: '▸ '; margin-right: 4px; color: #94a3b8; }
+.agg-details[open] .agg-details-summary::before { content: '▾ '; }
+.agg-details[open] .agg-details-summary { border-bottom: 1px dashed var(--border); }
+.agg-details-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 10px; }
 .agg-usage-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
 .agg-usage-item { display: flex; flex-direction: column; gap: 2px; }
 .agg-usage-label { font-size: 11px; color: var(--muted); }

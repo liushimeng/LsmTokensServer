@@ -9,6 +9,13 @@
 //   3) 支持 cache_creation_input_tokens / cache_read_input_tokens 展示（Anthropic）。
 // v2.0.75 阶段AU：新增可选 query prop —— 聚合文本块 / 工具名 / 事件类型标签
 // 在面板布局内查找高亮（计数与焦点滚动由 InlineDetailRow DOM 机制统一处理）。
+// v2.0.76 阶段AV：渲染顺序调整 ——
+//   1) 聚合文本（Text）前置为主信息，紧接 banner 之后；多事件流的 Events 标签列
+//      不再遮挡用户最想看到的"聚合出的对话文本"；
+//   2) Tokens / Events / Tools 三块合并到一个 <details> 中默认折叠，避免一打开
+//      聚合解析就铺满统计标签列；保留所有数据可见性（用户主动展开查看）；
+//   3) 新增 .agg-summary-row 汇总行（紧凑 meta：一行展示 tokens / 事件数 / 工具数），
+//      作为元信息补充，避免聚合文本孤立无背景。
 
 import { useI18n } from '../i18n'
 import SearchText from './SearchText'
@@ -45,6 +52,10 @@ export default function AggregateView({ result, query }) {
     totalTokens === 0 && toolCalls.length === 0 && textParts.length === 0 &&
     Object.keys(eventTypes).length === 0
 
+  // 阶段AV：汇总行 meta（tokens / 事件数 / 工具数 / 文本片段数）
+  const eventTotalCount = Object.values(eventTypes).reduce((s, n) => s + n, 0)
+  const hasStats = totalTokens > 0 || eventTotalCount > 0 || toolCalls.length > 0
+
   return (
     <div className="aggregate-view">
       {isComplete ? (
@@ -59,76 +70,7 @@ export default function AggregateView({ result, query }) {
         </div>
       ) : null}
 
-      <div className="agg-block agg-usage">
-        <div className="agg-block-title">📊 Tokens</div>
-        <div className="agg-block-body">
-          <div className="agg-usage-grid">
-            <div className="agg-usage-item">
-              <span className="agg-usage-label">Input</span>
-              <span className="agg-usage-val input">{inFinal.toLocaleString()}</span>
-            </div>
-            <div className="agg-usage-item">
-              <span className="agg-usage-label">Output</span>
-              <span className="agg-usage-val output">{outFinal.toLocaleString()}</span>
-            </div>
-          </div>
-          {(usage.cache_creation_input_tokens || usage.cache_read_input_tokens) ? (
-            <div className="agg-cache-info">
-              {usage.cache_creation_input_tokens ? (
-                <span className="agg-cache-tag">cache_creation: {usage.cache_creation_input_tokens.toLocaleString()}</span>
-              ) : null}
-              {usage.cache_read_input_tokens ? (
-                <span className="agg-cache-tag">cache_read: {usage.cache_read_input_tokens.toLocaleString()}</span>
-              ) : null}
-            </div>
-          ) : null}
-          {totalTokens > 0 ? (
-            <div className="agg-usage-bar">
-              <div className="bar-input" style={{ width: `${inPct}%` }} title={`Input ${inPct}%`} />
-              <div className="bar-output" style={{ width: `${outPct}%` }} title={`Output ${outPct}%`} />
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="agg-block agg-event-types">
-        <div className="agg-block-title">📋 Events</div>
-        <div className="agg-block-body">
-          {Object.keys(eventTypes).length === 0 ? (
-            <span className="muted">({t('common.none')})</span>
-          ) : (
-            <ul className="agg-tag-list">
-              {Object.entries(eventTypes).map(([k, v]) => {
-                const c = EVENT_TYPE_COLORS[k] || DEFAULT_EVENT_COLOR
-                return (
-                  <li key={k} className="agg-tag" style={{ background: c.bg, color: c.color }}>
-                    <span className="agg-tag-name"><SearchText query={query} text={k || '(default)'} /></span>
-                    <span className="agg-tag-count">× {v}</span>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
-      </div>
-
-      <div className="agg-block agg-tool-calls">
-        <div className="agg-block-title">🔧 Tools</div>
-        <div className="agg-block-body">
-          {toolCalls.length === 0 ? (
-            <span className="muted">({t('common.none')})</span>
-          ) : (
-            <ul className="agg-tag-list">
-              {toolCalls.map((tl, i) => (
-                <li key={`${tl}-${i}`} className="agg-tag agg-tag-tool">
-                  <span className="agg-tag-name"><SearchText query={query} text={tl || '(unnamed)'} /></span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-
+      {/* 阶段AV：聚合文本前置为主信息（用户最想看的内容） */}
       <div className="agg-block agg-text">
         <div className="agg-block-title">📝 Text ({textParts.length})</div>
         <div className="agg-block-body">
@@ -139,6 +81,120 @@ export default function AggregateView({ result, query }) {
           )}
         </div>
       </div>
+
+      {/* 阶段AV：汇总信息行 —— 一行紧凑展示 tokens / 事件 / 工具元数据。
+          提供快速上下文，避免聚合文本"孤立无背景"。 */}
+      {hasStats ? (
+        <div className="agg-summary-row">
+          {totalTokens > 0 ? (
+            <span className="agg-summary-item">
+              <span className="agg-summary-label">Tokens</span>
+              <span className="agg-summary-val">
+                in {inFinal.toLocaleString()} / out {outFinal.toLocaleString()}
+                {' '}<span className="agg-summary-sub">({inPct}% / {outPct}%)</span>
+              </span>
+            </span>
+          ) : null}
+          {eventTotalCount > 0 ? (
+            <span className="agg-summary-item">
+              <span className="agg-summary-label">Events</span>
+              <span className="agg-summary-val">{eventTotalCount}</span>
+            </span>
+          ) : null}
+          {toolCalls.length > 0 ? (
+            <span className="agg-summary-item">
+              <span className="agg-summary-label">Tools</span>
+              <span className="agg-summary-val">{toolCalls.length}</span>
+            </span>
+          ) : null}
+          {(usage.cache_creation_input_tokens || usage.cache_read_input_tokens) ? (
+            <span className="agg-summary-item">
+              <span className="agg-summary-label">Cache</span>
+              <span className="agg-summary-val">
+                {usage.cache_creation_input_tokens ? `create ${usage.cache_creation_input_tokens.toLocaleString()}` : ''}
+                {usage.cache_creation_input_tokens && usage.cache_read_input_tokens ? ' / ' : ''}
+                {usage.cache_read_input_tokens ? `read ${usage.cache_read_input_tokens.toLocaleString()}` : ''}
+              </span>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* 阶段AV：Tokens / Events / Tools 三块合并为默认折叠的 details，
+          既保留完整统计可见性，又避免一打开就铺满标签列。
+          展开后内容与既有阶段AP/AR 行为一致（含 cache 标签）。 */}
+      {hasStats ? (
+        <details className="agg-details">
+          <summary className="agg-details-summary">📊 详细统计（Tokens / Events / Tools）</summary>
+          <div className="agg-details-body">
+            {totalTokens > 0 ? (
+              <div className="agg-block agg-usage">
+                <div className="agg-block-title">📊 Tokens</div>
+                <div className="agg-block-body">
+                  <div className="agg-usage-grid">
+                    <div className="agg-usage-item">
+                      <span className="agg-usage-label">Input</span>
+                      <span className="agg-usage-val input">{inFinal.toLocaleString()}</span>
+                    </div>
+                    <div className="agg-usage-item">
+                      <span className="agg-usage-label">Output</span>
+                      <span className="agg-usage-val output">{outFinal.toLocaleString()}</span>
+                    </div>
+                  </div>
+                  {(usage.cache_creation_input_tokens || usage.cache_read_input_tokens) ? (
+                    <div className="agg-cache-info">
+                      {usage.cache_creation_input_tokens ? (
+                        <span className="agg-cache-tag">cache_creation: {usage.cache_creation_input_tokens.toLocaleString()}</span>
+                      ) : null}
+                      {usage.cache_read_input_tokens ? (
+                        <span className="agg-cache-tag">cache_read: {usage.cache_read_input_tokens.toLocaleString()}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div className="agg-usage-bar">
+                    <div className="bar-input" style={{ width: `${inPct}%` }} title={`Input ${inPct}%`} />
+                    <div className="bar-output" style={{ width: `${outPct}%` }} title={`Output ${outPct}%`} />
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {Object.keys(eventTypes).length > 0 ? (
+              <div className="agg-block agg-event-types">
+                <div className="agg-block-title">📋 Events</div>
+                <div className="agg-block-body">
+                  <ul className="agg-tag-list">
+                    {Object.entries(eventTypes).map(([k, v]) => {
+                      const c = EVENT_TYPE_COLORS[k] || DEFAULT_EVENT_COLOR
+                      return (
+                        <li key={k} className="agg-tag" style={{ background: c.bg, color: c.color }}>
+                          <span className="agg-tag-name"><SearchText query={query} text={k || '(default)'} /></span>
+                          <span className="agg-tag-count">× {v}</span>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+
+            {toolCalls.length > 0 ? (
+              <div className="agg-block agg-tool-calls">
+                <div className="agg-block-title">🔧 Tools</div>
+                <div className="agg-block-body">
+                  <ul className="agg-tag-list">
+                    {toolCalls.map((tl, i) => (
+                      <li key={`${tl}-${i}`} className="agg-tag agg-tag-tool">
+                        <span className="agg-tag-name"><SearchText query={query} text={tl || '(unnamed)'} /></span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
     </div>
   )
 }

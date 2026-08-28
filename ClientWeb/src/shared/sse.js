@@ -186,7 +186,12 @@ export function aggregateSSE(text) {
 
   // 流式 SSE 聚合（原有逻辑）
   events.forEach((e) => {
-    if (e.event) out.eventTypes[e.event] = (out.eventTypes[e.event] || 0) + 1
+    // 阶段AV：与 SseEventList / aggregateToText 对齐 —— OpenAI 协议等 data:-only
+    // 流（无 event: 行）的事件用 '(default)' 兜底计入 eventTypes，避免同一段流
+    // 在 SSE 解析（Summary bar 显示 (default) ×N）与聚合解析（之前显示 none），
+    // 两视图给出不同的"统计"。
+    const eventName = e.event || '(default)'
+    out.eventTypes[eventName] = (out.eventTypes[eventName] || 0) + 1
     const p = e.parsed
     if (!p) return
     if (p.type === 'content_block_delta' && p.delta) {

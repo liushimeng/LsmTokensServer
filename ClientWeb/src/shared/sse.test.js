@@ -97,6 +97,10 @@ eq(agg1.usage && agg1.usage.input_tokens_final, 10, 'usage.input_tokens_final �
 eq(agg1.usage && agg1.usage.output_tokens_final, 5, 'usage.output_tokens_final 末帧覆盖')
 eq(agg1.eventTypes && agg1.eventTypes.message_start, 1, 'eventTypes 统计')
 
+// 阶段AV：eventTypes 对无名事件用 '(default)' 兜底，与 SseEventList / aggregateToText 一致
+eq(agg1.eventTypes['content_block_delta'], 2, 'Anthropic eventTypes 计数正确（多 delta 累加）')
+eq(agg1.eventTypes['(default)'], undefined, 'Anthropic 流无 (default) 键')
+
 const openaiStream = [
   'data: {"choices":[{"delta":{"content":"Hi "}}]}',
   '',
@@ -107,6 +111,9 @@ const openaiStream = [
 ].join('\n')
 const agg2 = aggregateSSE(openaiStream)
 eq(agg2.textParts.join(''), 'Hi therethinking', 'OpenAI choices[0].delta.content + reasoning_content 合并')
+// 阶段AV：OpenAI data:-only 流 eventTypes 用 '(default)' 兜底（与 SSE 解析 Summary bar 一致）
+eq(agg2.eventTypes && agg2.eventTypes['(default)'], 3, 'OpenAI 流 eventTypes 含 (default)×3，与 SSE 视图 Summary 一致')
+eq(Object.keys(agg2.eventTypes || {}).length, 1, 'OpenAI 流 eventTypes 仅 (default) 一个键')
 
 eq(aggregateSSE('').textParts, [], '空流 → textParts=[]')
 eq(aggregateSSE(null), { textParts: [], usage: null, toolCalls: [], eventTypes: {} }, 'null → 空结构')
