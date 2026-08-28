@@ -83,7 +83,7 @@ func TestCertDownloadInfo_PublicHost(t *testing.T) {
 
 	testCfg := config.DefaultConfig()
 	testCfg.UserWebCertFile = certPath
-	testCfg.AgentPublicHost = "8.130.85.252"
+	testCfg.AgentPublicHost = "XXX.XXX.XXX"
 	testCfg.AgentProductListenAddr = "0.0.0.0" // 监听地址仍应为 0.0.0.0，但接入主机应使用 PublicHost
 	testCfg.AgentHttpsListenPort = 29003
 	testCfg.AgentListenPort = 29000
@@ -106,17 +106,17 @@ func TestCertDownloadInfo_PublicHost(t *testing.T) {
 		t.Fatalf("decode JSON: %v (body=%s)", err, rec.Body.String())
 	}
 
-	if resp.PublicHost != "8.130.85.252" {
-		t.Fatalf("PublicHost = %q, want 8.130.85.252", resp.PublicHost)
+	if resp.PublicHost != "XXX.XXX.XXX" {
+		t.Fatalf("PublicHost = %q, want XXX.XXX.XXX", resp.PublicHost)
 	}
 	if resp.AgentHost != "0.0.0.0" {
 		t.Fatalf("AgentHost (listen) = %q, want 0.0.0.0", resp.AgentHost)
 	}
-	wantAnthropic := "https://8.130.85.252:29003/Anthropic"
+	wantAnthropic := "https://XXX.XXX.XXX:29003/Anthropic"
 	if resp.PublicAnthropicURL != wantAnthropic {
 		t.Fatalf("PublicAnthropicURL = %q, want %q", resp.PublicAnthropicURL, wantAnthropic)
 	}
-	wantOpenAI := "https://8.130.85.252:29003/OpenAI"
+	wantOpenAI := "https://XXX.XXX.XXX:29003/OpenAI"
 	if resp.PublicOpenAIURL != wantOpenAI {
 		t.Fatalf("PublicOpenAIURL = %q, want %q", resp.PublicOpenAIURL, wantOpenAI)
 	}
@@ -374,10 +374,10 @@ func TestCertDownloadInfo_CertMetaInvalid(t *testing.T) {
 
 func TestResolveAccessHost(t *testing.T) {
 	tests := []struct {
-		name        string
-		publicHost  string
-		listenAddr  string
-		want        string
+		name       string
+		publicHost string
+		listenAddr string
+		want       string
 	}{
 		{"public_host_overrides", "1.2.3.4", "0.0.0.0", "1.2.3.4"},
 		{"public_host_trims_whitespace", "  1.2.3.4  ", "0.0.0.0", "1.2.3.4"},
