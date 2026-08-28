@@ -700,6 +700,7 @@
   "dstEndPoint.endPointUrl": "エンドポイント URL",
   "dstEndPoint.noData": "エンドポイントなし",
   "dstEndPoint.openai": "OpenAI",
+  "dstEndPoint.platformNameLabel": "プラットフォーム名 *",
   "dstEndPoint.readonly": "読み取り専用モード",
   "dstEndPoint.readonlyTip": "読み取り専用モードです。エンドポイントの表示とテストのみ可能です。",
   "dstEndPoint.retryCount": "リトライ回数",

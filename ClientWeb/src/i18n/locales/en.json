@@ -726,6 +726,7 @@
   "dstEndPoint.endPointUrl": "Endpoint URL",
   "dstEndPoint.noData": "No endpoints",
   "dstEndPoint.openai": "OpenAI",
+  "dstEndPoint.platformNameLabel": "Platform Name *",
   "dstEndPoint.readonly": "Read-only Mode",
   "dstEndPoint.readonlyTip": "You are in read-only mode. You can only view and test endpoints.",
   "dstEndPoint.retryCount": "Retry Count",

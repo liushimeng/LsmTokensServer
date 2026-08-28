@@ -45,6 +45,18 @@ export default function DstEndPointManage() {
   const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState(new Set())
   const [testResult, setTestResult] = useState(null) // {success,message,data}
+  const [platformOptions, setPlatformOptions] = useState([]) // list_platforms 去重平台名（可编辑弹窗 datalist）
+  const [modelOptions, setModelOptions] = useState([])       // list_models 去重模型名
+
+  // 弹窗打开 / 切换所属用户时刷新平台名与模型名候选（仅管理端，供 datalist 下拉选择）
+  const loadNameOptions = useCallback((userId) => {
+    post('DstEndPointManageInterface', { action: 'list_platforms', user_id: userId })
+      .then((d) => setPlatformOptions((d && d.data) || []))
+      .catch(() => setPlatformOptions([]))
+    post('DstEndPointManageInterface', { action: 'list_models', user_id: userId })
+      .then((d) => setModelOptions((d && d.data) || []))
+      .catch(() => setModelOptions([]))
+  }, [])
 
   const loadData = useCallback(() => {
     setLoading(true)
@@ -162,7 +174,7 @@ export default function DstEndPointManage() {
       render: (_, ep) => (
         <span>
           {isAdmin ? <button className="btn btn-sm" onClick={() => toggleStatus(ep)}>{ep.status == 1 ? t('dstEndPoint.disableAction') : t('dstEndPoint.enableAction')}</button> : null}{' '}
-          {isAdmin ? <button className="btn btn-sm btn-primary" onClick={() => setForm({ ...emptyForm, ...ep, api_key: '' })}>{t('common.edit')}</button> : null}{' '}
+          {isAdmin ? <button className="btn btn-sm btn-primary" onClick={() => { setForm({ ...emptyForm, ...ep, api_key: '' }); loadNameOptions(ep.user_id) }}>{t('common.edit')}</button> : null}{' '}
           <button className="btn btn-sm" onClick={() => testItem(ep)}>{t('dstEndPoint.testConnection')}</button>
           {isAdmin ? <>{' '}<button className="btn btn-sm btn-danger" onClick={() => deleteItem(ep)}>{t('common.delete')}</button></> : null}
         </span>
@@ -175,7 +187,7 @@ export default function DstEndPointManage() {
       <h2 className="page-title">{t('dstEndPoint.title')}</h2>
       <div className="toolbar">
         <button className="btn" onClick={loadData}>{t('common.refresh')}</button>
-        {isAdmin ? <button className="btn btn-primary" onClick={() => setForm({ ...emptyForm, user_id: users[0]?.id || 0 })}>+ {t('dstEndPoint.addEndPoint')}</button>
+        {isAdmin ? <button className="btn btn-primary" onClick={() => { const uid = users[0]?.id || 0; setForm({ ...emptyForm, user_id: uid }); loadNameOptions(uid) }}>+ {t('dstEndPoint.addEndPoint')}</button>
           : <span style={{ color: '#888', fontSize: 13 }}>{t('dstEndPoint.userMode')}</span>}
         {selected.size > 0 ? (
           <>
@@ -206,15 +218,21 @@ export default function DstEndPointManage() {
         >
           {formError ? <div className="alert alert-error">{formError}</div> : null}
           <label className="field"><span>{t('dstEndPoint.userLabel')}</span>
-            <select value={form.user_id} onChange={(e) => setForm({ ...form, user_id: parseInt(e.target.value, 10) })}>
+            <select value={form.user_id} onChange={(e) => { const uid = parseInt(e.target.value, 10); setForm({ ...form, user_id: uid }); loadNameOptions(uid) }}>
               {users.map((u) => <option key={u.id} value={u.id}>{u.user_name}</option>)}
             </select>
           </label>
           <label className="field"><span>{t('dstEndPoint.platformNameLabel')}</span>
-            <input value={form.platform_name} placeholder={t('dstEndPoint.platformNamePlaceholder')} onChange={(e) => setForm({ ...form, platform_name: e.target.value })} />
+            <input value={form.platform_name} list="dst-endpoint-platform-names" placeholder={t('dstEndPoint.platformNamePlaceholder')} onChange={(e) => setForm({ ...form, platform_name: e.target.value })} />
+            <datalist id="dst-endpoint-platform-names">
+              {platformOptions.map((n) => <option key={n} value={n} />)}
+            </datalist>
           </label>
           <label className="field"><span>{t('dstEndPoint.modelLabel')}</span>
-            <input value={form.model_name} placeholder={t('dstEndPoint.modelNamePlaceholder')} onChange={(e) => setForm({ ...form, model_name: e.target.value })} />
+            <input value={form.model_name} list="dst-endpoint-model-names" placeholder={t('dstEndPoint.modelNamePlaceholder')} onChange={(e) => setForm({ ...form, model_name: e.target.value })} />
+            <datalist id="dst-endpoint-model-names">
+              {modelOptions.map((n) => <option key={n} value={n} />)}
+            </datalist>
           </label>
           <label className="field"><span>{t('dstEndPoint.protocolType')}</span>
             <select value={form.protocol_type} onChange={(e) => setForm({ ...form, protocol_type: parseInt(e.target.value, 10) })}>

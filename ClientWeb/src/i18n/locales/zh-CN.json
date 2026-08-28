@@ -754,6 +754,7 @@
   "dstEndPoint.noData": "暂无源站",
   "dstEndPoint.openai": "OpenAI",
   "dstEndPoint.platformLabel": "平台",
+  "dstEndPoint.platformNameLabel": "平台名称 *",
   "dstEndPoint.platformNamePlaceholder": "如: Anthropic, OpenAI",
   "dstEndPoint.protocolLabel": "协议",
   "dstEndPoint.protocolType": "协议类型",
