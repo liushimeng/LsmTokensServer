@@ -1,112 +1,306 @@
 // ClientWeb/src/components/JsonTree.jsx
 //
-// JSON 美化视图组件：递归渲染可折叠 JSON 树。
-// v2.0.7x 阶段AM：对话详情 Modal 的「JSON 美化」视图专用。
-// v2.0.7x 阶段AR：JSON 树折叠/展开修复 ——
-//   1) 根级容器不再用 <details> 包裹（顶层无折叠意义且会遮蔽所有子级折叠按钮）；
-//   2) 每个对象/数组节点都用独立的 <details> 渲染，子树可独立折叠/展开；
-//   3) 递归结构保持 indent + 虚线引导线，深层节点的折叠按钮始终可见可点。
+// JSON 美化视图组件 v2（v2.0.74 阶段AS 全面升级）。
+//
+// 核心策略：惰性渲染 —— 折叠的容器只渲染一行 "{ … } // N 项" 标记，
+// 展开时才递归渲染子节点；DOM 数量只与"当前可见节点数"相关，与 JSON
+// 总大小解耦，数据层永远持有完整解析结果，零丢失。
+//
+//   1) 标准 JSON 排版：{ } [ ] 引号/冒号/逗号/缩进对齐全保留，闭合括号独占一行；
+//   2) 全量折叠：每个非空对象/数组节点都有独立折叠按钮（button + aria-expanded），
+//      不存在"不可展开"的节点类型（废除阶段AR 的 OVERFLOW/truncated 机制）；
+//   3) 大容器分页：展开容器默认渲染前 JSON_TREE_PAGE_SIZE 项，「显示更多 / 显示全部」
+//      按需加载到末尾，剩余项永不丢失；
+//   4) 超长字符串：超过 JSON_STRING_INLINE_LIMIT 默认截断 + 「显示全部」按需展开；
+//   5) 渲染预算：单次渲染超过 JSON_RENDER_BUDGET 行即停止并提示，防级联卡死；
+//   6) 工具栏：折叠全部 / 展开至 2、3、5 层（确定性路径收集）。
+//
+// 旧版（阶段AM/AR）问题：配额制 buildJsonTreeNodes 在构建期截断数据，
+// 导致"显示不全、只有第一个元素可折叠、Object{3} 标签式排版"。
 
+import { useCallback, useMemo, useState } from 'react'
 import { useI18n } from '../i18n'
 import {
-  buildJsonTreeNodes,
+  parseJsonSafely,
   escapeJsonString,
-  NODE_KIND_PRIMITIVE,
-  NODE_KIND_CONTAINER,
-  NODE_KIND_OVERFLOW,
-  NODE_KIND_EMPTY,
+  entriesOf,
+  childPathOf,
+  collectContainerPaths,
+  collectDefaultExpandedPaths,
+  JSON_TREE_PAGE_SIZE,
+  JSON_STRING_INLINE_LIMIT,
+  JSON_RENDER_BUDGET,
 } from '../shared/json'
+
+/** 每层缩进像素（与 .jt-toggle 宽度 + 右距对齐：子级折叠按钮列对齐父级内容列） */
+const JT_INDENT_PX = 20
+/** 工具栏"展开至 N 层"档位 */
+const JT_EXPAND_LEVELS = [2, 3, 5]
 
 export default function JsonTree({ value }) {
   const { t } = useI18n()
-  if (value === null || value === undefined) {
-    return <div className="muted">({t('common.none')})</div>
+  const parsed = useMemo(() => parseJsonSafely(value), [value])
+
+  if (!parsed.ok && parsed.reason === 'empty') {
+    return <div className="muted">({t('chatAnalysis.emptyContent')})</div>
   }
-  let parsed = value
-  if (typeof value === 'string') {
-    try {
-      parsed = JSON.parse(value)
-    } catch {
-      return <pre className="log-box">{value}</pre>
-    }
+  if (!parsed.ok) {
+    // 非 JSON 文本（或解析失败）：原样兜底展示
+    return <pre className="log-box">{String(value)}</pre>
   }
-  const nodes = buildJsonTreeNodes(parsed)
-  // 根级只有一个 NODE_KIND_CONTAINER 节点（来自 buildJsonTreeNodes），
-  // 这里直接展开 children —— 顶层不渲染 <details>，保证每个深层节点都
-  // 有自己独立的折叠按钮。
-  if (nodes.length === 1 && nodes[0].kind === NODE_KIND_CONTAINER) {
-    const root = nodes[0]
-    return (
-      <div className="json-tree">
-        {root.children.map((c, ci) => renderChild(c, `r-${ci}`))}
+
+  return <JsonTreeInner data={parsed.data} />
+}
+
+/**
+ * 受控惰性树主体（独立组件保证 hooks 稳定：JsonTree 的早退分支不触发 hook 顺序变化）。
+ * 状态：
+ *   expanded —— 展开的容器路径集合（$ / $["key"] / $[0]）
+ *   limits   —— 各容器的分页上限（path → 可见子项数；缺省 JSON_TREE_PAGE_SIZE）
+ */
+function JsonTreeInner({ data }) {
+  const { t } = useI18n()
+  const [expanded, setExpanded] = useState(() => collectDefaultExpandedPaths(data))
+  const [limits, setLimits] = useState({})
+
+  const toggle = useCallback((path) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }, [])
+
+  const showMore = useCallback((path, all) => {
+    setLimits((prev) => ({
+      ...prev,
+      [path]: all ? Infinity : (prev[path] || JSON_TREE_PAGE_SIZE) + JSON_TREE_PAGE_SIZE,
+    }))
+  }, [])
+
+  const collapseAll = () => setExpanded(new Set(['$']))
+  const expandToLevel = (level) => setExpanded(collectContainerPaths(data, level))
+
+  // 单次渲染通行的预算（每次 render 重建；渲染过程同步扣减）。
+  // 扣减封装为 tryTake() 方法：语义即"尝试占用 1 个预算行，耗尽返回 false"。
+  const budget = {
+    left: JSON_RENDER_BUDGET,
+    tryTake() {
+      if (this.left <= 0) return false
+      this.left--
+      return true
+    },
+  }
+
+  const ctx = {
+    t,
+    budget,
+    isExpanded: (path) => expanded.has(path),
+    toggle,
+    getLimit: (path) => limits[path] || JSON_TREE_PAGE_SIZE,
+    showMore,
+  }
+
+  return (
+    <div className="json-tree">
+      <div className="json-tree-toolbar">
+        <button type="button" className="jt-tool-btn" onClick={collapseAll}>
+          {t('chatAnalysis.jsonCollapseAll')}
+        </button>
+        {JT_EXPAND_LEVELS.map((level) => (
+          <button
+            key={level}
+            type="button"
+            className="jt-tool-btn"
+            onClick={() => expandToLevel(level)}
+          >
+            {t('chatAnalysis.jsonExpandLevel', { n: level })}
+          </button>
+        ))}
       </div>
+      <div className="json-tree-code">
+        <JsonNode value={data} path="$" depth={0} name={undefined} hasKey={false} isLast ctx={ctx} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 递归节点渲染。容器折叠时只输出一行标记；展开时输出 开括号行 / 子节点 / 闭括号行。
+ * 每渲染一个节点扣减 1 个预算行，预算耗尽停止渲染后续兄弟节点并输出提示行。
+ */
+function JsonNode({ value, path, depth, name, hasKey, isLast, ctx }) {
+  const isContainer = value !== null && typeof value === 'object'
+  const comma = !isLast ? <span className="jt-punct">,</span> : null
+  const keyPart = hasKey ? (
+    <>
+      <span className="jt-key">"{escapeJsonString(name)}"</span>
+      <span className="jt-punct">: </span>
+    </>
+  ) : null
+
+  if (!isContainer) {
+    if (!ctx.budget.tryTake()) return <BudgetHint depth={depth} ctx={ctx} />
+    return (
+      <Line depth={depth}>
+        {keyPart}
+        <PrimitiveValue value={value} />
+        {comma}
+      </Line>
     )
   }
-  return <div className="json-tree">{nodes.map((n, i) => renderNode(n, `n-${i}`))}</div>
 
-  function renderNode(node, key) {
-    if (node.kind === NODE_KIND_PRIMITIVE) {
-      let valueSpan = null
-      if (node.type === 'string') {
-        valueSpan = <span className="string">"{escapeJsonString(node.value)}"</span>
-      } else if (node.type === 'number') {
-        valueSpan = <span className="number">{String(node.value)}</span>
-      } else if (node.type === 'boolean') {
-        valueSpan = <span className="boolean">{String(node.value)}</span>
-      } else if (node.type === 'null') {
-        valueSpan = <span className="null">null</span>
-      }
-      return (
-        <div className="json-tree-row" key={key}>
-          {node.key ? <span className="key">{node.key}</span> : null}
-          {valueSpan}
-        </div>
-      )
-    }
-    if (node.kind === NODE_KIND_CONTAINER) {
-      const baseLabel = node.key ? `${node.key}: ${node.typeLabel}` : node.typeLabel
-      // 截断模式 summary 加上"对象过大"提示，summary 仍可点击展开。
-      const summaryText = node.truncated
-          ? (node.key ? `${node.key}: ${node.typeLabel} · 对象过大（已截断）` : `${node.typeLabel} · 对象过大（已截断）`)
-          : baseLabel
-      return (
-        <details key={key} className={`json-tree-container${node.truncated ? ' json-tree-truncated' : ''}`} open={node.open}>
-          <summary>{summaryText}</summary>
-          <div className="json-tree-body">
-            {node.children.map((c, ci) => renderChild(c, `${key}-${ci}`))}
-            {node.truncated && node.truncatedRemain > 0 ? (
-              <div className="json-tree-truncated-more">
-                … 剩余 {node.truncatedRemain} 项未渲染（防止浏览器卡顿）
-              </div>
-            ) : null}
-          </div>
-        </details>
-      )
-    }
-    if (node.kind === NODE_KIND_EMPTY) {
-      return (
-        <div className="json-tree-row" key={key}>
-          {node.key ? <span className="key">{node.key}</span> : null}
-          <span className="muted">{node.emptyText}</span>
-        </div>
-      )
-    }
-    if (node.kind === NODE_KIND_OVERFLOW) {
-      return (
-        <div className="json-tree-overflow" key={key}>
-          {node.key ? <span className="key">{node.key}</span> : null}
-          {node.typeLabel ? <span>: {node.typeLabel}</span> : null}
-          {' '}{node.note}
-        </div>
-      )
-    }
-    return null
+  const isArr = Array.isArray(value)
+  const entries = entriesOf(value)
+  const openB = isArr ? '[' : '{'
+  const closeB = isArr ? ']' : '}'
+
+  // 空容器：单行 "{}" / "[]"，无折叠按钮（占位符保持列对齐）
+  if (entries.length === 0) {
+    if (!ctx.budget.tryTake()) return <BudgetHint depth={depth} ctx={ctx} />
+    return (
+      <Line depth={depth}>
+        {keyPart}
+        <span className="jt-brace">{openB}{closeB}</span>
+        {comma}
+      </Line>
+    )
   }
 
-  // renderChild：每个 child 包含 1 个 node（来自 buildNodes 返回的单元素数组）。
-  // 直接渲染该 node 即可 —— 不再包一层额外的 .json-tree-row 防止破坏 children 嵌套层级。
-  function renderChild(child, key) {
-    if (!child || !child.nodes || child.nodes.length === 0) return null
-    return <div className="json-tree-row" key={key}>{child.nodes.map((n, ni) => renderNode(n, `${key}-n${ni}`))}</div>
+  const open = ctx.isExpanded(path)
+  const total = entries.length
+
+  // 折叠态：一行式 "key": { … } // N 项 （保留原始符号 + 项数提示）
+  if (!open) {
+    if (!ctx.budget.tryTake()) return <BudgetHint depth={depth} ctx={ctx} />
+    return (
+      <Line depth={depth} toggle open={false} onToggle={() => ctx.toggle(path)}>
+        {keyPart}
+        <span className="jt-brace">
+          {openB}<span className="jt-ellipsis"> … </span>{closeB}
+        </span>
+        <span className="jt-count">{ctx.t('chatAnalysis.jsonItemsSuffix', { n: total })}</span>
+        {comma}
+      </Line>
+    )
   }
+
+  // 展开态：开括号行 + 分页子节点 + 闭括号行
+  if (!ctx.budget.tryTake()) return <BudgetHint depth={depth} ctx={ctx} />
+
+  const limit = ctx.getLimit(path)
+  const visible = entries.slice(0, limit)
+  const remain = total - visible.length
+  const rendered = []
+  let exhausted = false
+  for (let i = 0; i < visible.length; i++) {
+    if (!ctx.budget.tryTake()) { exhausted = true; break }
+    const [k, child] = visible[i]
+    rendered.push(
+      <JsonNode
+        key={childPathOf(path, isArr, k)}
+        value={child}
+        path={childPathOf(path, isArr, k)}
+        depth={depth + 1}
+        name={k}
+        hasKey={!isArr}
+        isLast={i === total - 1}
+        ctx={ctx}
+      />,
+    )
+  }
+
+  return (
+    <>
+      <Line depth={depth} toggle open onToggle={() => ctx.toggle(path)}>
+        {keyPart}
+        <span className="jt-brace">{openB}</span>
+      </Line>
+      {rendered}
+      {exhausted ? <BudgetHint depth={depth + 1} ctx={ctx} /> : null}
+      {remain > 0 ? (
+        <div className="jt-line jt-more" style={{ paddingLeft: (depth + 1) * JT_INDENT_PX }}>
+          <button
+            type="button"
+            className="jt-inline-btn"
+            onClick={() => ctx.showMore(path, false)}
+          >
+            {ctx.t('chatAnalysis.jsonShowMore', { n: Math.min(JSON_TREE_PAGE_SIZE, remain) })}
+          </button>
+          <button
+            type="button"
+            className="jt-inline-btn"
+            onClick={() => ctx.showMore(path, true)}
+          >
+            {ctx.t('chatAnalysis.jsonShowAll', { n: total })}
+          </button>
+        </div>
+      ) : null}
+      <Line depth={depth}>
+        <span className="jt-brace">{closeB}</span>
+        {comma}
+      </Line>
+    </>
+  )
+}
+
+/** 单行容器：折叠按钮（或隐形占位符保持对齐）+ 内容区（可换行） */
+function Line({ depth, toggle, open, onToggle, children }) {
+  return (
+    <div className="jt-line" style={{ paddingLeft: depth * JT_INDENT_PX }}>
+      {toggle ? (
+        <button
+          type="button"
+          className="jt-toggle"
+          aria-expanded={open}
+          onClick={onToggle}
+        >
+          {open ? '▾' : '▸'}
+        </button>
+      ) : (
+        <span className="jt-toggle jt-toggle-none" aria-hidden="true">▸</span>
+      )}
+      <div className="jt-content">{children}</div>
+    </div>
+  )
+}
+
+/** 标量值渲染（字符串/数字/布尔/null） */
+function PrimitiveValue({ value }) {
+  if (value === null) return <span className="jt-null">null</span>
+  if (typeof value === 'number') return <span className="jt-number">{String(value)}</span>
+  if (typeof value === 'boolean') return <span className="jt-boolean">{String(value)}</span>
+  if (typeof value === 'string') return <StringValue text={value} />
+  return <span className="jt-string">{escapeJsonString(String(value))}</span>
+}
+
+/** 字符串值：超长默认截断，「显示全部 / 收起」按需切换 */
+function StringValue({ text }) {
+  const { t } = useI18n()
+  const [showAll, setShowAll] = useState(false)
+
+  if (text.length <= JSON_STRING_INLINE_LIMIT) {
+    return <span className="jt-string">"{escapeJsonString(text)}"</span>
+  }
+  const shown = showAll ? text : text.slice(0, JSON_STRING_INLINE_LIMIT)
+  return (
+    <>
+      <span className="jt-string">"{escapeJsonString(shown)}{showAll ? '' : '…'}"</span>
+      <button type="button" className="jt-inline-btn" onClick={() => setShowAll((s) => !s)}>
+        {showAll
+          ? t('chatAnalysis.jsonStringCollapse')
+          : t('chatAnalysis.jsonStringExpand', { n: text.length })}
+      </button>
+    </>
+  )
+}
+
+/** 渲染预算耗尽提示行 */
+function BudgetHint({ depth, ctx }) {
+  return (
+    <div className="jt-line jt-budget-hint" style={{ paddingLeft: (depth + 1) * JT_INDENT_PX }}>
+      {ctx.t('chatAnalysis.jsonBudgetHint', { n: JSON_RENDER_BUDGET })}
+    </div>
+  )
 }

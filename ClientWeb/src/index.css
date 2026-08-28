@@ -334,27 +334,35 @@ a { color: var(--primary); text-decoration: none; }
   min-height: 180px;
 }
 
-/* ===== 阶段AM：JSON 美化可折叠树 ===== */
-/* 阶段AR：根级容器不再用 <details>，每个对象/数组节点都有独立 <details>
-   折叠按钮；深层嵌套时也要保留 summary 的展开箭头与可点击样式；
-   节点数过载时（truncated）summary 标橙，展开后可继续浏览前 N 项。 */
-.json-tree { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.7; padding: 4px 0; }
-.json-tree details.json-tree-container { margin: 0; }
-.json-tree details.json-tree-container > summary { list-style: disclosure-closed; cursor: pointer; color: #475569; font-weight: 500; padding: 2px 4px; border-radius: 4px; display: list-item; }
-.json-tree details.json-tree-container[open] > summary { list-style: disclosure-open; }
-.json-tree details.json-tree-container.json-tree-truncated > summary { color: #b45309; background: #fffbeb; }
-.json-tree .json-tree-body { margin-left: 16px; padding-left: 8px; border-left: 1px dashed #e2e8f0; }
-.json-tree .json-tree-row { padding: 1px 0; }
-.json-tree summary:hover { background: #f1f5f9; }
-.json-tree .key { color: #2563eb; font-weight: 600; }
-.json-tree .string { color: #16a34a; }
-.json-tree .number { color: #ea580c; }
-.json-tree .boolean { color: #9333ea; }
-.json-tree .null { color: #94a3b8; font-style: italic; }
-.json-tree .json-tree-empty { color: var(--muted); padding: 2px 8px; }
-.json-tree-overflow { color: var(--muted); padding: 4px 8px; font-size: 12px; font-style: italic; }
-.json-tree-deep > summary { color: var(--muted); }
-.json-tree-truncated-more { color: #b45309; font-style: italic; padding: 2px 8px; font-size: 12px; }
+/* ===== 阶段AS：JSON 美化可折叠树 v2（惰性渲染 + 标准 JSON 排版） ===== */
+/* 标准 JSON 符号（{ } [ ] 引号/逗号）+ 2 空格位/层缩进对齐；
+   每个非空对象/数组节点都有独立折叠按钮（.jt-toggle）；
+   叶子行用隐形占位按钮（.jt-toggle-none）保持列对齐；
+   大容器分页（.jt-more）与渲染预算提示（.jt-budget-hint）。 */
+.json-tree { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.7; padding: 4px 0; }
+.json-tree-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 0 8px; margin-bottom: 6px; border-bottom: 1px dashed #e2e8f0; font-family: var(--font-sans, system-ui, sans-serif); }
+.jt-tool-btn { font-size: 11.5px; padding: 2px 10px; border-radius: 4px; border: 1px solid #cbd5e1; background: #f8fafc; color: #475569; cursor: pointer; }
+.jt-tool-btn:hover { background: #eef2f7; border-color: #94a3b8; color: #1e293b; }
+.json-tree-code { overflow-x: auto; padding: 2px 0; }
+.jt-line { display: flex; align-items: flex-start; padding: 0; }
+.jt-line:hover > .jt-content { background: rgba(148, 163, 184, 0.12); border-radius: 3px; }
+.jt-toggle { flex: 0 0 auto; width: 16px; height: 16px; margin: 3px 4px 0 0; padding: 0; border: none; border-radius: 3px; background: transparent; color: #64748b; font-size: 10px; line-height: 14px; text-align: center; cursor: pointer; }
+.jt-toggle:hover { background: #e2e8f0; color: #1e293b; }
+.jt-toggle-none { visibility: hidden; pointer-events: none; }
+.jt-content { flex: 1 1 auto; min-width: 0; white-space: pre-wrap; word-break: break-all; }
+.jt-key { color: #2563eb; font-weight: 600; }
+.jt-punct { color: #64748b; }
+.jt-brace { color: #334155; font-weight: 600; }
+.jt-ellipsis { color: #94a3b8; font-weight: 400; }
+.jt-count { color: #94a3b8; font-style: italic; margin-left: 6px; }
+.jt-string { color: #16a34a; }
+.jt-number { color: #ea580c; }
+.jt-boolean { color: #9333ea; }
+.jt-null { color: #94a3b8; font-style: italic; }
+.jt-inline-btn { font-size: 11px; margin-left: 8px; padding: 0 6px; border-radius: 4px; border: 1px dashed #cbd5e1; background: #f8fafc; color: #475569; cursor: pointer; vertical-align: baseline; }
+.jt-inline-btn:hover { border-style: solid; color: #1e293b; background: #eef2f7; }
+.jt-more { padding-top: 2px; padding-bottom: 2px; }
+.jt-budget-hint { color: #b45309; font-style: italic; padding: 2px 0; }
 
 /* ===== 阶段AR：SSE 非流式完整响应卡片 ===== */
 .sse-event-card.sse-color-complete { border-left-color: #7c3aed; }

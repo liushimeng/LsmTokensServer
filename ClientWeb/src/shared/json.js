@@ -1,19 +1,21 @@
 // ClientWeb/src/shared/json.js
 //
-// JSON 美化与可折叠 JSON 树数据结构构造工具。
+// JSON 美化与可折叠 JSON 树的纯数据工具层。
 // v2.0.7x 阶段AM：从 ChatAnalysis.jsx 原样抽离 prettyJSON；新增 buildJsonTreeNodes。
-// v2.0.7x 阶段AR：节点上限策略调整 ——
-//   大对象/数组不再"截断为 OVERFLOW"导致无可展开按钮，
-//   而是返回正常 CONTAINER 并标记 truncated：默认折叠，summary 显示
-//   "对象过大（已截断显示前 N 项）" + 展开按钮，用户可点开逐项浏览。
+// v2.0.7x 阶段AR：节点上限策略（配额制 + truncated 截断）。
+// v2.0.74 阶段AS：配额制整体废弃 —— 数据层截断导致"显示不全、折叠按钮缺失"。
+//   改为惰性渲染配套的纯工具集：
+//   - parseJsonSafely            安全解析（对象直通 / 字符串解析 / 失败原因）
+//   - countJsonNodes             子树节点计数（带 cap 早退，用于默认展开判定）
+//   - entriesOf / childPathOf    统一对象/数组子项枚举与节点路径构造（保证唯一）
+//   - collectContainerPaths      收集 depth < maxLevel 的全部容器路径（"展开至 N 层"）
+//   - collectDefaultExpandedPaths 默认展开集（根 + 子树节点数 ≤ 60 的小容器）
+//   防卡顿边界从数据层移到渲染层：组件只渲染可见节点（分页 + 渲染预算），
+//   解析数据始终完整，零丢失。
 //
 // 设计要点：
 //   - 本文件不包含 JSX（项目 vite 未为 .js 启用 JSX 解析）。
-//   - buildJsonTreeNodes 返回纯 JSON 结构（树形对象数组），由 components/JsonTree.jsx 负责 JSX 渲染。
-//   - 这样保持工具层无 React 依赖，组件层专注 UI。
-//   - 配额制（remainingBudget）：进入 buildNodes 时扣除 1 个配额给自身；
-//     进入 children 递归前若配额已耗尽，则当前容器 truncated，children
-//     按 truncatedRender 截断构建。
+//   - 全部为纯函数，无 React/DOM 依赖，便于 node 自检脚本直接验证。
 
 /**
  * 美化 JSON 字符串。失败时返回原字符串（不抛异常，便于兜底展示）。
@@ -26,148 +28,156 @@ export function prettyJSON(s) {
   try { return JSON.stringify(JSON.parse(s), null, 2) } catch { return s }
 }
 
-/**
- * 节点类型：
- *   - 'primitive'：基本类型（含字符串/数字/布尔/null）
- *   - 'container'：对象或数组，可折叠（truncated=true 时默认折叠+截断渲染）
- *   - 'overflow'  ：嵌套层级过深（独立字段，无 children）
- *   - 'empty'     ：空对象/空数组
- */
-export const NODE_KIND_PRIMITIVE = 'primitive'
-export const NODE_KIND_CONTAINER = 'container'
-export const NODE_KIND_OVERFLOW = 'overflow'
-export const NODE_KIND_EMPTY = 'empty'
+// ===== 惰性渲染树常量 =====
+
+/** 展开的容器默认渲染的子项数（分页页大小；「显示更多」每次追加一页） */
+export const JSON_TREE_PAGE_SIZE = 100
+/** 超过此长度的字符串值默认截断显示，按需「显示全部」 */
+export const JSON_STRING_INLINE_LIMIT = 500
+/** 子树总节点数 ≤ 此值的容器默认自动展开（小 JSON 全开，大 JSON 浅开） */
+export const JSON_SMALL_TREE_NODES = 60
+/** 单次渲染通行预算（行数）：防「展开至 5 层」级联渲染数万 DOM 行卡死 */
+export const JSON_RENDER_BUDGET = 4000
 
 /**
- * 默认节点数上限：单棵子树递归总节点数超过此值时，进入"截断模式"，
- * 容器节点会被标记 truncated，默认折叠，summary 给出截断提示，
- * 渲染时仅展示前 truncatedRender 项，避免一次性渲染数万节点造成卡顿。
- *
- * 用户主动点击折叠按钮展开后，可继续浏览（最多渲染 truncatedRender 个子项，
- * 超出部分显示"剩余 N 项未渲染"，防止浏览器无响应）。
- */
-export const DEFAULT_MAX_NODES = 500
-export const DEFAULT_TRUNCATED_RENDER = 200
-
-/**
- * 构造 JSON 树节点数组（自上而下递归）。
- *
- * 节点结构：
- *   {
- *     kind: 'primitive' | 'container' | 'overflow' | 'empty',
- *     key: string,        // 当前节点名（数组项为 "[idx]"）
- *     typeLabel: string,  // 类型提示文本，如 Object{3} / Array(2) / string
- *     open: boolean,      // 顶层默认展开，深层默认折叠
- *     truncated?: boolean,// container 超过节点上限时为 true（默认折叠 + 截断渲染）
- *     truncatedRender?: number, // truncated 时最多渲染的子项数
- *     truncatedRemain?: number, // truncated 时剩余未渲染的子项数
- *     value?: any,        // primitive 时附带原始值
- *     isString?: boolean, // primitive 时是否字符串（用于加引号 + 转义）
- *     children?: JsonNode[] // container 时附带子节点
- *     note?: string,      // overflow / empty 时附带提示文本
- *   }
+ * 安全解析 JSON。
+ * - null/undefined → { ok:false, reason:'empty' }
+ * - 非字符串（已解析对象）→ 直通 { ok:true, data }
+ * - 字符串 → JSON.parse，失败 → { ok:false, reason:'parse-error' }
  *
  * @param {any} value
- * @param {object} [opts]
- * @param {number} [opts.maxDepth=6]
- * @param {number} [opts.maxNodes=500]   单棵子树节点数上限；超过后该容器 truncated
- * @param {number} [opts.truncatedRender=200] truncated 时最多渲染子项数
- * @returns {JsonNode[]}
+ * @returns {{ok: boolean, data?: any, reason?: string}}
  */
-export function buildJsonTreeNodes(value, opts = {}) {
-  const maxDepth = opts.maxDepth || 6
-  const maxNodes = opts.maxNodes || DEFAULT_MAX_NODES
-  const truncatedRender = opts.truncatedRender || DEFAULT_TRUNCATED_RENDER
-  // 根级扣除 1 个配额给自身
-  return buildNodes(value, '', false, 0, maxDepth, maxNodes, truncatedRender, maxNodes - 1)
+export function parseJsonSafely(value) {
+  if (value === null || value === undefined) return { ok: false, reason: 'empty' }
+  if (typeof value === 'object') return { ok: true, data: value }
+  if (typeof value !== 'string') return { ok: true, data: value }
+  const s = value.trim()
+  try {
+    return { ok: true, data: JSON.parse(s) }
+  } catch {
+    return { ok: false, reason: 'parse-error' }
+  }
 }
 
-function buildNodes(value, keyName, isArrayItem, depth, maxDepth, maxNodes, truncatedRender, budget) {
-  // budget：当前节点及其子树可用的剩余节点配额
-  if (budget < 0) {
-    // 配额已耗尽 —— 直接视为 truncated 的空容器（用 OVERFLOW 表示"已折叠"）
-    return [{ kind: NODE_KIND_OVERFLOW, key: keyName, note: '（对象过大，已折叠；超过节点上限）' }]
-  }
-  const t = typeOf(value)
-  if (t === 'string' || t === 'number' || t === 'boolean' || t === 'null') {
-    return [{
-      kind: NODE_KIND_PRIMITIVE,
-      key: keyName,
-      type: t,
-      value,
-      isString: t === 'string',
-    }]
-  }
-  // object / array —— 自身占 1 个配额
-  const isArr = Array.isArray(value)
-  const entries = isArr
-    ? value.map((v, i) => [i, v])
-    : Object.entries(value || {})
-  const typeLabel = isArr ? `Array(${entries.length})` : `Object{${entries.length}}`
-
-  if (entries.length === 0) {
-    return [{
-      kind: NODE_KIND_EMPTY,
-      key: keyName,
-      typeLabel,
-      emptyText: isArr ? '[]' : '{}',
-    }]
-  }
-
-  if (depth > maxDepth) {
-    return [{
-      kind: NODE_KIND_OVERFLOW,
-      key: keyName,
-      typeLabel,
-      note: `（嵌套层级超过 ${maxDepth}，已折叠）`,
-    }]
-  }
-
-  // 配额预算：递归每个子项都需要至少 1 个配额（其自身）；
-  // 当剩余配额不足以覆盖所有子项时，本节点 truncated，children 按 truncatedRender 截断构建。
-  const remaining = budget - 1 // 扣除本节点
-  if (remaining < entries.length) {
-    // 当前配额不足以遍历全部子项 —— 标 truncated
-    const visibleCount = Math.min(entries.length, truncatedRender)
-    const children = entries.slice(0, visibleCount).map(([k, v]) => ({
-      childKey: isArr ? `[${k}]` : String(k),
-      isArrayItem: isArr,
-      nodes: buildNodes(v, isArr ? `[${k}]` : String(k), isArr, depth + 1, maxDepth, maxNodes, truncatedRender, remaining),
-    }))
-    return [{
-      kind: NODE_KIND_CONTAINER,
-      key: keyName,
-      typeLabel,
-      open: false,
-      truncated: true,
-      truncatedRender: visibleCount,
-      truncatedRemain: Math.max(0, entries.length - visibleCount),
-      children,
-    }]
-  }
-
-  // 配额充足：正常递归
-  const open = depth < 1
-  const children = entries.map(([k, v]) => ({
-    childKey: isArr ? `[${k}]` : String(k),
-    isArrayItem: isArr,
-    nodes: buildNodes(v, isArr ? `[${k}]` : String(k), isArr, depth + 1, maxDepth, maxNodes, truncatedRender, remaining),
-  }))
-  return [{
-    kind: NODE_KIND_CONTAINER,
-    key: keyName,
-    typeLabel,
-    open,
-    children,
-  }]
+/**
+ * 统一子项枚举：数组返回 [index, item]，对象返回 [key, value]。
+ * @param {object|any[]} v
+ * @returns {[string|number, any][]}
+ */
+export function entriesOf(v) {
+  if (Array.isArray(v)) return v.map((item, i) => [i, item])
+  return Object.entries(v || {})
 }
 
-function typeOf(v) {
-  if (v === null) return 'null'
-  if (Array.isArray(v)) return 'array'
-  return typeof v
+/**
+ * 构造子节点路径（状态 key / React key 双用，保证唯一）。
+ * 数组项：`$[0]`；对象键统一 JSON.stringify 引号包裹：`$["a.b"]` ——
+ * 含点/引号等特殊字符的键与嵌套路径不会冲突。
+ *
+ * @param {string} parentPath
+ * @param {boolean} parentIsArray
+ * @param {string|number} key
+ * @returns {string}
+ */
+export function childPathOf(parentPath, parentIsArray, key) {
+  return parentIsArray ? `${parentPath}[${key}]` : `${parentPath}[${JSON.stringify(key)}]`
 }
 
+/**
+ * 统计子树总节点数（容器自身 + 全部后代；标量计 1）。
+ * cap 用于早退：计数超过 cap 即可停止深入（只需判断"是否超限"时传入）。
+ *
+ * @param {any} v
+ * @param {number} [cap=Infinity]
+ * @returns {number}
+ */
+export function countJsonNodes(v, cap = Infinity) {
+  let n = 0
+  let over = false
+  const walk = (x) => {
+    if (over) return
+    n++
+    if (n > cap) { over = true; return }
+    if (x !== null && typeof x === 'object') {
+      for (const [, child] of entriesOf(x)) {
+        walk(child)
+        if (over) return
+      }
+    }
+  }
+  walk(v)
+  return n
+}
+
+/**
+ * 收集 depth < maxLevel 的全部容器路径（含根 depth=0）。
+ * 用于工具栏「展开至 N 层」：纯数据遍历，不触碰 DOM。
+ *
+ * @param {any} data
+ * @param {number} maxLevel 层数上限（2 = 根 + 第一层子容器展开）
+ * @returns {Set<string>}
+ */
+export function collectContainerPaths(data, maxLevel) {
+  const out = new Set()
+  const walk = (v, path, depth) => {
+    if (v === null || typeof v !== 'object') return
+    out.add(path)
+    if (depth + 1 >= maxLevel) return
+    const isArr = Array.isArray(v)
+    for (const [k, child] of entriesOf(v)) {
+      walk(child, childPathOf(path, isArr, k), depth + 1)
+    }
+  }
+  walk(data, '$', 0)
+  return out
+}
+
+/**
+ * 默认展开路径集（打开详情即有内容，同时大 JSON 不卡）：
+ * - 根容器始终展开；
+ * - 其余容器当子树总节点数 ≤ JSON_SMALL_TREE_NODES 时自动展开（递归判定）。
+ *
+ * @param {any} data
+ * @returns {Set<string>}
+ */
+export function collectDefaultExpandedPaths(data) {
+  const out = new Set()
+  const walk = (v, path) => {
+    if (v === null || typeof v !== 'object') return
+    out.add(path)
+    const isArr = Array.isArray(v)
+    for (const [k, child] of entriesOf(v)) {
+      if (child === null || typeof child !== 'object') continue
+      if (countJsonNodes(child, JSON_SMALL_TREE_NODES) > JSON_SMALL_TREE_NODES) continue
+      walk(child, childPathOf(path, isArr, k))
+    }
+  }
+  walk(data, '$')
+  return out
+}
+
+/**
+ * JSON 字符串值转义（用于展示层还原带引号的字符串字面量）。
+ * 阶段AS 增强：补 `\\` 反斜杠、`\b`、`\f` 与 `\u0000-\u001f` 其余控制字符，
+ * 与 JSON.stringify 的转义规则对齐（旧版漏掉反斜杠会导致 `\n` 歧义显示）。
+ *
+ * @param {string} s
+ * @returns {string}
+ */
 export function escapeJsonString(s) {
-  return String(s).replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    // eslint-disable-next-line no-control-regex -- 匹配控制字符即为该转义器的目的
+    .replace(/[\u0000-\u001f]/g, (c) => {
+      switch (c) {
+        case '\n': return '\\n'
+        case '\r': return '\\r'
+        case '\t': return '\\t'
+        case '\b': return '\\b'
+        case '\f': return '\\f'
+        default: return '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')
+      }
+    })
 }
