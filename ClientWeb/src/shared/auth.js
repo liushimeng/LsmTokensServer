@@ -1,27 +1,33 @@
 // 登录态与本地偏好存储
-// v2 安全加固（20260825）：不再持久化 API Key（旧版 XOR+Base64 伪加密可被离线还原），
-// "记住我"仅保存模型名称；加载时发现旧版记录（含 ak 字段）立即清除。
+// v3（20260831）：支持双登录方式，存储 loginType（model/user）和名称（模型名或用户名）
+// v2 安全加固（20260825）：不再持久化 API Key（旧版 XOR+Base64 伪加密可被离线还原）
 import { baseUrl } from './api'
 
 const STORAGE_KEY = 'lsm_agent_creds'
 
-export function saveCredentials(modelName) {
+// saveCredentials 保存登录凭据到 localStorage
+// @param {string} loginType - 登录类型：'model' 或 'user'
+// @param {string} name - 模型名或用户名
+export function saveCredentials(loginType, name) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 2, mn: modelName, ts: Date.now() }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 3, loginType, mn: name, ts: Date.now() }))
   } catch { /* 忽略 */ }
 }
 
+// loadCredentials 从 localStorage 加载登录凭据
+// @returns {null | { loginType: string, modelName: string }}
 export function loadCredentials() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) return null
     const data = JSON.parse(stored)
-    // 旧版记录（v:1，含加密 ak）→ 直接清除，仅返回可用的模型名
-    if (data.v !== 2 || typeof data.ak !== 'undefined') {
-      localStorage.removeItem(STORAGE_KEY)
-      return null
+    // v3 版本：包含 loginType 和 mn
+    if (data.v === 3) {
+      return { loginType: data.loginType === 'user' ? 'user' : 'model', modelName: data.mn || '' }
     }
-    return { modelName: data.mn || '' }
+    // 旧版记录（v:1 含加密 ak / v:2 无 loginType）→ 直接清除
+    localStorage.removeItem(STORAGE_KEY)
+    return null
   } catch { return null }
 }
 

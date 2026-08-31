@@ -195,6 +195,11 @@ a { color: var(--primary); text-decoration: none; }
 .login-error { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; border-radius: 6px; padding: 8px 12px; margin-bottom: 14px; font-size: 13px; }
 .captcha-img { height: 38px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); }
 .login-submit { width: 100%; padding: 10px; font-size: 15px; }
+/* 阶段AQ：登录页 Tab 选项卡 */
+.login-tabs { display: flex; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.login-tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; border-bottom: 2px solid transparent; color: var(--muted); transition: all .15s; font-size: 14px; }
+.login-tab:hover:not(.active) { color: var(--text); background: rgba(0,0,0,.02); }
+.login-tab.active { border-bottom-color: var(--primary); color: var(--primary); font-weight: 500; }
 
 /* 日志/流式输出 */
 .log-box { background: #0f172a; color: #d1e7ff; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; border-radius: 8px; padding: 12px; max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
