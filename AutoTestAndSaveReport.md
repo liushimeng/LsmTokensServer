@@ -33,17 +33,23 @@
 
 | 人类行为 | go-web-debug-tool action | 说明 |
 |----------|--------------------------|------|
-| 点击按钮/链接 | `human_click` | 贝塞尔曲线移动鼠标 + 随机延迟 + 抖动，模拟真实点击 |
+| 单击按钮/链接 | `human_click` | 贝塞尔曲线移动鼠标 + 随机延迟 + 抖动，模拟真实点击 |
+| 双击（展开/编辑） | `human_double_click` | 模拟人类双击，如表格行展开、重命名等 |
 | 输入文本 | `human_input` | 逐字符输入，每字符 50-200ms 随机延迟，每 5-10 字符额外停顿 200-500ms |
 | 滚动页面 | `scroll` + `use_wheel=true` | 触发真实 WheelEvent，模拟滚轮滚动 |
 | 滚动到元素可见 | `scroll_to` | 等价 `el.scrollIntoView`，带平滑滚动 |
 | 悬停/展开下拉菜单 | `hover` → 等待菜单展开 → `human_click` 选择项 | 先悬停触发下拉，再点击选项 |
 | 选择下拉选项 | `select_option` | 选中 `<select>` 里的 option |
 | 按键操作 | `key_press` / `press_sequence` | 支持 Enter、ArrowDown、Tab 等 |
+| 拖拽元素 | `drag_and_drop` | 模拟人类鼠标拖拽（源 → 目标） |
 | 等待页面加载 | `LookChromePageInfo` `info=page_meta` 检查 `ready_state=complete` | 每步操作后必须等待页面就绪 |
-| 截图验证 | `LookChromePageInfo` `info=screenshot` | 关键步骤截图留证 |
+| **读取 DOM 元素/控件** | `LookChromePageInfo` `info=elements` | **优先**：获取元素树、控件属性、可见性、文案 |
+| **读取页面文字** | `LookChromePageInfo` `info=text` | **优先**：获取页面纯文本，用于断言与校验 |
+| 截图验证 | `LookChromePageInfo` `info=screenshot` | **降级**：DOM/文字不足以判断时再截图 |
 | 查看网络请求 | `LookChromePageInfo` `info=network` | 验证 API 调用与响应 |
 | 查看控制台 | `LookChromePageInfo` `info=console` | 检查错误日志 |
+
+> **信息获取优先级（强制）**：`elements` / `text` / `page_meta`（结构化数据）→ `screenshot`（图片）降级。优先用 DOM 元素与文字信息做断言，截图仅作为兜底或证据留档。
 
 #### 1.2 拟人化操作流程模板
 
@@ -52,15 +58,25 @@
 ```
 1. 打开页面：POST /NewChromePage { "url": "...", "wait_until": "networkidle" }
 2. 等待加载：POST /LookChromePageInfo { "page_id": "...", "info": "page_meta" } 直到 ready_state=complete
-3. 截图留证：POST /LookChromePageInfo { "page_id": "...", "info": "screenshot" }
-4. 执行操作（按需选择）：
-   a. 点击：POST /ControlChromePage { "action": "human_click", "params": { "selector": "..." } }
-   b. 输入：POST /ControlChromePage { "action": "human_input", "params": { "selector": "...", "text": "..." } }
-   c. 滚动：POST /ControlChromePage { "action": "scroll", "params": { "use_wheel": true, "delta_y": 300 } }
-   d. 下拉：POST /ControlChromePage { "action": "hover", "params": { "selector": "..." } } → 等待 → human_click 选项
+3. 获取界面信息（按优先级）：
+   a.【优先】读取 DOM 元素/控件：LookChromePageInfo info=elements → 获取元素树、控件属性、可见文案
+   b.【优先】读取页面文字：LookChromePageInfo info=text → 获取页面纯文本，用于断言
+   c.【降级】截图留证：LookChromePageInfo info=screenshot（仅当 DOM/文字不足以判断时）
+4. 执行操作（按需选择，严格模拟人类）：
+   a. 单击：POST /ControlChromePage { "action": "human_click", "params": { "selector": "..." } }
+   b. 双击：POST /ControlChromePage { "action": "human_double_click", "params": { "selector": "..." } }
+   c. 输入：POST /ControlChromePage { "action": "human_input", "params": { "selector": "...", "text": "..." } }
+   d. 滚动：POST /ControlChromePage { "action": "scroll", "params": { "use_wheel": true, "delta_y": 300 } }
+   e. 下拉：POST /ControlChromePage { "action": "hover", "params": { "selector": "..." } } → 等待展开 → human_click 选项
+   f. 拖拽：POST /ControlChromePage { "action": "drag_and_drop", "params": { "source": "...", "target": "..." } }
 5. 操作后等待：再次检查 page_meta 确认页面稳定
-6. 验证结果：截图 + network + console 三维验证
-7. 记录结果：写入测试报告
+6. 验证结果（按优先级）：
+   a.【优先】elements / text 结构化断言
+   b.【优先】network 抓取 API 调用，验证请求/响应
+   c.【优先】console 检查 error 级别日志
+   d.【降级】screenshot 截图留证（结构化数据不足时）
+7. 评估 UI 布局与交互设计合理性（见 §11）
+8. 记录结果：写入测试报告
 ```
 
 #### 1.3 操作节奏控制（强制）
@@ -203,22 +219,29 @@
 
 1. **打开页面**：`POST /NewChromePage { "url": "http://localhost:9101/<页面路径>", "wait_until": "networkidle" }`
 2. **等待加载**：`LookChromePageInfo info=page_meta` 确认 `ready_state=complete`
-3. **截图留证**：`LookChromePageInfo info=screenshot`
-4. **执行核心操作**（按需）：
-   - 点击按钮：`human_click`
+3. **获取界面信息**（按 §1.2 优先级）：
+   - 优先：`LookChromePageInfo info=elements` 获取 DOM 元素/控件信息
+   - 优先：`LookChromePageInfo info=text` 获取页面文字
+   - 降级：`LookChromePageInfo info=screenshot` 截图（DOM/文字不足时）
+4. **执行核心操作**（按需，严格模拟人类）：
+   - 单击按钮：`human_click`
+   - 双击行/元素：`human_double_click`
    - 填写表单：`human_input`
    - 下拉选择：`hover` 展开 → `human_click` 选项
    - 滚动浏览：`scroll use_wheel=true`
    - 切换 Tab/菜单：`human_click`
-5. **验证交互响应**：
-   - `LookChromePageInfo info=network` 抓取 API 调用,验证请求/响应状态码
-   - `LookChromePageInfo info=console` 检查 error 级别日志
-   - `LookChromePageInfo info=screenshot` 确认 UI 变化
-6. **记录结果**：通过/缺陷/跳过，附带截图证据
+   - 拖拽排序/移动：`drag_and_drop`
+5. **验证交互响应**（按 §1.2 优先级）：
+   - 优先：`info=elements` / `info=text` 结构化断言 UI 变化
+   - 优先：`LookChromePageInfo info=network` 抓取 API 调用,验证请求/响应状态码
+   - 优先：`LookChromePageInfo info=console` 检查 error 级别日志
+   - 降级：`LookChromePageInfo info=screenshot` 确认 UI 变化（结构化数据不足时）
+6. **评估 UI/交互设计合理性**：布局美观性、信息层级、控件对齐、交互反馈、导航直觉性、可读性等（见 §11）
+7. **记录结果**：通过/缺陷/跳过，附结构化证据（elements/text）为主、截图为辅
 
 #### 6.4 用户端测试(29001)（拟人化流程）
 
-同 §6.3,按 §2.2 页面顺序执行，所有操作通过 go-web-debug-tool 完成。
+同 §6.3,按 §2.2 页面顺序执行，所有操作通过 go-web-debug-tool 完成，严格模拟人类操作，信息获取遵循 elements/text 优先、截图降级原则，并评估 UI/交互设计合理性。
 
 #### 6.5 安全红线验证(强制)
 
@@ -292,8 +315,9 @@
    - `安全红线验证结果`
    - `双构建隔离合规性(grep 复验)`
    - `缺陷列表`(BugID / 严重等级 / 复现步骤 / 期望 vs 实际 / 证据)
+   - `UI/交互设计合理性评估`(逐页面:布局、对齐、反馈、导航、可读性等)
    - `诊断数据与证据链`(API 响应/日志/抓包)
-   - `优化建议`(定位到根因:提示词/工具定义/业务逻辑/前端/协议适配/安全)
+   - `优化建议`(定位到根因:提示词/工具定义/业务逻辑/前端/协议适配/安全/交互体验)
    - **阻塞信息**(如有):阻塞位置、类型、阻塞前操作序列、诊断数据
 2. **强制生成进度文件**(跨轮去重基线,**非可选**;正常结束、异常终止、整轮中断均必须落盘):
    - 路径: `AutoTestProgress/自动化测试进度_YYYYMMDD_HHMMSS.md`(与测试报告时间戳一致,便于按时间排序取最新)。
@@ -320,9 +344,18 @@
 
 ### 11. 注意事项
 
-- **go-web-debug-tool 是唯一的浏览器交互工具**：所有页面操作必须通过 go-web-debug-tool 完成，禁止直接 curl 页面 HTML 或绕过工具执行 JS。
-- **拟人化操作是强制要求**：必须使用 `human_click`、`human_input`、`scroll use_wheel=true` 等拟人化 action，禁止直接使用 `click`、`input_text` 等非拟人化 action（除非拟人化 action 失败后的降级）。
+- **go-web-debug-tool 是唯一的浏览器交互工具**：所有页面操作必须通过 go-web-debug-tool 完成，**严禁直接调用 REST 接口**（包括 `curl` 直接请求 API、绕过工具执行 JS 注入、直接 curl 页面 HTML 等），所有测试必须以**模拟真实人类用户操作**的方式完成（点击、双击、下拉选择、滚动、悬停、拖拽、键盘输入等）。
+- **拟人化操作是强制要求**：必须使用 `human_click`、`human_input`、`scroll use_wheel=true`、`hover`、`select_option`、`key_press`、`double_click`、`drag_and_drop` 等拟人化 action，禁止直接使用 `click`、`input_text` 等非拟人化 action（除非拟人化 action 失败后的降级）。
+- **信息获取优先级（强制）**：go-web-debug-tool 操作 Web 界面时，**优先使用读取 DOM 元素、返回文字信息、元素/控件信息的方式**（`LookChromePageInfo info=elements` 获取元素树、`info=text` 获取页面文字、`info=page_meta` 获取页面元信息）获取界面状态与数据；**仅当 DOM/文字信息不足以判断或存在歧义时**，才降级使用截图（`info=screenshot`）读取图片的方式进行验证。这一原则旨在提升验证速度、降低 token 消耗、并保证验证结论基于结构化数据而非图片猜测。
 - **操作后必须等待**：每次操作后必须等待页面稳定（`ready_state=complete` 或至少 500ms）再执行下一步。
+- **UI/交互设计合理性评估（强制）**：测试过程中不仅要验证功能正确性，还必须评估 **UI 布局的合理性**与**交互设计的合理性**，包括但不限于：
+  - 页面布局是否美观、信息层级是否清晰、重点操作是否突出
+  - 表单与控件是否在视觉上对齐、间距是否合理、是否适配不同视口
+  - 交互反馈是否及时（按钮点击态、加载态、成功/失败提示）
+  - 导航与操作流程是否符合用户直觉、是否存在多余步骤或死路
+  - 下拉、弹窗、Toast 等浮层是否遮挡关键内容、关闭路径是否清晰
+  - 文字是否可读（字号、颜色对比度）、图标表意是否明确
+  - 发现布局/交互不合理时，在报告的「优化建议」节明确指出并给出改进方向。
 - **报告文件保留(接力链不断裂)**: `TestReport/`、`AutoTestProgress/` 下的报告与进度文件必须**原样保留在工作区**,严禁测试 Agent 删除、移动、重命名或 `_无问题.md` 归档。接力脚本 `AutoDebugTestReport.sh` 通过 `any_pending_report()` 检测文件存在性来决定是否启动修复;Agent 提前删除将导致接力链断裂(缺陷无人修复)。即使用户直接要求删除,Agent 也**必须拒绝并解释接力依赖**,建议等接力脚本在代码修复提交后自动处理。
 - **多 Agent 并发与 Git**: 测试期间留意其他开发 Agent;**禁止** `git add` / `git commit` / `git push` 等一切写操作(由 shell 接力脚本统一提交)。
 - **数据安全**: 抓包数据 / 测试报告严禁明文输出 API Key / Token / Cookie / 密码,必须脱敏;`user_model_info.json` 内容不得写入报告。
@@ -378,23 +411,28 @@
 
 ### 13. go-web-debug-tool 操作速查表
 
-| 场景 | 请求示例 |
-|------|----------|
-| 打开页面 | `POST /NewChromePage {"url":"http://localhost:9101/Home","wait_until":"networkidle"}` |
-| 拟人点击 | `POST /ControlChromePage {"page_id":"p_xxx","action":"human_click","params":{"selector":"button.submit"}}` |
-| 拟人输入 | `POST /ControlChromePage {"page_id":"p_xxx","action":"human_input","params":{"selector":"input[name=username]","text":"admin"}}` |
-| 滚轮滚动 | `POST /ControlChromePage {"page_id":"p_xxx","action":"scroll","params":{"use_wheel":true,"delta_y":300}}` |
-| 滚动到元素 | `POST /ControlChromePage {"page_id":"p_xxx","action":"scroll_to","params":{"selector":".footer","block":"center"}}` |
-| 悬停展开 | `POST /ControlChromePage {"page_id":"p_xxx","action":"hover","params":{"selector":".dropdown-toggle"}}` |
-| 选择下拉 | `POST /ControlChromePage {"page_id":"p_xxx","action":"select_option","params":{"selector":"#role","value":"admin"}}` |
-| 按键 | `POST /ControlChromePage {"page_id":"p_xxx","action":"key_press","params":{"key":"Enter"}}` |
-| 查看元信息 | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"page_meta"}` |
-| 截图 | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"screenshot","params":{"full_page":true}}` |
-| 网络请求 | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"network","params":{"limit":100}}` |
-| 控制台日志 | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"console","params":{"level":["error"],"limit":50}}` |
-| 元素详情 | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"elements","params":{"selector":"#login-form"}}` |
-| 关闭页面 | `POST /CloseChromePage {"page_id":"p_xxx"}` |
-| 列出页面 | `POST /ListChromePages {}` |
+> **信息获取优先级**：`elements` / `text` / `page_meta`（结构化数据）优先 → `screenshot`（图片）降级。
+
+| 场景 | 请求示例 | 说明 |
+|------|----------|------|
+| **打开页面** | `POST /NewChromePage {"url":"http://localhost:9101/Home","wait_until":"networkidle"}` | 新建浏览器页面 |
+| **拟人单击** | `POST /ControlChromePage {"page_id":"p_xxx","action":"human_click","params":{"selector":"button.submit"}}` | 贝塞尔曲线移动 + 随机延迟 |
+| **拟人双击** | `POST /ControlChromePage {"page_id":"p_xxx","action":"human_double_click","params":{"selector":"tr.row"}}` | 模拟人类双击（如展开/编辑行） |
+| **拟人输入** | `POST /ControlChromePage {"page_id":"p_xxx","action":"human_input","params":{"selector":"input[name=username]","text":"admin"}}` | 逐字符输入，带随机停顿 |
+| **滚轮滚动** | `POST /ControlChromePage {"page_id":"p_xxx","action":"scroll","params":{"use_wheel":true,"delta_y":300}}` | 触发真实 WheelEvent |
+| **滚动到元素** | `POST /ControlChromePage {"page_id":"p_xxx","action":"scroll_to","params":{"selector":".footer","block":"center"}}` | 平滑滚动至元素可见 |
+| **悬停展开** | `POST /ControlChromePage {"page_id":"p_xxx","action":"hover","params":{"selector":".dropdown-toggle"}}` | 悬停触发下拉/ Tooltip |
+| **选择下拉** | `POST /ControlChromePage {"page_id":"p_xxx","action":"select_option","params":{"selector":"#role","value":"admin"}}` | 选中 `<select>` 的 option |
+| **按键** | `POST /ControlChromePage {"page_id":"p_xxx","action":"key_press","params":{"key":"Enter"}}` | 单键或组合键 |
+| **拖拽** | `POST /ControlChromePage {"page_id":"p_xxx","action":"drag_and_drop","params":{"source":".item","target":".dropzone"}}` | 模拟人类拖拽 |
+| **查看元信息** | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"page_meta"}` | 页面 URL / ready_state / title |
+| **读取元素树** | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"elements","params":{"selector":"#login-form"}}` | **优先**：获取 DOM 元素、控件属性 |
+| **读取页面文字** | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"text"}` | **优先**：获取页面纯文本，用于断言 |
+| **截图** | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"screenshot","params":{"full_page":true}}` | **降级**：DOM/文字不足时再截图 |
+| **网络请求** | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"network","params":{"limit":100}}` | 抓取 API 调用链 |
+| **控制台日志** | `POST /LookChromePageInfo {"page_id":"p_xxx","info":"console","params":{"level":["error"],"limit":50}}` | 检查 error 级别日志 |
+| **关闭页面** | `POST /CloseChromePage {"page_id":"p_xxx"}` | 关闭单个页面 |
+| **列出页面** | `POST /ListChromePages {}` | 列出所有打开的页面 |
 
 ### 14. 一轮测试的生命周期（loop 视角）
 
