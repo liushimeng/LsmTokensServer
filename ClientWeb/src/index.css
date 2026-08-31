@@ -420,6 +420,16 @@ a { color: var(--primary); text-decoration: none; }
   font-size: 12px;
   font-style: italic;
 }
+.agg-no-text-hint {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: #92400e;
+  line-height: 1.5;
+}
 .agg-cache-info {
   display: flex;
   flex-wrap: wrap;

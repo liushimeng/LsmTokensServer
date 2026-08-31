@@ -261,6 +261,43 @@ const parts5 = splitAggregateTextParts([
 eq(parts5[0].kind, 'text', 'partial_json 单段不完整（不以 { 开头）→ 文本')
 eq(parts5[1].kind, 'text', 'partial_json 单段不完整（不以 { 开头）→ 文本')
 
+// ===== 阶段AY：OpenAI 流式 tool_calls 聚合 + 纯工具流场景 =====
+// 阶段AY：OpenAI delta.tool_calls[].function.name 应被聚合到 toolCalls
+const openaiToolStream = [
+  'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}',
+  '',
+  'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"get_weather"},"arguments":"{\\"city\\":\\"北京\\"}"}]},"finish_reason":null}]}',
+  '',
+  'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"name":"get_time"}}]},"finish_reason":null}]}',
+  '',
+  'data: [DONE]',
+  '',
+].join('\n')
+const openaiToolAgg = aggregateSSE(openaiToolStream)
+eq(openaiToolAgg.toolCalls, ['get_weather', 'get_time'], 'OpenAI 流式 tool_calls.function.name 聚合')
+eq(openaiToolAgg.textParts, [], 'OpenAI 纯工具流 → textParts=[]')
+eq(openaiToolAgg.eventTypes['(default)'], 3, 'OpenAI 纯工具流 → 3 条 default 事件（[DONE] 跳过）')
+
+// 阶段AY：纯 message_delta 流（无 content_block_delta）→ textParts=[] 但 eventTypes 非空
+const onlyMessageDelta = [
+  'event: message_start',
+  'data: {"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0}}}',
+  '',
+  'event: message_delta',
+  'data: {"type":"message_delta","usage":{"output_tokens":5}}',
+  '',
+  'event: message_stop',
+  'data: {"type":"message_stop"}',
+  '',
+].join('\n')
+const msgDeltaAgg = aggregateSSE(onlyMessageDelta)
+eq(msgDeltaAgg.textParts, [], '只有 message_delta → textParts=[]')
+eq(msgDeltaAgg.eventTypes.message_start, 1, 'message_start 计数')
+eq(msgDeltaAgg.eventTypes.message_delta, 1, 'message_delta 计数')
+eq(msgDeltaAgg.eventTypes.message_stop, 1, 'message_stop 计数')
+eq(msgDeltaAgg.usage.input_tokens_final, 10, 'message_start 末帧 input_tokens 覆盖')
+eq(msgDeltaAgg.usage.output_tokens_final, 5, 'message_delta 末帧 output_tokens 覆盖')
+
 // 总结
 // eslint-disable-next-line no-console
 console.log(`\n总计：${pass} 通过 / ${fail} 失败`)

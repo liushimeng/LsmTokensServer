@@ -80,6 +80,12 @@ export default function AggregateView({ result, query }) {
     totalTokens === 0 && toolCalls.length === 0 && textParts.length === 0 &&
     Object.keys(eventTypes).length === 0
 
+  // 阶段AY：有 SSE 事件但无文本内容（如纯工具调用流、错误响应、message_stop 终止）
+  // → 给出明确解释，避免"Text (0) (无)"误导用户以为解析失败
+  const hasEventsButNoText =
+    textParts.length === 0 && Object.keys(eventTypes).length > 0 &&
+    (totalTokens > 0 || toolCalls.length > 0)
+
   // 阶段AV：汇总行 meta（tokens / 事件数 / 工具数 / 文本片段数）
   const eventTotalCount = Object.values(eventTypes).reduce((s, n) => s + n, 0)
   const hasStats = totalTokens > 0 || eventTotalCount > 0 || toolCalls.length > 0
@@ -99,6 +105,16 @@ export default function AggregateView({ result, query }) {
       {isAllEmpty ? (
         <div className="agg-empty-detail">
           ({t('chatAnalysis.aggNoSummary')})
+        </div>
+      ) : null}
+
+      {/* 阶段AY：有 SSE 事件但聚合出 0 文本（如纯工具调用流、错误响应、终止流）→
+          给出明确解释，避免"Text (0) (无)"误导；下方仍展示 Text 块与统计信息。 */}
+      {hasEventsButNoText ? (
+        <div className="agg-no-text-hint">
+          💡 {toolCalls.length > 0
+            ? t('chatAnalysis.aggNoTextWithTools', { toolCount: toolCalls.length })
+            : t('chatAnalysis.aggNoTextHint')}
         </div>
       ) : null}
 

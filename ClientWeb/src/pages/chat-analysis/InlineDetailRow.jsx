@@ -71,9 +71,13 @@ export default function InlineDetailRow({
   }
 
   // 首次展开时自动加载默认字段
+  // 阶段AY：通过 onTabChangeRef 跟踪最新回调，避免空依赖造成 stale closure
+  // （父组件更新 onTabChange 引用时，本组件不会重新订阅）
+  const onTabChangeRef = useRef(onTabChange)
+  useEffect(() => { onTabChangeRef.current = onTabChange }, [onTabChange])
   useEffect(() => {
     if (detailState && !detailState.value && !detailState.loading && !detailState.cache['request_body']) {
-      onTabChange('request_body')
+      onTabChangeRef.current('request_body')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

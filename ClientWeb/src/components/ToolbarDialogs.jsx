@@ -858,10 +858,13 @@ function GitDialog({ onClose }) {
     if (openHash === hash) { setOpenHash(null); return }
     setOpenHash(hash)
     if (!changes[hash]) {
+      const targetHash = hash // 阶段AY：捕获本次点击的 hash，await 后再校验避免写入过期数据
       try {
-        const d = await get(`GitInfoInterface?action=get_changes&hash=${hash}`)
-        setChanges((prev) => ({ ...prev, [hash]: d.changes || [] }))
-      } catch { /* 拉取失败保持“无文件变更信息”展示 */ }
+        const d = await get(`GitInfoInterface?action=get_changes&hash=${targetHash}`)
+        // 仅当本次展开仍是同一 commit 时才写入，避免用户在 await 期间切换
+        // 造成"已收起但 changes 已被脏写"的死数据。
+        setChanges((prev) => ({ ...prev, [targetHash]: d.changes || [] }))
+      } catch { /* 拉取失败保持"无文件变更信息"展示 */ }
     }
   }
 
@@ -933,9 +936,12 @@ function SysDialog({ onClose }) {
       setErr(''); setInfo(d)
     }).catch((e) => { if (!stop) setErr(e.message || '加载失败') })
     load()
-    if (!auto) return undefined
-    const timer = setInterval(load, SYS_REFRESH_MS)
-    return () => { stop = true; clearInterval(timer) }
+    let timer = null
+    if (auto) timer = setInterval(load, SYS_REFRESH_MS)
+    return () => {
+      stop = true
+      if (timer) clearInterval(timer)
+    }
   }, [auto])
 
   const Row = ({ k, v }) => <><dt>{k}</dt><dd>{v}</dd></>

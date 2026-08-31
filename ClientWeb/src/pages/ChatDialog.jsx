@@ -149,13 +149,16 @@ export default function ChatDialog({ route }) {
 
   // 初始化：探测模式（管理端 login_type=manager）；路由带 user_name 时自动拉模型
   useEffect(() => {
+    let alive = true // 阶段AY：组件卸载守卫，避免 setState on unmounted component 警告
     post('UserInfoInterface').then((d) => {
+      if (!alive) return
       const isUser = d && d.data && d.data.login_type && d.data.login_type !== 'manager'
       setUserMode(isUser)
       if (isUser) loadModels('', true)
     }).catch(() => { /* 探测失败按管理端处理 */ })
     // 路由带 user_name 时自动拉取模型列表
     if (init.userName) loadModels(init.userName)
+    return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

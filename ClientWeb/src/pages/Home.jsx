@@ -47,7 +47,8 @@ export default function Home() {
       .finally(() => { if (aliveRef.current) setInfoLoaded(true) })
     post('UserModelListInterface', {})
       .then((d) => { if (aliveRef.current) setModels((d && (d.data || d.models)) || []) })
-      .catch(() => {})
+      // 阶段AY：失败时给出提示而非静默吞错（用户模型列表为空但 UI 完全无反馈）
+      .catch((e) => { if (aliveRef.current) setError(e.message || t('home.loadModelsFailed')) })
     return () => { aliveRef.current = false }
   }, [])
 

@@ -94,10 +94,16 @@ export default function SpiderDataSource() {
   }
 
   // 打开爬取弹窗：默认提示词带 {{.DataSourceID}} 模板说明
+  // 阶段AY：用 `__DATA_SOURCE_ID__` 一次性占位符替换，避免 rec.id 数字串
+  // 与模板内其他位置（如默认值 "1"、"true" 等）误匹配。
   const openCrawl = (rec) => {
     setCrawling(rec)
-    setPrompt(defaultPromptTemplate(rec.id).replace(String(rec.id), '{{.DataSourceID}}')
-      + `\n- 当前数据源 ID：${rec.id}（提示词会被原样发送，后端将替换 {{.DataSourceID}}）`)
+    const tmpl = defaultPromptTemplate(rec.id)
+    const idStr = String(rec.id)
+    const replaced = tmpl.indexOf(idStr) >= 0
+      ? tmpl.replace(idStr, '{{.DataSourceID}}')
+      : tmpl
+    setPrompt(replaced + `\n- 当前数据源 ID：${rec.id}（提示词会被原样发送，后端将替换 {{.DataSourceID}}）`)
     setLogText('')
     setCrawlBusy(false)
   }

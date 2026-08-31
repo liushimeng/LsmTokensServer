@@ -158,6 +158,10 @@ export default function ChatAnalysisTotal({ route }) {
       if (!rangeDoneRef.current) applyEvent('error', { message: t('chatAnalysisTotal.connectionInterrupted') })
     } catch (e) {
       applyEvent('error', { message: t('chatAnalysisTotal.requestFailed', { message: e.message }) })
+    } finally {
+      // 阶段AY：rangeRunning 必须在所有退出路径（正常 done / 异常 / 早退 return）
+      // 都重置，避免 UI 永远停留在"生成中"。
+      setRangeRunning(false)
     }
   }
   // ===== 区间报告结束 =====

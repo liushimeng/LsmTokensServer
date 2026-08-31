@@ -120,6 +120,8 @@ export function resetTimeSpanConfigCache() {
 }
 
 // fetchTimeSpanConfig 拉取档位上限配置；失败时返回兜底值（365 天），不抛异常。
+// 阶段AY：失败路径不写缓存（避免 60s TTL 内反复兜底），下次调用会立即重试；
+// 成功路径正常写入缓存。
 export async function fetchTimeSpanConfig(fetchFn) {
   if (cachedConfig && Date.now() - cachedConfig.fetchedAt < CACHE_TTL_MS) {
     return cachedConfig.data
@@ -133,10 +135,9 @@ export async function fetchTimeSpanConfig(fetchFn) {
       return d
     })
     .catch(() => {
-      // 兜底：接口不可用（服务重启等）时按 365 天生成档位，不阻塞页面
-      const d = normalizeConfig(null)
-      cachedConfig = { fetchedAt: Date.now(), data: d }
-      return d
+      // 兜底：接口不可用（服务重启等）时按 365 天生成档位，不阻塞页面；
+      // 不写 cachedConfig，避免 60s 内反复兜底（下次调用会立即重试拉取真实上限）。
+      return normalizeConfig(null)
     })
     .finally(() => {
       inflight = null

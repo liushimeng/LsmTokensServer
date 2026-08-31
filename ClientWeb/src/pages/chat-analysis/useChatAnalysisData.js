@@ -56,13 +56,15 @@ export default function useChatAnalysisData(isAdmin, userName, modelName, days, 
         next.delete(rowId)
       } else {
         next.add(rowId)
-        // 首次展开时初始化 detail state
-        setDetailStates((states) => {
-          if (states[rowId]) return states
-          return { ...states, [rowId]: { tab: 'request_body', view: 'raw', value: '', loading: false, cache: {} } }
-        })
       }
       return next
+    })
+    // 阶段AY：将 detail state 初始化提到 toggleExpand 顶层独立 batch 调用，
+    // 避免在 setExpandedIds 的 updater 内嵌套 setDetailStates（React 不保证
+    // 跨 setState 合并时机，连续展开多行时偶发丢行）。
+    setDetailStates((states) => {
+      if (states[rowId]) return states
+      return { ...states, [rowId]: { tab: 'request_body', view: 'raw', value: '', loading: false, cache: {} } }
     })
   }
 

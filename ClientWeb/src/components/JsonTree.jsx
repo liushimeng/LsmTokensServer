@@ -43,6 +43,28 @@ const JT_INDENT_PX = 20
 /** 工具栏"展开至 N 层"档位 */
 const JT_EXPAND_LEVELS = [2, 3, 5]
 
+/**
+ * 阶段AY：UTF-16 代理对安全的字符串截断 —— JS string.slice 按 UTF-16 code unit
+ * 计数，当截断点落在高/低代理对中间时会产生孤立字符（React 渲染时出现
+ * "Invalid string length" 或末尾乱码）。本函数在边界回退到上一个完整码点。
+ */
+function safeSliceUtf16(text, limit) {
+  if (!text || text.length <= limit) return text
+  const lo = limit
+  const hi = limit + 1
+  // 若截断点是 high surrogate 且下一位是 low surrogate，整体后移一位
+  if (hi < text.length && isHighSurrogate(text.charCodeAt(lo)) && isLowSurrogate(text.charCodeAt(hi))) {
+    return text.slice(0, hi)
+  }
+  // 若截断点落在 low surrogate 中间（孤立），整体前移一位
+  if (isLowSurrogate(text.charCodeAt(lo))) {
+    return text.slice(0, lo - 1)
+  }
+  return text.slice(0, lo)
+}
+function isHighSurrogate(cp) { return cp >= 0xD800 && cp <= 0xDBFF }
+function isLowSurrogate(cp) { return cp >= 0xDC00 && cp <= 0xDFFF }
+
 export default function JsonTree({ value, query, toolbar = true }) {
   const { t } = useI18n()
   const parsed = useMemo(() => parseJsonSafely(value), [value])
@@ -300,7 +322,7 @@ function StringValue({ text, query }) {
   if (text.length <= JSON_STRING_INLINE_LIMIT) {
     return <span className="jt-string"><SearchText query={query} text={`"${escapeJsonString(text)}"`} /></span>
   }
-  const shown = showAll ? text : text.slice(0, JSON_STRING_INLINE_LIMIT)
+  const shown = showAll ? text : safeSliceUtf16(text, JSON_STRING_INLINE_LIMIT)
   return (
     <>
       <span className="jt-string"><SearchText query={query} text={`"${escapeJsonString(shown)}${showAll ? '' : '…'}"`} /></span>

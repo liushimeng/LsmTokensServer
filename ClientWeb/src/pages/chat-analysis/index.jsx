@@ -1,6 +1,6 @@
 // 对话分析页面主组件
 // 模块化重构：筛选工具栏 + 数据表格 + 内联详情展开（替代 Modal 弹窗）
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { post, get } from '../../shared/api'
 import { isAdminRole } from '../../shared/auth'
 import { useUserModelOptions, useMyModelNames } from '../../shared/userModelOptions'
@@ -65,6 +65,11 @@ export default function ChatAnalysis({ route }) {
     } catch { /* 静默失败 */ }
   }
 
+  // 阶段AY：modelNameRef 跟踪最新 modelName，避免 useEffect 的闭包陷阱
+  // （loadOptions() 不传参时读取 ref，保证请求参数与 UI 一致）
+  const modelNameRef = useRef(modelName)
+  useEffect(() => { modelNameRef.current = modelName }, [modelName])
+
   // Agent 工具下拉（全站，加载一次）
   useEffect(() => {
     get('ChatAnalysisAgentToolsInterface').then((d) => setAgentTools(d.data || [])).catch(() => {})
@@ -73,8 +78,8 @@ export default function ChatAnalysis({ route }) {
   // 动态档位就绪后首查（管理端需 userName+modelName，用户端需 modelName）
   useEffect(() => {
     if (days === null) return
-    const hasKey = (isAdmin ? userName.trim() !== '' : true) && modelName.trim() !== ''
-    if (hasKey) { loadOptions(); setPage(1); doQuery(1) }
+    const hasKey = (isAdmin ? userName.trim() !== '' : true) && modelNameRef.current.trim() !== ''
+    if (hasKey) { loadOptions(modelNameRef.current); setPage(1); doQuery(1) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days])
 

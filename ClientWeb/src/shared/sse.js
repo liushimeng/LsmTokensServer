@@ -200,6 +200,13 @@ export function aggregateSSE(text) {
     } else if (p.choices && p.choices[0] && p.choices[0].delta) {
       const t = p.choices[0].delta.content || p.choices[0].delta.reasoning_content
       if (t) out.textParts.push(t)
+      // 阶段AY：OpenAI 流式工具调用聚合（delta.tool_calls[].function.name）
+      const dToolCalls = p.choices[0].delta.tool_calls
+      if (Array.isArray(dToolCalls)) {
+        for (const tc of dToolCalls) {
+          if (tc && tc.function && tc.function.name) out.toolCalls.push(String(tc.function.name))
+        }
+      }
     } else if (p.type === 'content_block_start' && p.content_block && p.content_block.type === 'tool_use') {
       out.toolCalls.push(p.content_block.name || '')
     }
