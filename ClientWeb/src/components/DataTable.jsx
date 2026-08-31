@@ -7,7 +7,8 @@
 // collapsible: true 启用折叠行；collapsedIds: Set 折叠的 rowKey 集合；onToggleCollapse(rowKey)：切换回调。
 // renderCollapsedRow(row, onToggle)：折叠时自定义跨行摘要（优先级最高）。
 // collapsedHiddenColumns: [key1, key2]：折叠时隐藏指定列，其余列正常显示但单行紧凑（与 renderCollapsedRow 二选一）。
-import { useMemo, useState } from 'react'
+// sortStorageKey: 传入后排序状态持久化到 localStorage（{key, dir}），刷新后恢复；key 失效或列不可排序时自动忽略。
+import { useEffect, useMemo, useState } from 'react'
 import { useI18n } from '../i18n'
 
 // 数值优先数值比较，其余中文 localeCompare；null/undefined 恒排末尾
@@ -23,9 +24,28 @@ function compare(a, b) {
 }
 
 export default function DataTable({ columns, rows, loading, empty, rowKey, cardMode = true, rowClass,
-  collapsible, collapsedIds, onToggleCollapse, renderCollapsedRow, collapsedHiddenColumns = [] }) {
+  collapsible, collapsedIds, onToggleCollapse, renderCollapsedRow, collapsedHiddenColumns = [], sortStorageKey }) {
   const { t } = useI18n()
-  const [sort, setSort] = useState(null) // {key, dir: 1|-1}
+  // 排序状态：{key, dir: 1|-1}；sortStorageKey 存在时从 localStorage 恢复并持久化
+  const [sort, setSort] = useState(() => {
+    if (!sortStorageKey) return null
+    try {
+      const raw = window.localStorage.getItem(sortStorageKey)
+      if (!raw) return null
+      const s = JSON.parse(raw)
+      // 校验：列仍存在且可排序、方向合法，否则丢弃记忆
+      const col = columns.find((c) => c.key === s.key)
+      if (!col || !col.sortable || ![1, -1].includes(s.dir)) return null
+      return { key: s.key, dir: s.dir }
+    } catch { return null }
+  })
+  useEffect(() => {
+    if (!sortStorageKey) return
+    try {
+      if (sort) window.localStorage.setItem(sortStorageKey, JSON.stringify(sort))
+      else window.localStorage.removeItem(sortStorageKey)
+    } catch { /* 忽略 */ }
+  }, [sort, sortStorageKey])
 
   if (!empty) empty = t('datatable.noData')
 

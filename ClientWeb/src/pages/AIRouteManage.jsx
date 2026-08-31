@@ -373,9 +373,9 @@ export default function AIRouteManage() {
       ), width: 36,
       render: (_, r) => <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSelect(r.id)} />,
     }] : []),
-    { key: 'id', title: t('aiRouteManage.id'), width: 60 },
-    ...(isAdmin ? [{ key: 'user_name', title: t('aiRouteManage.belongUser') }] : []),
-    { key: 'model_name', title: t('aiRouteManage.modelName') },
+    { key: 'id', title: t('aiRouteManage.id'), width: 60, sortable: true },
+    ...(isAdmin ? [{ key: 'user_name', title: t('aiRouteManage.belongUser'), sortable: true }] : []),
+    { key: 'model_name', title: t('aiRouteManage.modelName'), sortable: true },
     { key: 'endpoints', title: t('aiRouteManage.targetList'), render: (_, r) => renderEpList(r) },
     { key: 'protocol_type', title: t('aiRouteManage.protocol'), render: (v) => (
       <span className={`protocol-badge protocol-${protocolSlug(v)}`}>{protocolName(v)}</span>
@@ -448,7 +448,8 @@ export default function AIRouteManage() {
         <DataTable columns={columns} rows={pagedRoutes} loading={loading} empty={t('aiRouteManage.noRoutesConfig')} rowKey="id"
           rowClass={(r) => 'row-protocol-' + protocolSlug(r.protocol_type)}
           collapsible collapsedIds={collapsedIds} onToggleCollapse={toggleCollapse}
-          collapsedHiddenColumns={['endpoints', 'actions']} />
+          collapsedHiddenColumns={['endpoints', 'actions']}
+          sortStorageKey={`lsm:airoute:sort:${isAdmin ? 'manager' : 'user'}`} />
         <div className="pager">
           <span>{t('aiRouteManage.totalPages', { total: routes.length, page: safePage, pages: totalPages })}</span>
           <select value={pageSize} onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(1) }}>
