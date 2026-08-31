@@ -356,7 +356,7 @@ export default function AIRouteManage() {
     const time = kind === 'success' ? route.last_success_at_text : route.last_failure_at_text
     const model = kind === 'success' ? route.last_success_dst_model_name : route.last_failure_dst_model_name
     return (
-      <span style={{ display: 'inline-flex', flexDirection: 'column', fontSize: 12 }}>
+      <span className="last-record-cell">
         <b style={{ color: kind === 'success' ? '#155724' : '#721c24' }}>{status}</b>
         <span>{time}</span>
         {model ? <span style={{ color: '#0c4a8f' }}>{model}</span> : null}
@@ -448,15 +448,7 @@ export default function AIRouteManage() {
         <DataTable columns={columns} rows={pagedRoutes} loading={loading} empty={t('aiRouteManage.noRoutesConfig')} rowKey="id"
           rowClass={(r) => 'row-protocol-' + protocolSlug(r.protocol_type)}
           collapsible collapsedIds={collapsedIds} onToggleCollapse={toggleCollapse}
-          renderCollapsedRow={(r, onToggle) => (
-            <div className="collapsed-summary">
-              <button type="button" className="collapse-btn" onClick={onToggle} title={t('aiRouteManage.expand')} aria-label={t('aiRouteManage.expand')}>▶</button>
-              <span className="collapsed-id">#{r.id}</span>
-              <span className={`protocol-badge protocol-${protocolSlug(r.protocol_type)}`}>{protocolName(r.protocol_type)}</span>
-              <span className="collapsed-model">{r.model_name || '-'}</span>
-              <span className="collapsed-hint">{r.algorithm_name || ALGO_NAMES[r.algorithm_strategy_type] || ''} · {t('aiRouteManage.sourcesCount', { count: (r.endpoint_list || []).length })}</span>
-            </div>
-          )} />
+          collapsedHiddenColumns={['endpoints', 'actions']} />
         <div className="pager">
           <span>{t('aiRouteManage.totalPages', { total: routes.length, page: safePage, pages: totalPages })}</span>
           <select value={pageSize} onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(1) }}>

@@ -247,6 +247,36 @@ a { color: var(--primary); text-decoration: none; }
 /* 折叠行：hover 保持折叠摘要色，不被 tr:hover 覆盖 */
 .data-table tr.row-collapsed td { padding: 0; }
 
+/* ===== 折叠行紧凑模式（隐藏指定列，其余列单行显示） ===== */
+.data-table tr.row-collapsed-compact td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.data-table tr.row-collapsed-compact td.cell-collapsed-hidden { display: none; }
+/* 折叠紧凑模式下，chip-list 单行，超出截断 */
+.data-table tr.row-collapsed-compact .chip-list {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  max-width: 100%;
+}
+.data-table tr.row-collapsed-compact .ep-chip {
+  flex-shrink: 0;
+}
+/* 最后记录单元格：正常模式为纵向排列 */
+.last-record-cell { display: inline-flex; flex-direction: column; font-size: 12px; }
+/* 折叠紧凑模式下改为单行 */
+.data-table tr.row-collapsed-compact .last-record-cell {
+  flex-direction: row;
+  gap: 6px;
+  align-items: center;
+}
+.data-table tr.row-collapsed-compact .last-record-cell > b,
+.data-table tr.row-collapsed-compact .last-record-cell > span {
+  white-space: nowrap;
+}
+
 /* ===== 阶段AP：对话详情 Modal 重构布局 ===== */
 
 /* Header：协议流向展示 */
