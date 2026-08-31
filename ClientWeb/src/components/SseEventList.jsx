@@ -16,12 +16,19 @@
 // v2.0.77 阶段AW：SSE 事件 parsed 是字符串时二次 JSON 解析 ——
 //   兼容 data: "{\"a\":1}"（合法 JSON 字符串作为 SSE data 行）这类场景，
 //   二次解析后若为 object/array 则走 JsonTree 渲染，与 JSON 美化按钮行为一致。
+// v2.0.78 阶段BH：超长流渲染上限 ——
+//   长对话（千级 delta 事件）一次性全量渲染卡片会挂出过多 DOM 节点导致滚动/
+//   展开卡顿；改为分批渲染（首屏 RENDER_BATCH=200 张，超出部分「加载更多」
+//   每次追加 200）。顶部 summary 统计栏始终基于全量 events，不随截断变化。
 
 import { useState } from 'react'
 import { useI18n } from '../i18n'
 import JsonTree from './JsonTree'
 import SearchText from './SearchText'
 import { tryParseJsonObject } from '../shared/sse'
+
+// 阶段BH：单批渲染卡片数（首屏 & 每次加载更多的增量）
+const RENDER_BATCH = 200
 
 // 事件类型 → 颜色分类（阶段AP）
 function sseColorClass(eventName) {
@@ -47,6 +54,8 @@ function sseDotColor(eventName) {
 
 export default function SseEventList({ events, query }) {
   const { t } = useI18n()
+  // 阶段BH：分批渲染游标（视图切换 / 行切换时组件重挂载自动复位）
+  const [visible, setVisible] = useState(RENDER_BATCH)
   if (!events || !events.length) {
     return <div className="sse-empty">({t('common.noData')})</div>
   }
@@ -59,6 +68,9 @@ export default function SseEventList({ events, query }) {
 
   // 阶段AR：单条 synthetic complete 事件 → 显示"完整响应"说明
   const isCompleteSingle = events.length === 1 && events[0].synthetic && events[0].event === 'complete'
+
+  // 阶段BH：仅渲染前 visible 张卡片（统计栏始终基于全量 events）
+  const shown = Math.min(visible, events.length)
 
   return (
     <>
@@ -79,9 +91,18 @@ export default function SseEventList({ events, query }) {
       </div>
 
       <div className="sse-event-list">
-        {events.map((e, i) => (
+        {events.slice(0, shown).map((e, i) => (
           <SseEventCard key={`sse-${i}`} index={i + 1} event={e} t={t} query={query} defaultOpen={i < 5} isComplete={isCompleteSingle} />
         ))}
+        {events.length > shown ? (
+          <button
+            type="button"
+            className="btn btn-sm sse-load-more"
+            onClick={() => setVisible((v) => v + RENDER_BATCH)}
+          >
+            ⬇ {t('chatAnalysis.sseLoadMore', { shown, total: events.length })}
+          </button>
+        ) : null}
       </div>
     </>
   )

@@ -162,6 +162,8 @@
   "chatAnalysis.agentToolBlock": "Agentツール情報ブロック",
   "chatAnalysis.agentSessionId": "AgentセッションID",
   "chatAnalysis.aggParse": "集計解析",
+  "chatAnalysis.aggMergedJson": "統合完全レスポンス JSON（ストリーム再構築）",
+  "chatAnalysis.sseLoadMore": "さらに読み込む（{{shown}} / {{total}} 件表示中）",
   "chatAnalysis.aggNoSummary": "レスポンスには解析可能な usage/text/tool_calls 概要が含まれていません",
   "chatAnalysis.aggNoTextHint": "SSE イベントは検出されましたが、テキスト内容は抽出されませんでした（ツール呼び出しストリーム、エラーレスポンス、異常終了ストリームの可能性があります。詳細は下記の Events / Tools 統計をご確認ください）",
   "chatAnalysis.aggNoTextWithTools": "このレスポンスは {{toolCount}} 件のツール呼び出しのみで、テキスト出力はありません（下記の Tools を展開してツール名をご確認ください）",

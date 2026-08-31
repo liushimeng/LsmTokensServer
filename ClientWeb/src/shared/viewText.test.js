@@ -42,6 +42,11 @@ ok(aggText.includes('聚合文本'), 'agg 视图含聚合文本段')
 ok(aggText.includes('你好'), 'agg 视图聚合出增量文本')
 ok(aggText.includes('input=10'), 'agg 视图含 usage')
 
+// ===== 阶段BH：agg 视图含「完整响应 JSON」重组段 =====
+ok(aggText.includes('---- 完整响应 JSON (anthropic) ----'), 'agg 视图含完整响应 JSON 段（协议标注）')
+ok(aggText.includes('"type": "message"'), 'agg 视图 merged 段含重组骨架（type=message）')
+ok(aggText.includes('"input_tokens": 10'), 'agg 视图 merged 段含重组 usage')
+
 // 空值安全
 ok(buildViewText('request_body', VIEW_JSON, '') === '', '空 body json 安全')
 ok(buildViewText('request_body', undefined, 'x') === 'x', '缺省视图按 raw')

@@ -162,6 +162,8 @@
   "chatAnalysis.agentToolBlock": "Agent Tool Info Block",
   "chatAnalysis.agentSessionId": "Agent Session ID",
   "chatAnalysis.aggParse": "Aggregate Parse",
+  "chatAnalysis.aggMergedJson": "Merged Full Response JSON (reconstructed from stream)",
+  "chatAnalysis.sseLoadMore": "Load more ({{shown}} / {{total}} shown)",
   "chatAnalysis.aggNoSummary": "The response contains no parseable usage/text/tool_calls summary",
   "chatAnalysis.aggNoTextHint": "SSE events were captured but no text content was extracted (this may be a tool-call stream, error response, or aborted stream — see Events / Tools stats below)",
   "chatAnalysis.aggNoTextWithTools": "Response only contains {{toolCount}} tool call(s) without any text output (expand Tools below to view tool names)",

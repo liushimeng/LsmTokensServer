@@ -194,6 +194,8 @@
   "chatAnalysis.agentToolBlock": "Agent工具信息块",
   "chatAnalysis.agentSessionId": "AgentSessionID",
   "chatAnalysis.aggParse": "聚合解析",
+  "chatAnalysis.aggMergedJson": "完整响应 JSON（流式事件重组）",
+  "chatAnalysis.sseLoadMore": "加载更多（已显示 {{shown}} / 共 {{total}} 条）",
   "chatAnalysis.aggNoSummary": "该响应未包含可解析的 usage/text/tool_calls 摘要",
   "chatAnalysis.aggNoTextHint": "已捕获到 SSE 事件但未提取到文本内容（可能是工具调用流、错误响应或异常终止流，详见下方 Events / Tools 统计）",
   "chatAnalysis.aggNoTextWithTools": "该响应仅包含 {{toolCount}} 次工具调用，未输出文本内容（可展开下方 Tools 查看工具名）",

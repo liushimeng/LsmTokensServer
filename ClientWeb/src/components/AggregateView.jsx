@@ -28,6 +28,14 @@
 //      等 eventTypes 非空但 textParts 为空的边缘场景；
 //   2) Text 块改为条件渲染：fragments 为空时整体隐藏（去除"Text (0) (无)"噪音）；
 //   3) 新增 i18n 键 chatAnalysis.aggEventsButEmpty，文案带事件计数更直观。
+// v2.0.78 阶段BH：新增「完整响应 JSON（merged）」块 ——
+//   1) aggregateSSE 结果新增 merged / mergedProtocol（流式事件重组为等价非流式
+//      完整响应对象，Anthropic message/content_block 全事件族 + OpenAI chunk 族）；
+//   2) 该块置于提示之后、Text 片段之前 —— 用户点聚合解析最想看的"完整整合后的
+//      信息"即此对象（content 文本、tool_use.input、stop_reason、usage 各归其位）；
+//   3) JsonTree 渲染（toolbar=false）：标准排版 / 折叠 / 语法高亮 / 超长字符串保护 /
+//      查找高亮 / 渲染预算，与 JSON 美化按钮行为一致；
+//   4) merged=null（未知协议）时整块不渲染，保持既有提示链路。
 
 import { useI18n } from '../i18n'
 import SearchText from './SearchText'
@@ -103,6 +111,10 @@ export default function AggregateView({ result, query }) {
   const fragments = splitAggregateTextParts(textParts)
   const jsonFragmentCount = fragments.filter((f) => f.kind === 'json').length
 
+  // 阶段BH：完整响应 JSON 重组结果（null = 未知协议，不渲染该块）
+  const merged = result.merged && typeof result.merged === 'object' ? result.merged : null
+  const mergedProtocol = merged ? (result.mergedProtocol || null) : null
+
   return (
     <div className="aggregate-view">
       {isComplete ? (
@@ -127,6 +139,26 @@ export default function AggregateView({ result, query }) {
             ? t('chatAnalysis.aggNoTextWithTools', { toolCount: toolCalls.length })
             : t('chatAnalysis.aggEventsButEmpty', { eventCount: eventTotalCount })}
         </div>
+      ) : null}
+
+      {/* 阶段BH：完整响应 JSON（流式事件重组）—— 把 SSE 流重组成等价非流式完整响应
+          对象整体展示。默认展开、可折叠；merged=null（未知协议）时不渲染。 */}
+      {merged ? (
+        <details className="agg-merged" open>
+          <summary className="agg-merged-summary">
+            🧩 {t('chatAnalysis.aggMergedJson')}
+            {mergedProtocol ? (
+              <span className={`agg-proto-tag ${mergedProtocol}`}>
+                {mergedProtocol === 'anthropic' ? t('chatAnalysis.anthropic') : t('chatAnalysis.openai')}
+              </span>
+            ) : null}
+          </summary>
+          <div className="agg-merged-body">
+            <div className="agg-merged-tree">
+              <JsonTree value={merged} query={query} toolbar={false} />
+            </div>
+          </div>
+        </details>
       ) : null}
 
       {/* 阶段BF：聚合文本条件渲染 —— 仅当有文本片段时显示 Text (N) 块，

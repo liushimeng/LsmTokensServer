@@ -7,7 +7,7 @@
 // 或在 Node 18+：
 //   node src/shared/sse.test.js
 
-import { parseSSEEvents, aggregateSSE, aggregateToText, sseEventsToText, tryParseJsonObject, splitAggregateTextParts } from './sse.js'
+import { parseSSEEvents, aggregateSSE, aggregateToText, sseEventsToText, tryParseJsonObject, splitAggregateTextParts, mergeSSEEvents } from './sse.js'
 
 let pass = 0
 let fail = 0
@@ -353,6 +353,166 @@ eq(isE3Blind, true, '自定义事件流被识别为"有事件无文本"（修复
 const isE4Blind = openaiToolAgg.textParts.length === 0 && Object.keys(openaiToolAgg.eventTypes).length > 0
 eq(isE4Blind, true, 'OpenAI 纯工具流仍被识别为"有事件无文本"')
 eq(openaiToolAgg.toolCalls.length > 0, true, 'OpenAI 纯工具流 toolCalls 非空（提示文案走 withTools 分支）')
+
+// ===== 阶段BH：完整响应 JSON 重组（merged / mergedProtocol） =====
+section('阶段BH：mergeSSEEvents / aggregateSSE.merged')
+
+// 1) Anthropic 流：text + tool_use（partial_json 增量）+ thinking + stop_reason/usage 回填
+const anthropicFullStream = [
+  'event: message_start',
+  'data: {"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-x","content":[],"usage":{"input_tokens":25,"output_tokens":1}}}',
+  '',
+  'event: content_block_start',
+  'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
+  '',
+  'event: content_block_delta',
+  'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}',
+  '',
+  'event: content_block_delta',
+  'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}',
+  '',
+  'event: content_block_stop',
+  'data: {"type":"content_block_stop","index":0}',
+  '',
+  'event: content_block_start',
+  'data: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01","name":"get_weather","input":{}}}',
+  '',
+  'event: content_block_delta',
+  'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"city\\":"}}',
+  '',
+  'event: content_block_delta',
+  'data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\\"北京\\"}"}}',
+  '',
+  'event: content_block_stop',
+  'data: {"type":"content_block_stop","index":1}',
+  '',
+  'event: message_delta',
+  'data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":88}}',
+  '',
+  'event: message_stop',
+  'data: {"type":"message_stop"}',
+  '',
+].join('\n')
+const bh1 = aggregateSSE(anthropicFullStream)
+eq(bh1.mergedProtocol, 'anthropic', 'Anthropic 流 mergedProtocol=anthropic')
+eq(bh1.merged.id, 'msg_01', 'Anthropic merged 骨架取自 message_start（id）')
+eq(bh1.merged.role, 'assistant', 'Anthropic merged 骨架 role')
+eq(bh1.merged.model, 'claude-x', 'Anthropic merged 骨架 model')
+eq(bh1.merged.content.length, 2, 'Anthropic merged content 含 2 个块')
+eq(bh1.merged.content[0].text, 'Hello world', 'Anthropic merged 文本块增量拼接')
+eq(bh1.merged.content[1].name, 'get_weather', 'Anthropic merged tool_use 块 name')
+eq(bh1.merged.content[1].input.city, '北京', 'Anthropic merged tool_use input 由 partial_json 增量拼装为对象')
+eq(bh1.merged.stop_reason, 'tool_use', 'Anthropic merged stop_reason 来自 message_delta')
+eq(bh1.merged.stop_sequence, null, 'Anthropic merged stop_sequence 来自 message_delta')
+eq(bh1.merged.usage.input_tokens, 25, 'Anthropic merged usage.input_tokens 保留自 message_start')
+eq(bh1.merged.usage.output_tokens, 88, 'Anthropic merged usage.output_tokens 被 message_delta 覆盖')
+
+// 2) Anthropic thinking 块：thinking_delta / signature_delta 合并
+const thinkingStream = [
+  'event: content_block_start',
+  'data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}',
+  '',
+  'event: content_block_delta',
+  'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"let me "}}',
+  '',
+  'event: content_block_delta',
+  'data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"think"}}',
+  '',
+  'event: content_block_delta',
+  'data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-abc"}}',
+  '',
+].join('\n')
+const bh2 = aggregateSSE(thinkingStream)
+eq(bh2.merged.content[0].thinking, 'let me think', 'thinking_delta 增量拼接')
+eq(bh2.merged.content[0].signature, 'sig-abc', 'signature_delta 写入')
+eq(bh2.merged.role, 'assistant', '缺 message_start 的截断流 → 延迟骨架兜底')
+
+// 3) OpenAI 流：content + reasoning_content + tool_calls 累积 + finish_reason + 末帧 usage
+const openaiFullStream = [
+  'data: {"id":"chatcmpl-9","object":"chat.completion.chunk","created":1700000000,"model":"gpt-x","system_fingerprint":"fp1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi "},"finish_reason":null}]}',
+  '',
+  'data: {"id":"chatcmpl-9","object":"chat.completion.chunk","created":1700000000,"model":"gpt-x","choices":[{"index":0,"delta":{"content":"there"},"finish_reason":null}]}',
+  '',
+  'data: {"id":"chatcmpl-9","object":"chat.completion.chunk","created":1700000000,"model":"gpt-x","choices":[{"index":0,"delta":{"reasoning_content":"thinking..."},"finish_reason":null}]}',
+  '',
+  'data: {"id":"chatcmpl-9","object":"chat.completion.chunk","created":1700000000,"model":"gpt-x","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":"{\\"city\\""}}]},"finish_reason":null}]}',
+  '',
+  'data: {"id":"chatcmpl-9","object":"chat.completion.chunk","created":1700000000,"model":"gpt-x","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\\"北京\\"}"}}]},"finish_reason":"tool_calls"}]}',
+  '',
+  'data: {"id":"chatcmpl-9","object":"chat.completion.chunk","created":1700000000,"model":"gpt-x","choices":[],"usage":{"prompt_tokens":12,"completion_tokens":34,"total_tokens":46}}',
+  '',
+  'data: [DONE]',
+  '',
+].join('\n')
+const bh3 = aggregateSSE(openaiFullStream)
+eq(bh3.mergedProtocol, 'openai', 'OpenAI 流 mergedProtocol=openai')
+eq(bh3.merged.id, 'chatcmpl-9', 'OpenAI merged 骨架 id')
+eq(bh3.merged.object, 'chat.completion', 'OpenAI merged object 由 chunk 归一为 chat.completion')
+eq(bh3.merged.model, 'gpt-x', 'OpenAI merged 骨架 model')
+eq(bh3.merged.system_fingerprint, 'fp1', 'OpenAI merged 骨架 system_fingerprint')
+eq(bh3.merged.choices[0].message.role, 'assistant', 'OpenAI merged message.role')
+eq(bh3.merged.choices[0].message.content, 'Hi there', 'OpenAI merged message.content 拼接')
+eq(bh3.merged.choices[0].message.reasoning_content, 'thinking...', 'OpenAI merged reasoning_content 拼接')
+eq(bh3.merged.choices[0].message.tool_calls[0].id, 'call_1', 'OpenAI merged tool_calls id 累积')
+eq(bh3.merged.choices[0].message.tool_calls[0].function.name, 'get_weather', 'OpenAI merged tool_calls function.name')
+eq(bh3.merged.choices[0].message.tool_calls[0].function.arguments, '{"city":"北京"}', 'OpenAI merged tool_calls arguments 逐帧拼接')
+eq(bh3.merged.choices[0].finish_reason, 'tool_calls', 'OpenAI merged finish_reason')
+eq(bh3.merged.usage.total_tokens, 46, 'OpenAI merged 末帧 usage 覆盖')
+
+// 4) 非流式完整响应：merged 原样透传
+const bh4 = aggregateSSE(openaiCompleteStr)
+eq(bh4.merged.id, 'chatcmpl-1', '非流式完整响应 merged 原样透传（id）')
+eq(bh4.mergedProtocol, 'openai', '非流式 OpenAI 响应 mergedProtocol=openai')
+eq(bh4.merged.choices[0].message.content, '你好，世界！', '非流式 merged content 可访问')
+const bh4b = aggregateSSE(JSON.stringify(anthropicComplete))
+eq(bh4b.mergedProtocol, 'anthropic', '非流式 Anthropic 响应 mergedProtocol=anthropic')
+eq(bh4b.merged.content[0].text, 'Hello', '非流式 Anthropic merged content 透传')
+
+// 5) 未知协议流 → merged=null
+const bh5 = aggregateSSE(unknownStream)
+eq(bh5.merged, null, '自定义未知事件流 → merged=null')
+eq(bh5.mergedProtocol, null, '自定义未知事件流 → mergedProtocol=null')
+eq(mergeSSEEvents([]).merged, null, 'mergeSSEEvents([]) → merged=null')
+
+// 6) 截断的 Anthropic 工具流：无 content_block_stop → partial_json 收尾兜底解析
+const truncatedToolStream = [
+  'event: content_block_start',
+  'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_02","name":"get_time"}}',
+  '',
+  'event: content_block_delta',
+  'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"tz\\":\\"UTC\\"}"}}',
+  '',
+].join('\n')
+const bh6 = aggregateSSE(truncatedToolStream)
+eq(bh6.merged.content[0].input.tz, 'UTC', '截断流无 content_block_stop → 收尾兜底解析 partial_json')
+
+// 7) 非法 partial_json（半截 JSON）→ 保留原文字符串，不抛异常
+const badPartialJsonStream = [
+  'event: content_block_start',
+  'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"x"}}',
+  '',
+  'event: content_block_delta',
+  'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"un"}}',
+  '',
+  'event: content_block_stop',
+  'data: {"type":"content_block_stop","index":0}',
+  '',
+].join('\n')
+const bh7 = aggregateSSE(badPartialJsonStream)
+eq(bh7.merged.content[0].input, '{"un', '非法 partial_json → input 保留原文字符串（无损）')
+
+// 8) aggregateToText：merged 段追加 + 旧对象（无 merged）输出不变
+const bh8 = aggregateToText(bh1)
+eq(bh8.includes('---- 完整响应 JSON (anthropic) ----'), true, 'aggregateToText 追加完整响应 JSON 段（含协议）')
+eq(bh8.includes('"stop_reason": "tool_use"'), true, 'aggregateToText 的 merged 段为格式化 JSON')
+eq(
+  aggregateToText({ textParts: ['A'], usage: null, toolCalls: [], eventTypes: {} }),
+  '事件类型分布: 无\nusage: input=0 output=0\n---- 聚合文本 ----\nA',
+  'aggregateToText 无 merged 字段 → 输出与旧版一致',
+)
+
+// 9) 兼容回归：null 入参返回结构不含 merged（历史断言原样保留）
+eq(aggregateSSE(null), { textParts: [], usage: null, toolCalls: [], eventTypes: {} }, 'null → 空结构（回归）')
 
 // 总结
 // eslint-disable-next-line no-console

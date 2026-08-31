@@ -552,6 +552,40 @@ a { color: var(--primary); text-decoration: none; }
 .agg-tag-tool .agg-tag-count { color: #b45309; background: rgba(180,83,9,.1); }
 .agg-text-content { max-height: 360px; }
 .agg-empty { color: var(--muted); padding: 12px; text-align: center; }
+
+/* ===== 阶段BH：聚合解析「完整响应 JSON（merged）」块 + SSE 加载更多 ===== */
+.agg-merged { border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.agg-merged-summary {
+  cursor: pointer;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+}
+.agg-merged-summary::-webkit-details-marker { display: none; }
+.agg-merged-summary::before { content: '▾ '; color: #94a3b8; }
+.agg-merged:not([open]) .agg-merged-summary::before { content: '▸ '; }
+.agg-merged[open] .agg-merged-summary { border-bottom: 1px dashed var(--border); }
+.agg-merged-body { padding: 8px 12px; }
+.agg-merged-tree {
+  max-height: 520px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: #f8fafc;
+}
+.agg-proto-tag { font-size: 11px; font-weight: 600; border-radius: 10px; padding: 1px 8px; }
+.agg-proto-tag.anthropic { background: #dbeafe; color: #1e40af; }
+.agg-proto-tag.openai { background: #dcfce7; color: #166534; }
+/* SSE 事件列表渲染上限的「加载更多」按钮 */
+.sse-load-more { align-self: center; margin-top: 2px; }
 .muted { color: var(--muted); }
 
 /* ===== Wiki 知识库弹窗（阶段AG：树形目录 + 分块加载） ===== */
