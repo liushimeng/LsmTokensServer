@@ -298,6 +298,62 @@ eq(msgDeltaAgg.eventTypes.message_stop, 1, 'message_stop 计数')
 eq(msgDeltaAgg.usage.input_tokens_final, 10, 'message_start 末帧 input_tokens 覆盖')
 eq(msgDeltaAgg.usage.output_tokens_final, 5, 'message_delta 末帧 output_tokens 覆盖')
 
+// ===== 阶段BF：聚合解析 Text (0) (无) 盲区覆盖 =====
+
+// 1) Anthropic 纯 message_* 流（usage 全 0，无 content_block_delta / tool_use）
+//    修复前：hasEventsButNoText 不命中（要求 totalTokens>0 || toolCalls.length>0），
+//    UI 落入"Text (0) (无)"盲区；修复后应识别为"有事件无文本"。
+const onlyMessageEvents = [
+  'event: message_start',
+  'data: {"type":"message_start","message":{"usage":{"input_tokens":0,"output_tokens":0}}}',
+  '',
+  'event: message_delta',
+  'data: {"type":"message_delta","usage":{"input_tokens":0,"output_tokens":0}}',
+  '',
+  'event: message_stop',
+  'data: {"type":"message_stop"}',
+  '',
+].join('\n')
+const aggE1 = aggregateSSE(onlyMessageEvents)
+eq(aggE1.textParts, [], '纯 message_* 流 → textParts=[]')
+eq(aggE1.eventTypes.message_stop, 1, 'message_stop 计数')
+// AggregateView 期望的 hasEventsButNoText 判定（去掉了 usage/toolCalls 限制）
+const isE1Blind = aggE1.textParts.length === 0 && Object.keys(aggE1.eventTypes).length > 0
+eq(isE1Blind, true, '纯 message_* 流被识别为"有事件无文本"（修复前为盲区）')
+
+// 2) OpenAI 纯 role / finish_reason 元数据流（无 content / tool_calls / reasoning_content）
+const openaiMetaOnly = [
+  'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}',
+  '',
+  'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+  '',
+].join('\n')
+const aggE2 = aggregateSSE(openaiMetaOnly)
+eq(aggE2.textParts, [], 'OpenAI 纯元数据流 → textParts=[]')
+const isE2Blind = aggE2.textParts.length === 0 && Object.keys(aggE2.eventTypes).length > 0
+eq(isE2Blind, true, 'OpenAI 纯元数据流被识别为"有事件无文本"（修复前为盲区）')
+
+// 3) 自定义未知事件类型（聚合逻辑完全不识别）
+const unknownStream = [
+  'event: custom_event',
+  'data: {"foo":"bar","baz":42}',
+  '',
+  'event: another_custom',
+  'data: {"hello":"world"}',
+  '',
+].join('\n')
+const aggE3 = aggregateSSE(unknownStream)
+eq(aggE3.textParts, [], '自定义事件流 → textParts=[]')
+eq(aggE3.eventTypes.custom_event, 1, '自定义事件计数保留')
+eq(aggE3.eventTypes.another_custom, 1, '第二个自定义事件计数保留')
+const isE3Blind = aggE3.textParts.length === 0 && Object.keys(aggE3.eventTypes).length > 0
+eq(isE3Blind, true, '自定义事件流被识别为"有事件无文本"（修复前为盲区）')
+
+// 4) 回归：纯工具流（已有功能）仍命中 hasEventsButNoText 且命中 toolCalls 分支
+const isE4Blind = openaiToolAgg.textParts.length === 0 && Object.keys(openaiToolAgg.eventTypes).length > 0
+eq(isE4Blind, true, 'OpenAI 纯工具流仍被识别为"有事件无文本"')
+eq(openaiToolAgg.toolCalls.length > 0, true, 'OpenAI 纯工具流 toolCalls 非空（提示文案走 withTools 分支）')
+
 // 总结
 // eslint-disable-next-line no-console
 console.log(`\n总计：${pass} 通过 / ${fail} 失败`)

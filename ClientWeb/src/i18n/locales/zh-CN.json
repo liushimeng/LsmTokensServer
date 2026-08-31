@@ -195,6 +195,7 @@
   "chatAnalysis.aggNoSummary": "该响应未包含可解析的 usage/text/tool_calls 摘要",
   "chatAnalysis.aggNoTextHint": "已捕获到 SSE 事件但未提取到文本内容（可能是工具调用流、错误响应或异常终止流，详见下方 Events / Tools 统计）",
   "chatAnalysis.aggNoTextWithTools": "该响应仅包含 {{toolCount}} 次工具调用，未输出文本内容（可展开下方 Tools 查看工具名）",
+  "chatAnalysis.aggEventsButEmpty": "已捕获到 {{eventCount}} 条 SSE 事件，但未提取到文本内容（可能是仅含终止事件 message_stop 的流、纯错误响应或非文本协议，详见下方 Events 统计）",
   "chatAnalysis.sseCompleteResponse": "完整响应 (非流式)",
   "chatAnalysis.sseCompleteResponseHint": "当前响应为非流式完整响应（非 SSE 流），已自动封装为单条 complete 事件展示",
   "chatAnalysis.aggregateView": "聚合视图",

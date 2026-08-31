@@ -22,6 +22,12 @@
 //      标准排版 / 折叠 / 语法高亮 / 超长字符串保护 / 查找高亮 / 渲染预算；
 //   3) 普通片段保持 <pre> + SearchText 渲染；片段之间细线分隔；
 //   4) buildViewText / aggregateToText 契约不变（复制文本仍为完整拼接）。
+// 阶段BF：聚合解析 Text (0) (无) 盲区修复 ——
+//   1) 扩展 hasEventsButNoText 判定：去掉 "totalTokens > 0 || toolCalls.length > 0"
+//      限制，覆盖纯 message_start/stop 流、OpenAI 纯元数据流、自定义未知事件流
+//      等 eventTypes 非空但 textParts 为空的边缘场景；
+//   2) Text 块改为条件渲染：fragments 为空时整体隐藏（去除"Text (0) (无)"噪音）；
+//   3) 新增 i18n 键 chatAnalysis.aggEventsButEmpty，文案带事件计数更直观。
 
 import { useI18n } from '../i18n'
 import SearchText from './SearchText'
@@ -80,14 +86,17 @@ export default function AggregateView({ result, query }) {
     totalTokens === 0 && toolCalls.length === 0 && textParts.length === 0 &&
     Object.keys(eventTypes).length === 0
 
-  // 阶段AY：有 SSE 事件但无文本内容（如纯工具调用流、错误响应、message_stop 终止）
-  // → 给出明确解释，避免"Text (0) (无)"误导用户以为解析失败
+  // 阶段AY + 阶段BF：有 SSE 事件但无文本内容（如纯工具调用流、错误响应、
+  // 仅 message_start/message_stop 的终止流、自定义未知协议流等）
+  // → 给出明确解释，避免"Text (0) (无)"误导用户以为解析失败。
+  // 阶段BF 扩展：原条件还要求 `totalTokens > 0 || toolCalls.length > 0`，导致
+  // eventTypes 非空但 usage/toolCalls 全为 0 的边缘场景（纯 message_* 流、OpenAI
+  // 纯元数据流、自定义未知事件流）仍落入盲区，统一放宽为"有事件且无文本即提示"。
+  const eventTotalCount = Object.values(eventTypes).reduce((s, n) => s + n, 0)
   const hasEventsButNoText =
-    textParts.length === 0 && Object.keys(eventTypes).length > 0 &&
-    (totalTokens > 0 || toolCalls.length > 0)
+    textParts.length === 0 && Object.keys(eventTypes).length > 0
 
   // 阶段AV：汇总行 meta（tokens / 事件数 / 工具数 / 文本片段数）
-  const eventTotalCount = Object.values(eventTypes).reduce((s, n) => s + n, 0)
   const hasStats = totalTokens > 0 || eventTotalCount > 0 || toolCalls.length > 0
 
   // 阶段AW：片段级 JSON 识别
@@ -108,34 +117,36 @@ export default function AggregateView({ result, query }) {
         </div>
       ) : null}
 
-      {/* 阶段AY：有 SSE 事件但聚合出 0 文本（如纯工具调用流、错误响应、终止流）→
-          给出明确解释，避免"Text (0) (无)"误导；下方仍展示 Text 块与统计信息。 */}
+      {/* 阶段AY + 阶段BF：有 SSE 事件但聚合出 0 文本（如纯工具调用流、错误响应、
+          仅 message_start/message_stop 的终止流、自定义未知协议流等）→
+          给出明确解释，避免"Text (0) (无)"误导；下方 Text 块改为条件渲染（仅当
+          实际存在文本片段时才显示，去掉空 Text 标题与"(无)"字样的视觉噪音）。 */}
       {hasEventsButNoText ? (
         <div className="agg-no-text-hint">
           💡 {toolCalls.length > 0
             ? t('chatAnalysis.aggNoTextWithTools', { toolCount: toolCalls.length })
-            : t('chatAnalysis.aggNoTextHint')}
+            : t('chatAnalysis.aggEventsButEmpty', { eventCount: eventTotalCount })}
         </div>
       ) : null}
 
-      {/* 阶段AV：聚合文本前置为主信息（用户最想看的内容） */}
-      <div className="agg-block agg-text">
-        <div className="agg-block-title">
-          📝 Text ({textParts.length}
-          {jsonFragmentCount > 0 ? ` · ${jsonFragmentCount} JSON` : ''})
-        </div>
-        <div className="agg-block-body">
-          {fragments.length === 0 ? (
-            <span className="muted">({t('common.none')})</span>
-          ) : (
+      {/* 阶段BF：聚合文本条件渲染 —— 仅当有文本片段时显示 Text (N) 块，
+          无文本时整体隐藏（避免"Text (0) (无)"的视觉噪音；hasEventsButNoText
+          提示 + 折叠 Events 详情已覆盖全部信息）。 */}
+      {fragments.length > 0 ? (
+        <div className="agg-block agg-text">
+          <div className="agg-block-title">
+            📝 Text ({textParts.length}
+            {jsonFragmentCount > 0 ? ` · ${jsonFragmentCount} JSON` : ''})
+          </div>
+          <div className="agg-block-body">
             <div className="agg-text-fragments">
               {fragments.map((frag, i) => (
                 <FragmentBlock key={`agg-frag-${i}`} index={i} frag={frag} query={query} />
               ))}
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {/* 阶段AV：汇总信息行 —— 一行紧凑展示 tokens / 事件 / 工具元数据。
           提供快速上下文，避免聚合文本"孤立无背景"。 */}
