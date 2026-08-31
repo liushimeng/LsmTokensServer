@@ -540,23 +540,28 @@ func invalidateDstEndPointCache(id uint64) {
 }
 
 // addUserToCache 将用户添加到缓存
+// 阶段AR（20260831 修复）：拷贝值后入缓存，
+// 防止调用方对原结构体字段（如响应脱敏 item.Password = ""）的修改波及缓存，
+// 导致缓存中后续登录拿到的 user.Password 为空，VerifyPassword 全部失败。
 func AddUserToCache(u *TAgentHttpUserInfo) {
 	agentCache.mu.Lock()
 	defer agentCache.mu.Unlock()
-	agentCache.users[u.ID] = u
-	agentCache.usersByName[u.UserName] = u
+	cached := *u
+	agentCache.users[u.ID] = &cached
+	agentCache.usersByName[u.UserName] = &cached
 }
 
 // addModelToCache 将模型添加到缓存
 func AddModelToCache(m *TAgentHttpUserModelInfo) {
 	agentCache.mu.Lock()
 	defer agentCache.mu.Unlock()
-	agentCache.models[m.ID] = m
+	cached := *m
+	agentCache.models[m.ID] = &cached
 	if m.APIKey != "" {
-		agentCache.modelsByKey[m.APIKey] = m
+		agentCache.modelsByKey[m.APIKey] = &cached
 	}
 	if user, ok := agentCache.users[m.UserID]; ok {
-		agentCache.modelsByUserModel[user.UserName+":"+m.ModelName] = m
+		agentCache.modelsByUserModel[user.UserName+":"+m.ModelName] = &cached
 	}
 }
 

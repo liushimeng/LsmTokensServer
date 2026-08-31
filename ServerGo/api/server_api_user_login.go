@@ -501,8 +501,10 @@ func doModelLogin(req userLoginReq) (*modelsdb.TAgentHttpUserInfo, error) {
 
 // doUserLogin 用户登录验证
 func doUserLogin(req userLoginReq) (*modelsdb.TAgentHttpUserInfo, error) {
-	if req.UserName == "" || req.Password == "" || req.Phone == "" {
-		return nil, fmt.Errorf("用户名、密码和手机号不能为空")
+	// v2.0.56：用户名与密码必填，手机号改选填（管理员可能清空 phone）；
+	// 统一对外仍返回"用户名、密码或手机号错误"，避免枚举探测 phone 字段状态。
+	if req.UserName == "" || req.Password == "" {
+		return nil, fmt.Errorf("用户名和密码不能为空")
 	}
 
 	// 通过用户名获取用户（优先缓存）
@@ -522,7 +524,9 @@ func doUserLogin(req userLoginReq) (*modelsdb.TAgentHttpUserInfo, error) {
 		return nil, fmt.Errorf("用户名、密码或手机号错误")
 	}
 
-	// 校验手机号（错误信息与密码一致，避免枚举探测）
+	// 校验手机号（错误信息与密码一致，避免枚举探测）：
+	//   - 当 DB 中 phone 为空时，req.Phone 也必须为空才允许通过；
+	//   - 否则按严格等值校验。
 	if subtleConstantTimeEq(user.Phone, strings.TrimSpace(req.Phone)) != true {
 		return nil, fmt.Errorf("用户名、密码或手机号错误")
 	}

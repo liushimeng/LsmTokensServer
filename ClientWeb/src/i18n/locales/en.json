@@ -775,6 +775,7 @@
   "login.emptyPassword": "Please enter password",
   "login.emptyPhone": "Please enter phone number",
   "login.emptyUserName": "Please enter username",
+  "login.phoneOptionalHint": "Phone is optional; leave empty to match the value stored in DB",
   "login.invalidCaptcha": "Invalid captcha",
   "login.loginFailed": "Login failed",
   "login.loginSuccess": "Login successful",

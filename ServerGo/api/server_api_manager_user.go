@@ -13,11 +13,11 @@ type userManageReq struct {
 	Action string `json:"action"`
 	ID     uint64 `json:"id"`
 	// User fields
-	UserName         string `json:"user_name"`
-	Password         string `json:"password"`
-	Phone            string `json:"phone"`
-	AnthropicEnabled bool   `json:"anthropic_enabled"`
-	OpenAIEnabled    bool   `json:"openai_enabled"`
+	UserName        string `json:"user_name"`
+	Password        string `json:"password"`
+	Phone           string `json:"phone"`
+	AnthropicEnabled bool  `json:"anthropic_enabled"`
+	OpenAIEnabled    bool  `json:"openai_enabled"`
 	// Model fields
 	UserID    uint64 `json:"user_id"`
 	ModelName string `json:"model_name"`
@@ -115,8 +115,19 @@ func userManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})
 			return
 		}
-		// v2.0.56：列表接口已脱敏，回传的掩码手机号 / 空密码 / 哈希密码 表示"未修改"，保留原值；
-		// 提交新明文密码时 bcrypt 哈希后更新。
+		// v2.0.56：编辑表单"未修改"判断：
+		//   - password 留空或已是 bcrypt 哈希前缀 → 保留 existing.Password
+		//     （防御：列表接口已将 Password 置空，编辑时不带值相当于"不修改"。）
+		//   - phone 留空 → 保留 existing.Phone（兼容旧前端 + 用户 UX：清空等价"不修改"）。
+		//   - phone 非空 → 直接写入 DB。
+		// 阶段AR 关键修复：移除旧版 `strings.Contains(phone, "****")` 启发式判断。
+		// 旧逻辑问题：admin 看到 MaskPhone 输出的 "138****1234" 直接保存，
+		// 后端若不识别"掩码值 vs 真实值"就会误以为未修改——但实际上若 admin
+		// 在该字段内输入新的完整手机号，phone 不含 **** 时能正常写入；
+		// 真正风险在于 admin 重输的字符串碰巧包含 ****（被误判）。
+		// 解决：前端把 phone 输入框留空并把 placeholder 标清"不修改请留空"，
+		// admin 真正改 phone 时一定会清空原值再输入完整新号码，因此 phone 留空 = 未修改
+		// 是稳定语义。
 		existing, exErr := modelsdb.GetUserByID(req.ID)
 		if exErr != nil {
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "用户不存在"})
@@ -132,7 +143,7 @@ func userManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			}
 			password = hashed
 		}
-		if strings.Contains(phone, "****") || phone == "" {
+		if phone == "" {
 			phone = existing.Phone
 		}
 		item := &modelsdb.TAgentHttpUserInfo{

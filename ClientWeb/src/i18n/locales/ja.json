@@ -749,6 +749,7 @@
   "login.emptyPassword": "パスワードを入力してください",
   "login.emptyPhone": "電話番号を入力してください",
   "login.emptyUserName": "ユーザー名を入力してください",
+  "login.phoneOptionalHint": "電話番号は任意項目です。空欄の場合はDBの実値と照合します",
   "login.invalidCaptcha": "キャプチャが無効です",
   "login.loginFailed": "ログイン失敗",
   "login.loginSuccess": "ログイン成功",

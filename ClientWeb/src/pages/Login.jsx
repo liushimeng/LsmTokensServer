@@ -70,7 +70,8 @@ export default function Login() {
     if (loginType === 'model') {
       if (!modelName || !apiKey || !captchaCode) { setError(t('login.emptyModelName')); return }
     } else {
-      if (!userName || !password || !phone || !captchaCode) { setError(t('login.emptyUserName')); return }
+      // 阶段AR：手机号改为选填（管理员可清空用户手机号）。
+      if (!userName || !password || !captchaCode) { setError(t('login.emptyUserName')); return }
     }
 
     setBusy(true)
@@ -171,6 +172,8 @@ export default function Login() {
               <span>{t('login.phone')}</span>
               <input value={phone} onChange={(e) => setPhone(e.target.value)}
                      autoComplete="tel" placeholder={t('login.emptyPhone')} />
+              {/* 阶段AR：手机号可选，未填写时按 DB 中实际手机号（可能为空）校验 */}
+              <span className="field-hint">{t('login.phoneOptionalHint')}</span>
             </label>
           </>
         )}

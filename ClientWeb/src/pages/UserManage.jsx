@@ -155,7 +155,9 @@ export default function UserManage() {
       key: 'actions', title: t('common.action'), render: (_, u) => (
         <span>
           <button className="btn btn-sm" onClick={() => toggleUserStatus(u)}>{u.status === 2 ? t('userManage.enableUser') : t('userManage.disableUser')}</button>{' '}
-          <button className="btn btn-sm btn-primary" onClick={() => setUserForm({ ...u, password: '' })}>{t('common.edit')}</button>{' '}
+          {/* 阶段AR：编辑时把 password 与 phone 都清空，避免把列表脱敏后的 phone 值（如 "138****1234"）
+             当作真实值提交；保留 phone 列表展示便于识别用户。 */}
+          <button className="btn btn-sm btn-primary" onClick={() => setUserForm({ ...u, password: '', phone: '' })}>{t('common.edit')}</button>{' '}
           <button className="btn btn-sm btn-danger" onClick={() => deleteUser(u)}>{t('common.delete')}</button>{' '}
           <button className="btn btn-link" onClick={() => toggleExpand(u.id)}>
             {t('userManage.viewModels')} {expanded === u.id ? '▲' : '▼'}
