@@ -36,6 +36,7 @@ func aiRouteManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		AlgorithmStrategyType        int                           `json:"algorithm_strategy_type"`
 		Days                         int                           `json:"days"`
 		BatchIDs                     []uint64                      `json:"ids"`
+		EndpointIDs                  []uint64                      `json:"endpoint_ids"`
 		BatchItems                   []modelsdb.RouteBatchStatItem `json:"batch_items"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -253,6 +254,54 @@ func aiRouteManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			Success: true,
 			Message: fmt.Sprintf("批量删除成功，共删除 %d 条", deletedCount),
 			Data:    map[string]interface{}{"deleted_count": deletedCount},
+		})
+	case "batch_append_endpoints":
+		// v2.0.x: 批量向多条路由追加源站（逐条处理：已存在则跳过，不存在则追加）
+		if len(req.BatchIDs) == 0 {
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "批量追加需提供至少一条路由 ID"})
+			return
+		}
+		if len(req.EndpointIDs) == 0 {
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "批量追加需提供至少一个源站 ID"})
+			return
+		}
+		result := modelsdb.BatchAddEndpointsToRoutes(req.BatchIDs, req.EndpointIDs, req.AlgorithmStrategyType)
+		if result.FailCount > 0 && result.SuccessCount == 0 {
+			json.NewEncoder(w).Encode(userManageResp{
+				Success: false,
+				Message: fmt.Sprintf("批量追加全部失败（%d 条）", result.FailCount),
+				Data:    result,
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(userManageResp{
+			Success: true,
+			Message: fmt.Sprintf("批量追加完成：成功 %d 条，跳过 %d 条，失败 %d 条", result.SuccessCount, result.SkipCount, result.FailCount),
+			Data:    result,
+		})
+	case "batch_remove_endpoints":
+		// v2.0.x: 批量删除多条路由中的指定源站（逐条处理：不存在则跳过，列表为空则拒绝）
+		if len(req.BatchIDs) == 0 {
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "批量删除需提供至少一条路由 ID"})
+			return
+		}
+		if len(req.EndpointIDs) == 0 {
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "批量删除需提供至少一个源站 ID"})
+			return
+		}
+		result := modelsdb.BatchRemoveEndpointsFromRoutes(req.BatchIDs, req.EndpointIDs, req.AlgorithmStrategyType)
+		if result.FailCount > 0 && result.SuccessCount == 0 {
+			json.NewEncoder(w).Encode(userManageResp{
+				Success: false,
+				Message: fmt.Sprintf("批量删除全部失败（%d 条）", result.FailCount),
+				Data:    result,
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(userManageResp{
+			Success: true,
+			Message: fmt.Sprintf("批量删除完成：成功 %d 条，跳过 %d 条，失败 %d 条", result.SuccessCount, result.SkipCount, result.FailCount),
+			Data:    result,
 		})
 	default:
 		json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "未知操作: " + req.Action})

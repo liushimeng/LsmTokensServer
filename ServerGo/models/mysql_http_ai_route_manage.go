@@ -870,6 +870,300 @@ func BatchDeleteAIRoute(ids []uint64) (int64, []error) {
 	return deletedCount, errs
 }
 
+// BatchEndpointDetail 批量源站操作的单条路由结果明细
+type BatchEndpointDetail struct {
+	RouteID uint64 `json:"route_id"`
+	Status  string `json:"status"` // "success" / "skip" / "fail"
+	Reason  string `json:"reason"` // 跳过 / 失败原因（中文前端展示）
+}
+
+// BatchEndpointResult 批量源站操作的汇总结果
+type BatchEndpointResult struct {
+	SuccessCount int                    `json:"success_count"`
+	SkipCount    int                    `json:"skip_count"`
+	FailCount    int                    `json:"fail_count"`
+	Details      []BatchEndpointDetail  `json:"details"`
+}
+
+// BatchAddEndpointsToRoutes 批量向多条路由追加源站
+// 逐条处理：
+//   - 路由已包含该源站 → 跳过该路由（继续处理其他路由）
+//   - 路由未包含该源站 → 追加到列表末尾
+//   - algorithmStrategyType != 0 时同时更新算法策略
+//
+// 协议一致性：追加时按路由 protocol_type 与源站 protocol_type 自动判定算法类型。
+// 幂等性：重复执行相同追加操作，结果一致。
+func BatchAddEndpointsToRoutes(routeIDs, endpointIDs []uint64, algorithmStrategyType int) BatchEndpointResult {
+	result := BatchEndpointResult{Details: make([]BatchEndpointDetail, 0, len(routeIDs))}
+	if len(routeIDs) == 0 || len(endpointIDs) == 0 {
+		return result
+	}
+	// 预查源站信息，避免循环内重复查询
+	endpointCache := make(map[uint64]*TAgentDstEndPoint, len(endpointIDs))
+	for _, epID := range endpointIDs {
+		if ep, err := GetDstEndPointByID(epID); err == nil && ep != nil {
+			endpointCache[epID] = ep
+		}
+	}
+
+	for _, routeID := range routeIDs {
+		detail := BatchEndpointDetail{RouteID: routeID}
+		// 单条路由加锁更新，避免并发冲突
+		agentAIRouteMutex.Lock()
+		err := batchAddEndpointsToSingleRoute(routeID, endpointIDs, algorithmStrategyType, endpointCache)
+		agentAIRouteMutex.Unlock()
+
+		if err != nil {
+			// 区分"已存在可跳过"与真正的错误
+			errStr := err.Error()
+			if strings.Contains(errStr, "already exists") {
+				detail.Status = "skip"
+				detail.Reason = errStr
+				result.SkipCount++
+			} else {
+				detail.Status = "fail"
+				detail.Reason = errStr
+				result.FailCount++
+			}
+		} else {
+			detail.Status = "success"
+			result.SuccessCount++
+		}
+		result.Details = append(result.Details, detail)
+	}
+	return result
+}
+
+// batchAddEndpointsToSingleRoute 向单条路由追加源站（调用方必须持有 agentAIRouteMutex）
+func batchAddEndpointsToSingleRoute(routeID uint64, endpointIDs []uint64, algorithmStrategyType int, endpointCache map[uint64]*TAgentDstEndPoint) error {
+	if database.DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	var existing TAgentHttpAIRoute
+	if err := database.DB.Table(AgentHttpAIRouteTableName).
+		Where("id = ? AND deleted_at IS NULL", routeID).
+		First(&existing).Error; err != nil {
+		return fmt.Errorf("ai route not found (id=%d): %w", routeID, err)
+	}
+
+	// 解析现有源站列表
+	currentIDs, err := ParseDstEndPointIDList(existing.DstEndPointIDList)
+	if err != nil {
+		return fmt.Errorf("parse dst endpoint id list failed: %w", err)
+	}
+	_, currentAlgos, err := NormalizeDstEndPointAlgorithmTypeList(existing.DstEndPointIDList, existing.DstEndPointAlgorithmTypeList)
+	if err != nil {
+		return fmt.Errorf("normalize algorithm type list failed: %w", err)
+	}
+	_, currentStatuses, err := NormalizeDstEndPointIDStatusList(existing.DstEndPointIDList, existing.DstEndPointIDStatusList)
+	if err != nil {
+		return fmt.Errorf("normalize status list failed: %w", err)
+	}
+
+	// 判重：全部已存在则跳过
+	existingSet := make(map[uint64]bool, len(currentIDs))
+	for _, id := range currentIDs {
+		existingSet[id] = true
+	}
+	newEndpointIDs := make([]uint64, 0, len(endpointIDs))
+	for _, epID := range endpointIDs {
+		if existingSet[epID] {
+			continue
+		}
+		// 源站不存在于缓存（查不到）也拒绝
+		if _, ok := endpointCache[epID]; !ok {
+			return fmt.Errorf("endpoint %d not found", epID)
+		}
+		newEndpointIDs = append(newEndpointIDs, epID)
+	}
+	if len(newEndpointIDs) == 0 {
+		return fmt.Errorf("all endpoints already exists")
+	}
+
+	// 新列表 = 旧列表 + 新追加（去重后）
+	mergedIDs := append(currentIDs, newEndpointIDs...)
+	mergedAlgos := currentAlgos
+	mergedStatuses := currentStatuses
+	for _, epID := range newEndpointIDs {
+		ep := endpointCache[epID]
+		// 协议一致性判定：源站协议 == 路由协议 → 直连；否则 → 转换器
+		if ep != nil && parseProtocolType(ep.ProtocolType) == parseProtocolType(existing.ProtocolType) {
+			mergedAlgos = append(mergedAlgos, DstEndPointAlgorithmType_Direct)
+		} else {
+			mergedAlgos = append(mergedAlgos, DstEndPointAlgorithmType_ProtocolConverter)
+		}
+		mergedStatuses = append(mergedStatuses, 1) // 新源站默认启用
+	}
+
+	// 构造更新项（复用 UpdateAIRoute 语义，但批量场景直接走 DB 更新避免重复加锁）
+	updated := existing
+	updated.DstEndPointIDList = formatUint64List(mergedIDs)
+	updated.DstEndPointAlgorithmTypeList = FormatDstEndPointAlgorithmTypeList(mergedAlgos)
+	updated.DstEndPointIDStatusList = FormatDstEndPointIDStatusList(mergedStatuses)
+	updated.DstEndPointIDNumber = len(mergedIDs)
+	if algorithmStrategyType != 0 {
+		updated.AlgorithmStrategyType = algorithmStrategyType
+	}
+	autoFillRouteNewFields(&updated)
+
+	if err := ValidateAIRouteInput(updated.UserID, updated.UserModelID, updated.DstEndPointIDList, updated.DstEndPointAlgorithmTypeList, updated.ProtocolType); err != nil {
+		return err
+	}
+	if err := validateAIRouteEndpointAlgorithms(&updated); err != nil {
+		return err
+	}
+
+	if err := database.DB.Table(AgentHttpAIRouteTableName).
+		Where("id = ? AND deleted_at IS NULL", routeID).
+		Updates(map[string]interface{}{
+			"dst_endpoint_id_list":             updated.DstEndPointIDList,
+			"dst_endpoint_id_status_list":      updated.DstEndPointIDStatusList,
+			"dst_endpoint_algorithm_type_list": updated.DstEndPointAlgorithmTypeList,
+			"dst_endpoint_id_number":           updated.DstEndPointIDNumber,
+			"algorithm_strategy_type":          updated.AlgorithmStrategyType,
+		}).Error; err != nil {
+		return fmt.Errorf("failed to update ai route: %w", err)
+	}
+
+	updateRouteInCache(&updated)
+	logger.Printf("[ROUTE] Batch append endpoints: routeID=%d, added=%v, ids:[%s]->[%s]", routeID, newEndpointIDs, existing.DstEndPointIDList, updated.DstEndPointIDList)
+	return nil
+}
+
+// BatchRemoveEndpointsFromRoutes 批量删除多条路由中的指定源站
+// 逐条处理：
+//   - 路由不包含该源站 → 跳过该路由
+//   - 路由包含该源站 → 从列表中删除
+//   - 删除后列表为空 → 该条拒绝（至少保留 1 个源站）
+//   - algorithmStrategyType != 0 时同时更新算法策略
+func BatchRemoveEndpointsFromRoutes(routeIDs, endpointIDs []uint64, algorithmStrategyType int) BatchEndpointResult {
+	result := BatchEndpointResult{Details: make([]BatchEndpointDetail, 0, len(routeIDs))}
+	if len(routeIDs) == 0 || len(endpointIDs) == 0 {
+		return result
+	}
+
+	// 待删除集合，O(1) 查找
+	removeSet := make(map[uint64]bool, len(endpointIDs))
+	for _, epID := range endpointIDs {
+		removeSet[epID] = true
+	}
+
+	for _, routeID := range routeIDs {
+		detail := BatchEndpointDetail{RouteID: routeID}
+		agentAIRouteMutex.Lock()
+		err := batchRemoveEndpointsFromSingleRoute(routeID, removeSet, algorithmStrategyType)
+		agentAIRouteMutex.Unlock()
+
+		if err != nil {
+			errStr := err.Error()
+			if strings.Contains(errStr, "not found in route") || strings.Contains(errStr, "not found") {
+				detail.Status = "skip"
+				detail.Reason = errStr
+				result.SkipCount++
+			} else {
+				detail.Status = "fail"
+				detail.Reason = errStr
+				result.FailCount++
+			}
+		} else {
+			detail.Status = "success"
+			result.SuccessCount++
+		}
+		result.Details = append(result.Details, detail)
+	}
+	return result
+}
+
+// batchRemoveEndpointsFromSingleRoute 从单条路由删除指定源站（调用方必须持有 agentAIRouteMutex）
+func batchRemoveEndpointsFromSingleRoute(routeID uint64, removeSet map[uint64]bool, algorithmStrategyType int) error {
+	if database.DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
+	var existing TAgentHttpAIRoute
+	if err := database.DB.Table(AgentHttpAIRouteTableName).
+		Where("id = ? AND deleted_at IS NULL", routeID).
+		First(&existing).Error; err != nil {
+		return fmt.Errorf("ai route not found (id=%d): %w", routeID, err)
+	}
+
+	ids, err := ParseDstEndPointIDList(existing.DstEndPointIDList)
+	if err != nil {
+		return fmt.Errorf("parse dst endpoint id list failed: %w", err)
+	}
+	_, algoTypes, err := NormalizeDstEndPointAlgorithmTypeList(existing.DstEndPointIDList, existing.DstEndPointAlgorithmTypeList)
+	if err != nil {
+		return fmt.Errorf("normalize algorithm type list failed: %w", err)
+	}
+	_, statuses, err := NormalizeDstEndPointIDStatusList(existing.DstEndPointIDList, existing.DstEndPointIDStatusList)
+	if err != nil {
+		return fmt.Errorf("normalize status list failed: %w", err)
+	}
+
+	// 判空：没有任何一个待删除源站存在于当前路由
+	foundAny := false
+	for _, id := range ids {
+		if removeSet[id] {
+			foundAny = true
+			break
+		}
+	}
+	if !foundAny {
+		return fmt.Errorf("endpoint not found in route")
+	}
+
+	// 过滤掉要删除的源站
+	newIDs := make([]uint64, 0, len(ids))
+	newAlgos := make([]int, 0, len(algoTypes))
+	newStatuses := make([]int, 0, len(statuses))
+	for i, id := range ids {
+		if removeSet[id] {
+			continue
+		}
+		newIDs = append(newIDs, id)
+		if i < len(algoTypes) {
+			newAlgos = append(newAlgos, algoTypes[i])
+		}
+		if i < len(statuses) {
+			newStatuses = append(newStatuses, statuses[i])
+		}
+	}
+
+	// 不允许清空所有源站
+	if len(newIDs) == 0 {
+		return fmt.Errorf("cannot remove last endpoint: route must have at least 1 endpoint")
+	}
+
+	updated := existing
+	updated.DstEndPointIDList = formatUint64List(newIDs)
+	updated.DstEndPointAlgorithmTypeList = FormatDstEndPointAlgorithmTypeList(newAlgos)
+	updated.DstEndPointIDStatusList = FormatDstEndPointIDStatusList(newStatuses)
+	updated.DstEndPointIDNumber = len(newIDs)
+	if algorithmStrategyType != 0 {
+		updated.AlgorithmStrategyType = algorithmStrategyType
+	}
+	autoFillRouteNewFields(&updated)
+
+	if err := ValidateAIRouteInput(updated.UserID, updated.UserModelID, updated.DstEndPointIDList, updated.DstEndPointAlgorithmTypeList, updated.ProtocolType); err != nil {
+		return err
+	}
+
+	if err := database.DB.Table(AgentHttpAIRouteTableName).
+		Where("id = ? AND deleted_at IS NULL", routeID).
+		Updates(map[string]interface{}{
+			"dst_endpoint_id_list":             updated.DstEndPointIDList,
+			"dst_endpoint_id_status_list":      updated.DstEndPointIDStatusList,
+			"dst_endpoint_algorithm_type_list": updated.DstEndPointAlgorithmTypeList,
+			"dst_endpoint_id_number":           updated.DstEndPointIDNumber,
+			"algorithm_strategy_type":          updated.AlgorithmStrategyType,
+		}).Error; err != nil {
+		return fmt.Errorf("failed to update ai route: %w", err)
+	}
+
+	updateRouteInCache(&updated)
+	logger.Printf("[ROUTE] Batch remove endpoints: routeID=%d, ids:[%s]->[%s]", routeID, existing.DstEndPointIDList, updated.DstEndPointIDList)
+	return nil
+}
+
 // GetAIRouteByID 根据路由 ID 获取智能路由
 func GetAIRouteByID(id uint64) (*TAgentHttpAIRoute, error) {
 	if database.DB == nil {

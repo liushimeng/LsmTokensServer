@@ -54,6 +54,15 @@ export default function AIRouteManage() {
   const { levels, loading: levelsLoading } = useTimeSpanLevels()
   const [days, setDays] = useState(null) // 档位加载后初始化（默认就近 3 天档；span 编码负值=小时）
   const [stats, setStats] = useState({}) // route_id -> {anthropic_count, openai_count}
+  const [batchEditOpen, setBatchEditOpen] = useState(false) // 批量编辑路由弹窗（追加/删除源站）
+  // v2.0.x：批量编辑弹窗仅管理端使用。动态 import 经 __APP_ROLE__ === 'manager' 常量门控，
+  // 静态替换后用户端 dist-user 中应无 BatchEditModal 代码（构建后 grep 复验）。
+  const [BatchEditModalComp, setBatchEditModalComp] = useState(null)
+  useEffect(() => {
+    if (__APP_ROLE__ === 'manager' && !BatchEditModalComp) {
+      import('../components/BatchEditModal').then((m) => setBatchEditModalComp(() => m.default))
+    }
+  }, [BatchEditModalComp])
 
   // 算法名称/描述（需 t() 内联，因为含变量）
   const ALGO_NAMES = { 1: t('aiRouteManage.algoDesignated'), 2: t('aiRouteManage.algoStable'), 3: t('aiRouteManage.algoEconomic') }
@@ -307,24 +316,10 @@ export default function AIRouteManage() {
     } catch (e) { alert(e.message) }
   }
 
-  const batchUpdateAlgo = async () => {
+  const batchUpdateAlgo = () => {
     const ids = [...selected]
     if (!ids.length) { alert(t('aiRouteManage.pleaseSelectRouteToEdit')); return }
-    const type = prompt(
-      t('aiRouteManage.batchSetAlgoPrompt', {
-        designated: t('aiRouteManage.algoDesignated'),
-        stable: t('aiRouteManage.algoStable'),
-        economic: t('aiRouteManage.algoEconomic'),
-      }),
-      '2'
-    )
-    const algo = parseInt(type, 10)
-    if (![1, 2, 3].includes(algo)) return
-    try {
-      await post('AIRouteManageInterface', { action: 'batch_update', ids, algorithm_strategy_type: algo })
-      setSelected(new Set())
-      loadRoutes()
-    } catch (e) { alert(e.message) }
+    setBatchEditOpen(true)
   }
 
   const toggleSelect = (id) => {
@@ -437,8 +432,8 @@ export default function AIRouteManage() {
         {selected.size > 0 ? (
           <>
             <span>{t('aiRouteManage.selected', { count: selected.size })}</span>
-            <button className="btn btn-sm" onClick={batchUpdateAlgo}>{t('aiRouteManage.batchEditAlgo')}</button>
-            <button className="btn btn-sm btn-danger" onClick={batchDelete}>{t('aiRouteManage.batchDelete')}</button>
+            {isAdmin ? <button className="btn btn-sm" onClick={batchUpdateAlgo}>{t('aiRouteManage.batchEditAlgo')}</button> : null}
+            {isAdmin ? <button className="btn btn-sm btn-danger" onClick={batchDelete}>{t('aiRouteManage.batchDelete')}</button> : null}
             <button className="btn btn-sm" onClick={() => setSelected(new Set())}>{t('aiRouteManage.cancelSelection')}</button>
           </>
         ) : null}
@@ -563,6 +558,19 @@ export default function AIRouteManage() {
             </div>
           </label>
         </Modal>
+      ) : null}
+
+      {/* 批量编辑路由弹窗（追加/删除源站）—— 仅管理端 */}
+      {batchEditOpen && BatchEditModalComp ? (
+        <BatchEditModalComp
+          open={batchEditOpen}
+          onClose={() => setBatchEditOpen(false)}
+          routes={routes.filter((r) => selected.has(r.id))}
+          onSuccess={() => {
+            setSelected(new Set())
+            loadRoutes()
+          }}
+        />
       ) : null}
     </div>
   )

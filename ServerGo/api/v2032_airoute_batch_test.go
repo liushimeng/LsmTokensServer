@@ -316,6 +316,151 @@ func TestAIRouteBatchStatsHandler_MethodNotPost(t *testing.T) {
 	}
 }
 
+// ==================== v2.0.x 批量追加/删除源站 (batch_append_endpoints / batch_remove_endpoints) 测试 ====================
+
+// TestAIRouteBatchAppendEndpointsHandler_EmptyIds 空 ids 应返回失败
+func TestAIRouteBatchAppendEndpointsHandler_EmptyIds(t *testing.T) {
+	body := `{"action":"batch_append_endpoints","ids":[],"endpoint_ids":[10]}`
+	req := httptest.NewRequest(http.MethodPost, "/AIRouteManageInterface", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	aiRouteManageInterfaceHandle(w, req)
+
+	var resp userManageResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if resp.Success {
+		t.Error("空 ids 应返回失败")
+	}
+}
+
+// TestAIRouteBatchAppendEndpointsHandler_EmptyEndpointIds 空 endpoint_ids 应返回失败
+func TestAIRouteBatchAppendEndpointsHandler_EmptyEndpointIds(t *testing.T) {
+	body := `{"action":"batch_append_endpoints","ids":[1],"endpoint_ids":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/AIRouteManageInterface", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	aiRouteManageInterfaceHandle(w, req)
+
+	var resp userManageResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if resp.Success {
+		t.Error("空 endpoint_ids 应返回失败")
+	}
+}
+
+// TestAIRouteBatchRemoveEndpointsHandler_EmptyIds 空 ids 应返回失败
+func TestAIRouteBatchRemoveEndpointsHandler_EmptyIds(t *testing.T) {
+	body := `{"action":"batch_remove_endpoints","ids":[],"endpoint_ids":[10]}`
+	req := httptest.NewRequest(http.MethodPost, "/AIRouteManageInterface", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	aiRouteManageInterfaceHandle(w, req)
+
+	var resp userManageResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if resp.Success {
+		t.Error("空 ids 应返回失败")
+	}
+}
+
+// TestAIRouteBatchRemoveEndpointsHandler_EmptyEndpointIds 空 endpoint_ids 应返回失败
+func TestAIRouteBatchRemoveEndpointsHandler_EmptyEndpointIds(t *testing.T) {
+	body := `{"action":"batch_remove_endpoints","ids":[1],"endpoint_ids":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/AIRouteManageInterface", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	aiRouteManageInterfaceHandle(w, req)
+
+	var resp userManageResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if resp.Success {
+		t.Error("空 endpoint_ids 应返回失败")
+	}
+}
+
+// TestAIRouteBatchAppendEndpointsHandler_MethodNotPost 验证仅 POST
+func TestAIRouteBatchAppendEndpointsHandler_MethodNotPost(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/AIRouteManageInterface", nil)
+	w := httptest.NewRecorder()
+	aiRouteManageInterfaceHandle(w, req)
+
+	var resp userManageResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if resp.Success {
+		t.Error("非 POST 请求应返回失败")
+	}
+}
+
+// TestAIRouteBatchRemoveEndpointsHandler_MethodNotPost 验证仅 POST
+func TestAIRouteBatchRemoveEndpointsHandler_MethodNotPost(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/AIRouteManageInterface", nil)
+	w := httptest.NewRecorder()
+	aiRouteManageInterfaceHandle(w, req)
+
+	var resp userManageResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if resp.Success {
+		t.Error("非 POST 请求应返回失败")
+	}
+}
+
+// TestBatchEndpointResult_StructShape 验证结构体字段完整（与 JSON 契约对齐）
+func TestBatchEndpointResult_StructShape(t *testing.T) {
+	r := modelsdb.BatchEndpointResult{
+		SuccessCount: 2,
+		SkipCount:    1,
+		FailCount:    0,
+		Details: []modelsdb.BatchEndpointDetail{
+			{RouteID: 1, Status: "success", Reason: ""},
+			{RouteID: 2, Status: "skip", Reason: "already exists"},
+		},
+	}
+	if r.SuccessCount != 2 || r.SkipCount != 1 || r.FailCount != 0 {
+		t.Errorf("计数字段赋值异常: %+v", r)
+	}
+	if len(r.Details) != 2 {
+		t.Errorf("明细长度异常: %d", len(r.Details))
+	}
+	if r.Details[0].Status != "success" || r.Details[1].Status != "skip" {
+		t.Errorf("明细状态字段异常: %+v", r.Details)
+	}
+}
+
+// TestBatchAddEndpointsToRoutes_EmptyInput 验证空入参不出错
+func TestBatchAddEndpointsToRoutes_EmptyInput(t *testing.T) {
+	if database.DB != nil {
+		t.Skip("集成测试需要 DB，跳过")
+	}
+	// DB == nil 时返回空结果
+	result := modelsdb.BatchAddEndpointsToRoutes([]uint64{}, []uint64{10}, 0)
+	if result.SuccessCount != 0 || result.SkipCount != 0 || result.FailCount != 0 {
+		t.Errorf("空入参应返回零值结果，得到 %+v", result)
+	}
+}
+
+// TestBatchRemoveEndpointsFromRoutes_EmptyInput 验证空入参不出错
+func TestBatchRemoveEndpointsFromRoutes_EmptyInput(t *testing.T) {
+	if database.DB != nil {
+		t.Skip("集成测试需要 DB，跳过")
+	}
+	result := modelsdb.BatchRemoveEndpointsFromRoutes([]uint64{}, []uint64{10}, 0)
+	if result.SuccessCount != 0 || result.SkipCount != 0 || result.FailCount != 0 {
+		t.Errorf("空入参应返回零值结果，得到 %+v", result)
+	}
+}
+
 // TestRouteBatchStatResult_StructShape 验证结构体字段完整（与 JSON 契约对齐）
 func TestRouteBatchStatResult_StructShape(t *testing.T) {
 	r := modelsdb.RouteBatchStatResult{
