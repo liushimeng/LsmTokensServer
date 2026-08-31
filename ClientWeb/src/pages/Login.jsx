@@ -36,30 +36,60 @@ export default function Login() {
     } catch { /* 忽略 */ }
   }
 
+  // 阶段AS：v4 双份记忆——同时恢复两种登录方式的已保存名称，
+  // 切换 Tab 时保存当前 Tab 的凭据后恢复另一 Tab 的已存名称。
+  // 每个 Tab 的"记住我"状态独立维护。
+  const savedCredsRef = useRef({ modelData: null, userData: null })
+
   useEffect(() => {
     aliveRef.current = true
     refreshCaptcha()
-    // v3：加载保存的登录凭据（loginType + 名称）
+    // v4：加载保存的登录凭据，同时恢复两种登录方式各自记忆的名称
     const creds = loadCredentials()
-    if (creds && creds.modelName) {
-      setLoginType(creds.loginType || 'model')
-      if (creds.loginType === 'user') {
-        setUserName(creds.modelName)
-      } else {
-        setModelName(creds.modelName)
+    if (creds) {
+      savedCredsRef.current = { modelData: creds.modelData, userData: creds.userData }
+      const activeType = creds.loginType || 'model'
+      setLoginType(activeType)
+      // 恢复模型名 Tab 的已保存值
+      if (creds.modelData && creds.modelData.mn) {
+        setModelName(creds.modelData.mn)
       }
-      setRemember(true)
+      // 恢复用户名 Tab 的已保存值
+      if (creds.userData && creds.userData.mn) {
+        setUserName(creds.userData.mn)
+      }
+      // 记住我状态跟随当前 active Tab
+      if (activeType === 'user') {
+        setRemember(!!(creds.userData && creds.userData.mn))
+      } else {
+        setRemember(!!(creds.modelData && creds.modelData.mn))
+      }
     }
     return () => { aliveRef.current = false }
   }, [])
 
-  // 切换 Tab 时刷新验证码
+  // 切换 Tab：保存当前 Tab 凭据后刷新验证码，并恢复目标 Tab 的已存名称与记住状态
   const switchTab = (type) => {
     if (type === loginType) return
+    // 保存当前 Tab 的凭据（勾选了"记住我"时）
+    if (remember) {
+      const savedName = loginType === 'model' ? modelName : userName
+      if (savedName) saveCredentials(loginType, savedName)
+    }
     setLoginType(type)
     setError('')
     setCaptchaCode('')
     refreshCaptcha()
+    // 恢复目标 Tab 的已保存值和"记住我"状态
+    if (type === 'user') {
+      const ud = savedCredsRef.current.userData
+      if (ud && ud.mn && !userName) setUserName(ud.mn)
+      setRemember(!!(ud && ud.mn))
+    } else {
+      const md = savedCredsRef.current.modelData
+      if (md && md.mn && !modelName) setModelName(md.mn)
+      setRemember(!!(md && md.mn))
+    }
   }
 
   const submit = async (e) => {

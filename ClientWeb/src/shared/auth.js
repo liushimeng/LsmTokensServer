@@ -1,4 +1,6 @@
 // 登录态与本地偏好存储
+// 阶段AS（20260831）：双登录方式独立记忆——模型名登录与用户名登录各自保存，
+// 切换 Tab 不覆盖另一方的已保存凭据。
 // v3（20260831）：支持双登录方式，存储 loginType（model/user）和名称（模型名或用户名）
 // v2 安全加固（20260825）：不再持久化 API Key（旧版 XOR+Base64 伪加密可被离线还原）
 import { baseUrl } from './api'
@@ -10,22 +12,84 @@ const STORAGE_KEY = 'lsm_agent_creds'
 // @param {string} name - 模型名或用户名
 export function saveCredentials(loginType, name) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: 3, loginType, mn: name, ts: Date.now() }))
+    const stored = localStorage.getItem(STORAGE_KEY)
+    let data = stored ? JSON.parse(stored) : null
+    // 阶段AS：同时保留两个 Tab 的凭据，各存各的，互不覆盖。
+    if (!data || !data.v4) {
+      // 迁移旧数据或初始化：旧 v3 格式只存一份 → 迁移到 v4 双份
+      const legacy = data && data.v === 3 ? data : null
+      data = {
+        v: 4,
+        model: legacy && legacy.loginType !== 'user' ? { mn: legacy.mn || '', ts: legacy.ts || Date.now() } : null,
+        user:  legacy && legacy.loginType === 'user' ? { mn: legacy.mn || '', ts: legacy.ts || Date.now() } : null,
+        active: loginType, // 最近一次使用的登录类型
+      }
+    }
+    if (!data.v4) data.v4 = true
+    // 去掉旧 v3 字段，避免歧义
+    delete data.v3
+    // v4 对应版本号，保持不变
+    data.v = 4
+
+    if (loginType === 'model') {
+      data.model = { mn: name || '', ts: Date.now() }
+      data.active = 'model'
+    } else {
+      data.user = { mn: name || '', ts: Date.now() }
+      data.active = 'user'
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
   } catch { /* 忽略 */ }
 }
 
 // loadCredentials 从 localStorage 加载登录凭据
-// @returns {null | { loginType: string, modelName: string }}
+// @returns {null | { loginType: string, modelName: string, modelSaved: boolean, userSaved: boolean }}
 export function loadCredentials() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) return null
     const data = JSON.parse(stored)
-    // v3 版本：包含 loginType 和 mn
-    if (data.v === 3) {
-      return { loginType: data.loginType === 'user' ? 'user' : 'model', modelName: data.mn || '' }
+
+    // 阶段AS v4：双份存储，返回最近 active 的 Tab 对应的凭据 + 两侧是否有保存
+    if (data.v === 4 && data.active) {
+      const activeData = data.active === 'user' ? data.user : data.model
+      const mn = activeData && activeData.mn ? activeData.mn : ''
+      return {
+        loginType: data.active === 'user' ? 'user' : 'model',
+        modelName: mn,
+        modelSaved: !!(data.model && data.model.mn),
+        userSaved:  !!(data.user  && data.user.mn),
+        modelData: data.model || null,
+        userData:  data.user  || null,
+      }
     }
-    // 旧版记录（v:1 含加密 ak / v:2 无 loginType）→ 直接清除
+
+    // 旧版记录（v:1 含加密 ak / v:2 无 loginType / v:3 单份）→ 尝试迁移
+    if (data.v === 3) {
+      const loginType = data.loginType === 'user' ? 'user' : 'model'
+      const mn = data.mn || ''
+      // 直接迁移为 v4 格式
+      try {
+        const migrated = {
+          v: 4,
+          model: loginType === 'model' && mn ? { mn, ts: data.ts || Date.now() } : null,
+          user:  loginType === 'user'  && mn ? { mn, ts: data.ts || Date.now() } : null,
+          active: loginType,
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated))
+      } catch { /* 忽略 */ }
+      if (!mn) { localStorage.removeItem(STORAGE_KEY); return null }
+      return {
+        loginType,
+        modelName: mn,
+        modelSaved: loginType === 'model' && !!mn,
+        userSaved:  loginType === 'user'  && !!mn,
+        modelData: loginType === 'model' ? { mn, ts: data.ts || Date.now() } : null,
+        userData:  loginType === 'user'  ? { mn, ts: data.ts || Date.now() } : null,
+      }
+    }
+
+    // v1/v2：无有效凭据，清除
     localStorage.removeItem(STORAGE_KEY)
     return null
   } catch { return null }
