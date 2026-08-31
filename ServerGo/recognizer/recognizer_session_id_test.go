@@ -435,3 +435,93 @@ func TestParseSessionIDFromPromptCacheKey(t *testing.T) {
 		})
 	}
 }
+
+// ============= v2.0.76 阶段BD：RecognizeSessionIDWithSource 与 Agent 专用头测试 =============
+
+// TestRecognizeSessionIDWithSource_Matched 验证识别命中时两字段同值
+func TestRecognizeSessionIDWithSource_Matched(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("X-Claude-Code-Session-Id", "144ca9ed-c216-40f2-87a7-cd9df1dc7f3c")
+	res := RecognizeSessionIDWithSource([]byte(`{"model":"claude-3"}`), protocol.AgentProtocolType_Anthropic, headers)
+	if res.AgentToolSessionID != "144ca9ed-c216-40f2-87a7-cd9df1dc7f3c" {
+		t.Errorf("AgentToolSessionID = %q, want claude session", res.AgentToolSessionID)
+	}
+	if res.EffectiveSessionID != res.AgentToolSessionID {
+		t.Errorf("EffectiveSessionID = %q, want same as AgentToolSessionID", res.EffectiveSessionID)
+	}
+}
+
+// TestRecognizeSessionIDWithSource_NotMatched 验证未识别时两字段均为空
+func TestRecognizeSessionIDWithSource_NotMatched(t *testing.T) {
+	res := RecognizeSessionIDWithSource([]byte(`{"model":"gpt-4","messages":[]}`), protocol.AgentProtocolType_OpenAI, http.Header{})
+	if res.AgentToolSessionID != "" {
+		t.Errorf("AgentToolSessionID = %q, want empty", res.AgentToolSessionID)
+	}
+	if res.EffectiveSessionID != "" {
+		t.Errorf("EffectiveSessionID = %q, want empty", res.EffectiveSessionID)
+	}
+}
+
+// TestRecognizeSessionIDWithSource_CompatWithLegacy 验证与原 RecognizeSessionID 结果一致
+func TestRecognizeSessionIDWithSource_CompatWithLegacy(t *testing.T) {
+	body := []byte(`{"model":"gpt-4","metadata":{"user_id":"{\"session_id\":\"legacy-sess-1234567890\"}"}}`)
+	headers := http.Header{}
+	legacy := RecognizeSessionID(body, protocol.AgentProtocolType_OpenAI, headers)
+	res := RecognizeSessionIDWithSource(body, protocol.AgentProtocolType_OpenAI, headers)
+	if legacy == "" {
+		t.Fatal("legacy path should recognize session")
+	}
+	if res.EffectiveSessionID != legacy {
+		t.Errorf("WithSource=%q != legacy=%q", res.EffectiveSessionID, legacy)
+	}
+}
+
+// agentToolSessionHeaderCases v2.0.76 阶段BD 新增 Agent 专用头用例
+var agentToolSessionHeaderCases = []struct {
+	name    string
+	header  string
+	value   string
+}{
+	{"aider", "X-Aider-Session-Id", "aider-sess-aaaaaaaa-bbbb-cccc"},
+	{"continue", "X-Continue-Session-Id", "continue-session-1234567890"},
+	{"cursor", "X-Cursor-Session-Id", "cursor-session-0987654321"},
+	{"cline", "X-Cline-Session-Id", "cline-session-abcdefghij"},
+	{"copilot", "X-Github-Copilot-Session-Id", "copilot-session-1234-5678"},
+	{"kilo-code", "X-Kilo-Code-Session-Id", "kilo-session-aaaabbbbcccc"},
+	{"windsurf", "X-Windsurf-Session-Id", "windsurf-session-ddddeeeeffff"},
+}
+
+// TestRecognizeSessionID_AgentToolHeaders 验证新增 Agent 专用头识别
+func TestRecognizeSessionID_AgentToolHeaders(t *testing.T) {
+	for _, tc := range agentToolSessionHeaderCases {
+		t.Run(tc.name, func(t *testing.T) {
+			headers := http.Header{}
+			headers.Set(tc.header, tc.value)
+			got := RecognizeSessionID([]byte(`{"model":"gpt-4","messages":[]}`), protocol.AgentProtocolType_OpenAI, headers)
+			if got != tc.value {
+				t.Errorf("%s: got %q, want %q", tc.name, got, tc.value)
+			}
+		})
+	}
+}
+
+// TestRecognizeSessionID_AgentToolHeaders_Anthropic 验证 Anthropic 协议下
+// Agent 专用头不生效（这些头只注册在 OpenAI 识别路径；Anthropic 走专用头集合）
+func TestRecognizeSessionID_AgentToolHeaders_Anthropic(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("X-Aider-Session-Id", "aider-sess-aaaaaaaa-bbbb-cccc")
+	got := RecognizeSessionID([]byte(`{"model":"claude-3"}`), protocol.AgentProtocolType_Anthropic, headers)
+	if got != "" {
+		t.Errorf("Anthropic path got %q, want empty (aider header is OpenAI-path only)", got)
+	}
+}
+
+// TestRecognizeSessionID_AgentToolHeaders_ShortValueRejected 验证短值被最小长度校验拒绝
+func TestRecognizeSessionID_AgentToolHeaders_ShortValueRejected(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("X-Cursor-Session-Id", "short") // 5 < sessionIDMinHeaderLen(10)
+	got := RecognizeSessionID([]byte(`{"model":"gpt-4","messages":[]}`), protocol.AgentProtocolType_OpenAI, headers)
+	if got != "" {
+		t.Errorf("got %q, want empty for short value", got)
+	}
+}

@@ -158,6 +158,7 @@
   "aiRouteManage.userMode": "User mode: Only display and allow editing of your own model routes",
   "chatAnalysis.action": "Action",
   "chatAnalysis.agentTool": "Agent Tool",
+  "chatAnalysis.agentSessionId": "Agent Session ID",
   "chatAnalysis.aggParse": "Aggregate Parse",
   "chatAnalysis.aggNoSummary": "The response contains no parseable usage/text/tool_calls summary",
   "chatAnalysis.aggNoTextHint": "SSE events were captured but no text content was extracted (this may be a tool-call stream, error response, or aborted stream — see Events / Tools stats below)",

@@ -69,6 +69,9 @@ const (
 	DEFAULT_OPENCLAW_API_KEY       = "" // 脱敏删除
 	DEFAULT_OPENCLAW_MODEL         = "openclaw"
 	DEFAULT_OPENCLAW_SYSTEM_PROMPT = "你是一个专业的网络爬虫助手。请用中文回答所有问题，并按照用户给出的任务指令执行爬虫操作。"
+	// v2.0.76 阶段BD: Agent 合成 Session ID 空闲超时默认 15 分钟
+	// （与历史硬编码 EconomicSyntheticSessionTTL = 15 * time.Minute 保持一致，不配置则零行为变化）
+	DEFAULT_AGENT_SESSION_IDLE_TIMEOUT_MINUTES = 15
 
 	// v2.0.55: /ChatAnalysisTotalWS WebSocket 协议常量
 	// 心跳与超时：服务端 30s ping，客户端 60s pong 容忍；写操作 10s 截止
@@ -176,6 +179,10 @@ type LsmTokensServerConfig struct {
 	OpenClawUserPromptTemplate string `json:"openClawUserPromptTemplate,omitempty"` // 用户提示词模板（含 XXXXXXXXX 占位符）
 	// v2.0.47: 过期数据保留天数（浏览记录保留 N 天；0 = 禁用自动清理）
 	TransactionRetentionDays int `json:"transactionRetentionDays"` // 默认 45 天，上限 3650 天（≈10 年）；显式 0 必须持久化
+	// v2.0.76 阶段BD: Agent 合成 Session ID 空闲超时（分钟）。
+	// 同一 userName+modelName 维度超过该时长无请求时，合成 Session 自动过期，
+	// 下次请求生成新的 self_generate_* Session（对话级轮换）。默认 15，上限 1440（24 小时）。
+	AgentSessionIdleTimeoutMinutes int `json:"agentSessionIdleTimeoutMinutes"`
 	// v2.0.56: 安全配置（见 SecurityConfig）
 	Security SecurityConfig `json:"security"`
 }
@@ -275,6 +282,8 @@ type rawLsmTokensServerConfig struct {
 	Security                   SecurityConfig `json:"security,omitempty"`
 	// v2.0.47: 过期数据保留天数（向后兼容：旧配置无该字段时为 0，由 validateAndFixConfig 修复为默认 60）
 	TransactionRetentionDays int `json:"transactionRetentionDays,omitempty"`
+	// v2.0.76 阶段BD: Agent 合成 Session 空闲超时（分钟）；旧配置缺失时由 validateAndFixConfig 修复为默认 15
+	AgentSessionIdleTimeoutMinutes int `json:"agentSessionIdleTimeoutMinutes,omitempty"`
 }
 
 // GetDefaultConfig 返回默认配置（导出版，供测试/初始化全局配置使用）
@@ -372,6 +381,8 @@ func getDefaultConfig() *LsmTokensServerConfig {
 		OpenClawUserPromptTemplate: "", // 空字符串表示使用内置默认模板
 		// v2.0.47: 过期数据保留天数默认值 45 天（v2.0.61 从 70 调整为 60；v2.0.62 从 60 调整为 45）
 		TransactionRetentionDays: DEFAULT_TRANSACTION_RETENTION_DAYS,
+		// v2.0.76 阶段BD: Agent 合成 Session 空闲超时默认 15 分钟（与历史硬编码 EconomicSyntheticSessionTTL 一致）
+		AgentSessionIdleTimeoutMinutes: DEFAULT_AGENT_SESSION_IDLE_TIMEOUT_MINUTES,
 	}
 }
 
@@ -740,6 +751,14 @@ func validateAndFixConfig(cfg *LsmTokensServerConfig) bool {
 		fixed = true
 	}
 
+	// v2.0.76 阶段BD: Agent 合成 Session 空闲超时校验（1-1440 分钟合法；≤0 或 >1440 回退默认 15）
+	if cfg.AgentSessionIdleTimeoutMinutes <= 0 || cfg.AgentSessionIdleTimeoutMinutes > 1440 {
+		fmt.Printf("[CONFIG] AgentSessionIdleTimeoutMinutes %d invalid, using default %d\n",
+			cfg.AgentSessionIdleTimeoutMinutes, defaults.AgentSessionIdleTimeoutMinutes)
+		cfg.AgentSessionIdleTimeoutMinutes = defaults.AgentSessionIdleTimeoutMinutes
+		fixed = true
+	}
+
 	return fixed
 }
 
@@ -856,6 +875,12 @@ func LoadConfig(path string) (*LsmTokensServerConfig, error) {
 			cfg.TransactionRetentionDays = defaults.TransactionRetentionDays
 			fmt.Printf("[CONFIG] transactionRetentionDays missing, enabling default %d days\n", defaults.TransactionRetentionDays)
 		}
+		// v2.0.76 阶段BD: Agent 合成 Session 空闲超时从 raw 读取
+		// 语义：raw.AgentSessionIdleTimeoutMinutes > 0 → 用户显式设置（保留原值）；
+		//      其他（0/负值/旧配置缺失）→ 由 validateAndFixConfig 修复为默认 15。
+		if raw.AgentSessionIdleTimeoutMinutes > 0 {
+			cfg.AgentSessionIdleTimeoutMinutes = raw.AgentSessionIdleTimeoutMinutes
+		}
 	} else {
 		fmt.Printf("[CONFIG] Failed to parse JSON config: %v, using defaults\n", err)
 	}
@@ -941,3 +966,12 @@ const (
 // BuildTime 后端编译时间（由 rebuild_restart_app.sh 经 -ldflags 注入 main.buildTime，
 // main 启动时赋值到此处供 api 包读取；未注入时为空字符串）
 var BuildTime string
+
+// ValidateAgentSessionIdleTimeout 校验 Agent 合成 Session 空闲超时并自动修正（导出版，供测试使用）。
+// 返回修正后的值：入参 ≤0 或 >1440 时回退默认 15，否则原样返回。
+func ValidateAgentSessionIdleTimeout(v int) int {
+	if v <= 0 || v > 1440 {
+		return DEFAULT_AGENT_SESSION_IDLE_TIMEOUT_MINUTES
+	}
+	return v
+}

@@ -492,6 +492,7 @@ func SaveAgentHttpTransaction(
 	agentToolName string,
 	agentToolInfo string,
 	sessionID string,
+	agentToolSessionID string,
 	subTableNum int,
 	tokensInputSize, tokensOutputSize, tokensAllSize uint64,
 ) error {
@@ -578,6 +579,9 @@ func SaveAgentHttpTransaction(
 
 	// 保存识别出的 Session ID
 	record.SessionID = sessionID
+	// 保存 Agent 工具原生识别的 Session ID（v2.0.76 阶段BD：未识别为空字符串，
+	// 与 SessionID 的 unknown_session_id 占位语义区分）
+	record.AgentToolSessionID = agentToolSessionID
 
 	err := database.DB.Table(tableName).Create(record).Error
 	if err != nil {
@@ -662,7 +666,7 @@ func selectTransactionColumns() string {
 		"response_status, response_content_length, " +
 		"tokens_input_size, tokens_output_size, tokens_all_size, " +
 		"request_start_at, request_end_at, response_start_at, response_end_at, " +
-		"elapsed_ms, tool_identifier, request_tools, session_id, agent_tool_name, agent_tool_info"
+		"elapsed_ms, tool_identifier, request_tools, session_id, agent_tool_name, agent_tool_info, agent_tool_session_id"
 }
 
 // QueryAgentHttpTransactions 根据用户名和模型索引名称查询该哈希分表中的记录（支持分页和过滤）

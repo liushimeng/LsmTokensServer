@@ -89,7 +89,7 @@ func saveTokensFixture(t *testing.T, userName, modelName string, in, out uint64)
 		time.Now(), time.Now(), time.Now(), time.Now(),
 		150,
 		"TestTool",
-		"", "", "unknown_session_id",
+		"", "", "unknown_session_id", "",
 		config.G.DBMysqlSubTableNumber,
 		in, out, in+out,
 	)

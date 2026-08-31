@@ -2,9 +2,12 @@ package models
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lishimeng/LsmTokensServer/config"
 )
 
 // ============================================================================
@@ -1000,11 +1003,15 @@ func TestGetOrSynthesizeSessionID(t *testing.T) {
 	if !ok1 {
 		t.Fatal("first call should succeed")
 	}
-	if len(id1) != 24 {
-		t.Errorf("session_id length = %d, want 24", len(id1))
+	// v2.0.76 阶段BD：合成 session 带 self_generate_ 前缀 + 24 位 hex = 38 字符
+	if !IsSyntheticSessionID(id1) {
+		t.Errorf("session_id %q should have %q prefix", id1, SyntheticSessionIDPrefix)
 	}
-	// 验证是 hex 字符串
-	for _, c := range id1 {
+	if len(id1) != len(SyntheticSessionIDPrefix)+24 {
+		t.Errorf("session_id length = %d, want %d", len(id1), len(SyntheticSessionIDPrefix)+24)
+	}
+	// 验证前缀之后是 hex 字符串
+	for _, c := range id1[len(SyntheticSessionIDPrefix):] {
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
 			t.Errorf("session_id contains non-hex char: %c", c)
 			break
@@ -1073,8 +1080,88 @@ func TestGetOrSynthesizeSessionID_TTLExpiry(t *testing.T) {
 	if id == "old_session_id_0000000000" {
 		t.Error("should not return expired session_id")
 	}
-	if len(id) != 24 {
-		t.Errorf("new session_id length = %d, want 24", len(id))
+	if !IsSyntheticSessionID(id) {
+		t.Errorf("new session_id %q should have %q prefix", id, SyntheticSessionIDPrefix)
+	}
+	if len(id) != len(SyntheticSessionIDPrefix)+24 {
+		t.Errorf("new session_id length = %d, want %d", len(id), len(SyntheticSessionIDPrefix)+24)
+	}
+}
+
+// ============= v2.0.76 阶段BD：合成 session 前缀与配置化 TTL 测试 =============
+
+// TestSyntheticSessionIDPrefixFormat 验证合成 session id 的前缀格式与总长度
+func TestSyntheticSessionIDPrefixFormat(t *testing.T) {
+	ResetSyntheticSessionCache()
+	defer ResetSyntheticSessionCache()
+
+	id, ok := GetOrSynthesizeSessionID("prefix_user", "prefix_model")
+	if !ok {
+		t.Fatal("synthesize should succeed")
+	}
+	if !strings.HasPrefix(id, SyntheticSessionIDPrefix) {
+		t.Errorf("id = %q, want prefix %q", id, SyntheticSessionIDPrefix)
+	}
+	// self_generate_ (14) + 24 hex = 38
+	if len(id) != 38 {
+		t.Errorf("len(id) = %d, want 38", len(id))
+	}
+}
+
+// TestIsSyntheticSessionID 验证合成 session 判断函数
+func TestIsSyntheticSessionID(t *testing.T) {
+	if !IsSyntheticSessionID("self_generate_abc123") {
+		t.Error("self_generate_ prefixed id should be synthetic")
+	}
+	if !IsSyntheticSessionID(SyntheticSessionIDPrefix) {
+		t.Error("bare prefix should be synthetic")
+	}
+	if IsSyntheticSessionID("") {
+		t.Error("empty string should not be synthetic")
+	}
+	if IsSyntheticSessionID("144ca9ed-c216-40f2-87a7-cd9df1dc7f3c") {
+		t.Error("real UUID session id should not be synthetic")
+	}
+	if IsSyntheticSessionID("unknown_session_id") {
+		t.Error("unknown placeholder should not be synthetic")
+	}
+	if IsSyntheticSessionID("selfgenerate_abc") {
+		t.Error("missing underscore variant should not be synthetic")
+	}
+}
+
+// TestGetSyntheticSessionTTL_Config 验证 TTL 配置化：配置生效、未配置回退默认
+func TestGetSyntheticSessionTTL_Config(t *testing.T) {
+	// 备份全局配置，测试后恢复
+	saved := config.G
+	defer func() { config.G = saved }()
+
+	// 场景1：配置 60 分钟 → TTL = 60min
+	config.G = &config.LsmTokensServerConfig{AgentSessionIdleTimeoutMinutes: 60}
+	if got := GetSyntheticSessionTTL(); got != 60*time.Minute {
+		t.Errorf("TTL = %v, want 60m", got)
+	}
+
+	// 场景2：配置 1 分钟（下限）→ TTL = 1min
+	config.G = &config.LsmTokensServerConfig{AgentSessionIdleTimeoutMinutes: 1}
+	if got := GetSyntheticSessionTTL(); got != time.Minute {
+		t.Errorf("TTL = %v, want 1m", got)
+	}
+
+	// 场景3：配置非法（0/负值）→ 回退默认 15min
+	config.G = &config.LsmTokensServerConfig{AgentSessionIdleTimeoutMinutes: 0}
+	if got := GetSyntheticSessionTTL(); got != EconomicSyntheticSessionTTL {
+		t.Errorf("TTL = %v, want default %v", got, EconomicSyntheticSessionTTL)
+	}
+	config.G = &config.LsmTokensServerConfig{AgentSessionIdleTimeoutMinutes: -5}
+	if got := GetSyntheticSessionTTL(); got != EconomicSyntheticSessionTTL {
+		t.Errorf("TTL = %v, want default %v", got, EconomicSyntheticSessionTTL)
+	}
+
+	// 场景4：config.G 为 nil（单测/早期启动）→ 回退默认
+	config.G = nil
+	if got := GetSyntheticSessionTTL(); got != EconomicSyntheticSessionTTL {
+		t.Errorf("TTL = %v, want default %v", got, EconomicSyntheticSessionTTL)
 	}
 }
 

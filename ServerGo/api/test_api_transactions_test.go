@@ -42,6 +42,7 @@ func TestSaveAndQueryTransaction(t *testing.T) {
 		"",                   // agentToolName
 		"",                   // agentToolInfo
 		"unknown_session_id", // 测试使用占位 session_id
+		"",                   // agentToolSessionID: 测试占位空值
 		config.G.DBMysqlSubTableNumber,
 		0, 0, 0,
 	)
@@ -79,6 +80,10 @@ func TestSaveAndQueryTransaction(t *testing.T) {
 	}
 	if r.SessionID != "unknown_session_id" {
 		t.Errorf("session_id = %q, want %q", r.SessionID, "unknown_session_id")
+	}
+	// v2.0.76 阶段BD：agent_tool_session_id 空值占位透传
+	if r.AgentToolSessionID != "" {
+		t.Errorf("agent_tool_session_id = %q, want empty", r.AgentToolSessionID)
 	}
 
 	var rawHeaders struct {
@@ -184,6 +189,7 @@ func TestSaveTransactionWithInvalidUTF8ResponseBody(t *testing.T) {
 		"",                   // agentToolName
 		"",                   // agentToolInfo
 		"unknown_session_id", // 测试使用占位 session_id
+		"",                   // agentToolSessionID: 测试占位空值
 		config.G.DBMysqlSubTableNumber,
 		10, 20, 30,
 	)
@@ -244,6 +250,7 @@ func TestCountAgentHttpTransactionsByDays(t *testing.T) {
 			time.Now(), time.Now(), time.Now(), time.Now(),
 			10, "tool", "", "",
 			"unknown_session_id", // 测试使用占位 session_id
+			"",                   // agentToolSessionID: 测试占位空值
 			config.G.DBMysqlSubTableNumber,
 			0, 0, 0,
 		); err != nil {
@@ -310,6 +317,7 @@ func TestUserAIRouteCountRecordEndpoint(t *testing.T) {
 			time.Now(), time.Now(), time.Now(), time.Now(),
 			10, "tool", "", "",
 			"unknown_session_id", // 测试使用占位 session_id
+			"",                   // agentToolSessionID: 测试占位空值
 			config.G.DBMysqlSubTableNumber,
 			0, 0, 0,
 		); err != nil {
@@ -386,6 +394,7 @@ func TestManagerAIRouteCountRecordEndpoint(t *testing.T) {
 			time.Now(), time.Now(), time.Now(), time.Now(),
 			10, "tool", "", "",
 			"unknown_session_id", // 测试使用占位 session_id
+			"",                   // agentToolSessionID: 测试占位空值
 			config.G.DBMysqlSubTableNumber,
 			0, 0, 0,
 		); err != nil {
@@ -427,5 +436,97 @@ func TestManagerAIRouteCountRecordEndpoint(t *testing.T) {
 	}
 	if got := call("bob", "model-MISSING", protocol.AgentProtocolType_Anthropic, 0); got != 0 {
 		t.Errorf("missing model = %d, want 0", got)
+	}
+}
+
+// ============= v2.0.76 阶段BD：agent_tool_session_id 落库与查询测试 =============
+
+// TestSaveAndQueryAgentToolSessionID 验证 AgentToolSessionID 字段独立落库并可从
+// 列表查询（selectTransactionColumns 白名单）取回：真实识别值与空值两种场景。
+func TestSaveAndQueryAgentToolSessionID(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	const realSessionID = "144ca9ed-c216-40f2-87a7-cd9df1dc7f3c"
+
+	// 场景1：携带 Agent 工具原生识别的 session（如 Claude Code 头识别值）
+	body := base64.StdEncoding.EncodeToString([]byte(`{"model":"claude-3","messages":[]}`))
+	err := modelsdb.SaveAgentHttpTransaction(
+		"sessuser", "model-sess", 1, "sk-sess-key", 1,
+		modelsdb.DstEndPointAlgorithmType_Direct, "dst-sess",
+		protocol.AgentProtocolType_Anthropic,
+		"POST", "https://api.test.com/v1/messages", "127.0.0.1:12345", 100,
+		"Content-Type: application/json", "Content-Type: application/json", body, "",
+		"200 OK", 200,
+		"Content-Type: application/json", "Content-Type: application/json", `{"ok":true}`, "",
+		time.Now(), time.Now(), time.Now(), time.Now(),
+		50, "claude-code/1.0", "claude-code", "1.0",
+		realSessionID, // session_id：生效值（与原生识别同值）
+		realSessionID, // agent_tool_session_id：原生识别值
+		config.G.DBMysqlSubTableNumber,
+		10, 20, 30,
+	)
+	if err != nil {
+		t.Fatalf("save with real session failed: %v", err)
+	}
+
+	// 场景2：未识别（原生空 + 合成 self_generate_ 兜底）
+	err = modelsdb.SaveAgentHttpTransaction(
+		"sessuser", "model-sess", 1, "sk-sess-key", 1,
+		modelsdb.DstEndPointAlgorithmType_Direct, "dst-sess",
+		protocol.AgentProtocolType_OpenAI,
+		"POST", "https://api.test.com/v1/chat/completions", "127.0.0.1:12345", 100,
+		"Content-Type: application/json", "Content-Type: application/json", body, "",
+		"200 OK", 200,
+		"Content-Type: application/json", "Content-Type: application/json", `{"ok":true}`, "",
+		time.Now(), time.Now(), time.Now(), time.Now(),
+		50, "opencode/1.0", "opencode", "1.0",
+		modelsdb.SyntheticSessionIDPrefix+"a3f8c2e19b4d7f0e5c6a8b2d", // session_id：合成兜底
+		"", // agent_tool_session_id：未识别为空
+		config.G.DBMysqlSubTableNumber,
+		10, 20, 30,
+	)
+	if err != nil {
+		t.Fatalf("save with synthetic session failed: %v", err)
+	}
+
+	records, total, err := modelsdb.QueryAgentHttpTransactions(
+		"sessuser", "model-sess", config.G.DBMysqlSubTableNumber, 1, 10,
+		"", "", "", false, 0, "", "", "", 3, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("query failed: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("total = %d, want 2", total)
+	}
+
+	// 按 id 倒序：场景2 在前，场景1 在后
+	byID := map[uint64]modelsdb.TAgentHttpTransactionDataItem{}
+	for _, r := range records {
+		byID[r.ID] = r
+	}
+	var recReal, recSynth *modelsdb.TAgentHttpTransactionDataItem
+	for i := range records {
+		if records[i].SessionID == realSessionID {
+			recReal = &records[i]
+		}
+		if modelsdb.IsSyntheticSessionID(records[i].SessionID) {
+			recSynth = &records[i]
+		}
+	}
+	if recReal == nil || recSynth == nil {
+		t.Fatalf("should find both records, real=%v synth=%v", recReal != nil, recSynth != nil)
+	}
+
+	// 场景1：原生识别值与生效值同值
+	if recReal.AgentToolSessionID != realSessionID {
+		t.Errorf("agent_tool_session_id = %q, want %q", recReal.AgentToolSessionID, realSessionID)
+	}
+	// 场景2：原生为空、生效值为合成前缀
+	if recSynth.AgentToolSessionID != "" {
+		t.Errorf("synth record agent_tool_session_id = %q, want empty", recSynth.AgentToolSessionID)
+	}
+	if !modelsdb.IsSyntheticSessionID(recSynth.SessionID) {
+		t.Errorf("synth record session_id = %q, want self_generate_ prefix", recSynth.SessionID)
 	}
 }

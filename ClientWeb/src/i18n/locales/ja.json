@@ -158,6 +158,7 @@
   "aiRouteManage.userMode": "ユーザーモード：自分のモデルのルートのみ表示・編集可能",
   "chatAnalysis.action": "操作",
   "chatAnalysis.agentTool": "Agentツール",
+  "chatAnalysis.agentSessionId": "AgentセッションID",
   "chatAnalysis.aggParse": "集計解析",
   "chatAnalysis.aggNoSummary": "レスポンスには解析可能な usage/text/tool_calls 概要が含まれていません",
   "chatAnalysis.aggNoTextHint": "SSE イベントは検出されましたが、テキスト内容は抽出されませんでした（ツール呼び出しストリーム、エラーレスポンス、異常終了ストリームの可能性があります。詳細は下記の Events / Tools 統計をご確認ください）",

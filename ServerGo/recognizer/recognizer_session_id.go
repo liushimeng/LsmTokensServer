@@ -50,6 +50,31 @@ func RecognizeSessionID(body []byte, protocolType int, headers http.Header) stri
 	return ""
 }
 
+// SessionRecognitionResult Session 识别结果（v2.0.76 阶段BD：区分原生识别与最终生效值）。
+//
+//   - AgentToolSessionID：Agent 工具原生识别出的 session ID（来自请求头或请求体）；
+//     未识别时为空字符串（不用 unknown 占位，便于统计 Agent 的 session 透传率）。
+//   - EffectiveSessionID：最终生效的 session ID；识别成功时与 AgentToolSessionID 同值，
+//     未识别时为空字符串，由调用方决定合成兜底（self_generate_*）或 unknown 占位。
+type SessionRecognitionResult struct {
+	AgentToolSessionID string
+	EffectiveSessionID string
+}
+
+// RecognizeSessionIDWithSource 按协议类型识别 session_id，并区分原生识别结果与生效值
+// （v2.0.76 阶段BD）。
+//
+// 语义约定：所有现有识别路径（协议级头 + body + Agent 工具级识别器）命中即视为
+// 「Agent 工具原生识别」，两字段同值；未识别时 AgentToolSessionID 保持空字符串。
+// 原 RecognizeSessionID() 行为完全兼容（等价于仅取 EffectiveSessionID）。
+func RecognizeSessionIDWithSource(body []byte, protocolType int, headers http.Header) SessionRecognitionResult {
+	sid := RecognizeSessionID(body, protocolType, headers)
+	return SessionRecognitionResult{
+		AgentToolSessionID: sid,
+		EffectiveSessionID: sid,
+	}
+}
+
 // RegisterSessionRecognizer 注册自定义 session 识别器（用于测试或扩展）
 func RegisterSessionRecognizer(protocolType int, recognizer SessionRecognizer) {
 	sessionRecognizers[protocolType] = recognizer
@@ -344,8 +369,23 @@ func (r *openAISessionRecognizer) Recognize(body []byte, headers http.Header) st
 	}
 	//    2c. x-session-id 头（OpenCode 原生）/ session-id 头（通用 Codex 兼容）
 	//        + x-opencode-session-id（OpenCode 特有头，v2.0.73 新增）
+	//    2d. 常见 Agent 工具专用会话头变体（v2.0.76 阶段BD：aider/continue/cursor/cline/
+	//        copilot/kilo-code/windsurf 等，均走最小长度校验，插在通用头之前避免被遮蔽）
 	if headers != nil {
-		for _, h := range []string{"X-OpenCode-Session-Id", "X-Session-Id", "Session-Id"} {
+		for _, h := range []string{
+			"X-OpenCode-Session-Id",
+			// v2.0.76 阶段BD 新增 Agent 工具专用头
+			"X-Aider-Session-Id",
+			"X-Continue-Session-Id",
+			"X-Cursor-Session-Id",
+			"X-Cline-Session-Id",
+			"X-Github-Copilot-Session-Id",
+			"X-Kilo-Code-Session-Id",
+			"X-Windsurf-Session-Id",
+			// 通用兜底头
+			"X-Session-Id",
+			"Session-Id",
+		} {
 			if v := strings.TrimSpace(headers.Get(h)); v != "" && len(v) >= sessionIDMinHeaderLen {
 				return v
 			}

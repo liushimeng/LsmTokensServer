@@ -142,6 +142,20 @@ export default function ChatAnalysis({ route }) {
     { key: 'tokens_output_size', title: t('chatAnalysis.outputTokens'), render: (v) => fmtNum(v) },
     { key: 'elapsed_ms', title: t('chatAnalysis.duration'), render: (v) => fmtMs(v) },
     { key: 'agent_tool_name', title: t('chatAnalysis.agentTool'), render: (v) => v || '-' },
+    // v2.0.76 阶段BD：AgentSessionID 列——优先展示 Agent 工具原生识别值（agent_tool_session_id），
+    // 为空时降级展示生效 session_id；合成 ID（self_generate_ 前缀）灰色斜体区分，超 24 字符截断。
+    { key: 'agent_tool_session_id', title: t('chatAnalysis.agentSessionId'), render: (v, row) => {
+      let sid = v
+      let isSynth = false
+      if (!sid) {
+        sid = row.session_id
+        isSynth = typeof sid === 'string' && sid.startsWith('self_generate_')
+      }
+      if (!sid || sid === 'unknown_session_id') return '-'
+      return <span style={isSynth ? { color: 'var(--muted)', fontStyle: 'italic' } : undefined} title={sid}>
+        {sid.length > 24 ? sid.slice(0, 24) + '…' : sid}
+      </span>
+    } },
     { key: 'actions', title: t('chatAnalysis.action'), render: (_, r) => {
       const isExpanded = expandedIds.has(r.id)
       return (

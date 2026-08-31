@@ -280,7 +280,9 @@ func forwardWithRetry(
 	// economicKBRequest: true 表示走「知识问答」分支（v2.0.17），从 DstEndPointIDs 随机挑源站
 	var economicKBRequest bool
 	if isEconomic {
-		economicSessionID = recognizer.RecognizeSessionID(bodyBytes, protocolType, r.Header)
+		// v2.0.76 阶段BD：改用 RecognizeSessionIDWithSource 取生效值（语义与原
+		// RecognizeSessionID 等价：识别命中即生效值），路由粘性行为不变。
+		economicSessionID = recognizer.RecognizeSessionIDWithSource(bodyBytes, protocolType, r.Header).EffectiveSessionID
 		if economicSessionID == "" {
 			// v2.0.20: opencode / OpenAI/Python 合成 session —— 按 userName+modelName
 			// 维度缓存合成 session_id，让连续请求走 SelectForSession 的 session 粘性路径。
@@ -910,6 +912,7 @@ func logAIProxyTransaction(
 	elapsedMs int64,
 	protocolType int,
 	sessionID string,
+	agentToolSessionID string,
 	tokensInputSize, tokensOutputSize, tokensAllSize uint64,
 ) {
 	if database.DB == nil || config.G == nil {
@@ -985,6 +988,7 @@ func logAIProxyTransaction(
 		agentResult.AgentToolName,
 		agentResult.AgentToolInfo,
 		sessionID,
+		agentToolSessionID,
 		config.G.DBMysqlSubTableNumber,
 		tokensInputSize, tokensOutputSize, tokensAllSize,
 	)

@@ -328,6 +328,7 @@ func saveTestRecordToSubTable(endpoint *modelsdb.TAgentDstEndPoint, result *Test
 		"",                   // agentToolName: 连通性测试使用空值
 		"",                   // agentToolInfo: 连通性测试使用空值
 		"unknown_session_id", // 连通性测试无客户端 body，使用占位值
+		"",                   // agentToolSessionID: 连通性测试无 Agent 客户端，无原生识别
 		config.G.DBMysqlSubTableNumber,
 		0, 0, 0,
 	)

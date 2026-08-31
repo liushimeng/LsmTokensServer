@@ -385,7 +385,12 @@ func handleAIProxyRequest(w http.ResponseWriter, r *http.Request, protocolType i
 	}
 
 	// 11.5 识别 session_id（所有请求，不仅经济算法）
-	sessionID := recognizer.RecognizeSessionID(bodyBytes, protocolType, r.Header)
+	// v2.0.76 阶段BD：区分「Agent 工具原生识别」与「生效值」两个维度：
+	//   - agentToolSessionID：原生识别结果（未识别为空字符串，落库 agent_tool_session_id 列）
+	//   - sessionID：生效值（识别 + 合成兜底 self_generate_* + unknown 占位，落库 session_id 列）
+	recResult := recognizer.RecognizeSessionIDWithSource(bodyBytes, protocolType, r.Header)
+	agentToolSessionID := recResult.AgentToolSessionID
+	sessionID := recResult.EffectiveSessionID
 	if sessionID == "" {
 		// v2.0.20: 日志路径复用合成 session（与 forwardWithRetry 共享缓存）
 		ua := r.Header.Get("User-Agent")
@@ -418,6 +423,7 @@ func handleAIProxyRequest(w http.ResponseWriter, r *http.Request, protocolType i
 		elapsedMs,
 		protocolType,
 		sessionID,
+		agentToolSessionID,
 		tokensInputSize, tokensOutputSize, tokensAllSize,
 	)
 

@@ -133,6 +133,11 @@ type TAgentHttpTransactionDataItem struct {
 	// AI Agent 工具信息
 	AgentToolName string `json:"agent_tool_name" gorm:"size:64;index;comment:AI Agent工具名称，如claude-cli/opencode等"`
 	AgentToolInfo string `json:"agent_tool_info" gorm:"size:512;comment:AI Agent工具扩展信息，含版本、运行时等"`
+	// AgentToolSessionID Agent 工具原生识别出的 Session ID（v2.0.76 阶段BD）。
+	// 与 SessionID（生效值：识别+合成兜底+unknown 占位）区分：
+	//   - 识别成功 → 真实 ID（与 SessionID 同值）
+	//   - 识别失败 → 空字符串（不用 unknown 占位，便于统计 Agent 的 session 透传率）
+	AgentToolSessionID string `json:"agent_tool_session_id" gorm:"size:128;index;comment:Agent工具原生识别的Session ID（空表示未识别）"`
 
 	// 预解析的 Task 特征（避免查询时重复解析 request_body）
 	IsParsed         bool   `json:"is_parsed" gorm:"index;comment:是否已解析request_body特征"`

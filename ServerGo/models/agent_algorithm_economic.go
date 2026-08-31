@@ -5,10 +5,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/lishimeng/LsmTokensServer/config"
 	"github.com/lishimeng/LsmTokensServer/logger"
 	"github.com/lishimeng/LsmTokensServer/recognizer"
 	"hash/fnv"
 	mathrand "math/rand"
+	"strings"
 	"sync"
 	"time"
 )
@@ -818,9 +820,30 @@ func toLowerASCII(s string) string {
 // 合成 session_id，让连续请求走 SelectForSession 的 session 粘性路径，
 // 同时不同对话（超时后）能轮换到不同源站，兼顾连贯性与负载均衡。
 
-// EconomicSyntheticSessionTTL 合成 session 的有效期。同一 userName+modelName
+// EconomicSyntheticSessionTTL 合成 session 的默认有效期（兜底值）。同一 userName+modelName
 // 在 TTL 内的连续请求复用同一 session_id；超过后重新生成，实现对话级轮换。
+// v2.0.76 阶段BD：实际生效值优先读配置 agentSessionIdleTimeoutMinutes（GetSyntheticSessionTTL）。
 const EconomicSyntheticSessionTTL = 15 * time.Minute
+
+// SyntheticSessionIDPrefix 合成 session id 的特殊标识前缀（v2.0.76 阶段BD）。
+// 用于在数据表与 ChatAnalysis 页面中直观区分「服务端合成」与「Agent 工具原生识别」的 session。
+const SyntheticSessionIDPrefix = "self_generate_"
+
+// GetSyntheticSessionTTL 返回合成 session 的空闲超时（v2.0.76 阶段BD：配置化）。
+// 优先读配置 agentSessionIdleTimeoutMinutes（validateAndFixConfig 已保证 1~1440 合法范围）；
+// 配置缺失（config.G 为 nil，如单测场景）或非法时回退默认 15 分钟。
+func GetSyntheticSessionTTL() time.Duration {
+	if config.G != nil && config.G.AgentSessionIdleTimeoutMinutes > 0 {
+		return time.Duration(config.G.AgentSessionIdleTimeoutMinutes) * time.Minute
+	}
+	return EconomicSyntheticSessionTTL
+}
+
+// IsSyntheticSessionID 判断 session id 是否为服务端合成（self_generate_ 前缀）。
+// 供展示层区分合成/原生 session，以及测试断言使用。
+func IsSyntheticSessionID(id string) bool {
+	return strings.HasPrefix(id, SyntheticSessionIDPrefix)
+}
 
 // EconomicSyntheticSessionEligibleAgents 需要合成 session 的 Agent 名称集合。
 // 大小写不敏感，匹配逻辑复用 toLowerASCII。
@@ -906,9 +929,10 @@ func IsSyntheticSessionEligibleAgent(agentName string) bool {
 //
 // 行为：
 //  1. cacheKey = "userName|modelName"
-//  2. RLock 查缓存 → 命中且未过期 → 更新 LastUsed，返回缓存的 session_id
+//  2. RLock 查缓存 → 命中且未过期（GetSyntheticSessionTTL）→ 更新 LastUsed，返回缓存的 session_id
 //  3. Lock 写缓存 → 二次检查（防并发生成）
-//  4. 生成 24 位 hex 随机字符串（crypto/rand → 12 字节 → hex.EncodeToString）
+//  4. 生成 self_generate_ + 24 位 hex 随机字符串（crypto/rand → 12 字节 → hex.EncodeToString）
+//     （v2.0.76 阶段BD：加前缀标识合成 session，总长 38 字符）
 //  5. 存入缓存，返回
 func GetOrSynthesizeSessionID(userName, modelName string) (string, bool) {
 	if userName == "" || modelName == "" {
@@ -917,11 +941,12 @@ func GetOrSynthesizeSessionID(userName, modelName string) (string, bool) {
 
 	cacheKey := userName + "|" + modelName
 	now := time.Now()
+	ttl := GetSyntheticSessionTTL()
 
 	// 快速路径：读锁查缓存
 	syntheticSessionCacheMu.RLock()
 	entry, exists := syntheticSessionCache[cacheKey]
-	if exists && now.Sub(entry.LastUsed) < EconomicSyntheticSessionTTL {
+	if exists && now.Sub(entry.LastUsed) < ttl {
 		sessionID := entry.SessionID
 		entry.LastUsed = now
 		syntheticSessionCacheMu.RUnlock()
@@ -935,19 +960,19 @@ func GetOrSynthesizeSessionID(userName, modelName string) (string, bool) {
 
 	// 二次检查：并发场景下可能已被其他 goroutine 生成
 	entry, exists = syntheticSessionCache[cacheKey]
-	if exists && now.Sub(entry.LastUsed) < EconomicSyntheticSessionTTL {
+	if exists && now.Sub(entry.LastUsed) < ttl {
 		sessionID := entry.SessionID
 		entry.LastUsed = now
 		return sessionID, true
 	}
 
-	// 生成 24 位 hex 随机字符串（12 字节 → 24 hex 字符）
+	// 生成 self_generate_ + 24 位 hex 随机字符串（12 字节 → 24 hex 字符）
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
 		// crypto/rand 失败是系统级异常，降级为不合成
 		return "", false
 	}
-	sessionID := hex.EncodeToString(b) // 24 字符
+	sessionID := SyntheticSessionIDPrefix + hex.EncodeToString(b) // self_generate_ + 24 字符
 
 	syntheticSessionCache[cacheKey] = &syntheticSessionEntry{
 		SessionID: sessionID,
