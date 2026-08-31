@@ -194,7 +194,50 @@ export default function UserManage() {
               columns={[
                 { key: 'id', title: t('userManage.id'), width: 60, sortable: true },
                 { key: 'model_name', title: t('userManage.modelName'), sortable: true },
-                { key: 'api_key', title: t('userManage.apiKey'), render: (v) => (v ? v.substring(0, 8) + '****' : '-') },
+                {
+                  key: 'api_key',
+                  title: t('userManage.apiKey'),
+                  render: (v) => {
+                    if (!v) return '-'
+                    const handleCopy = async (e) => {
+                      e.stopPropagation()
+                      try {
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                          await navigator.clipboard.writeText(v)
+                        } else {
+                          // 兜底走 document.execCommand 兼容旧版浏览器/HTTP 环境
+                          const ta = document.createElement('textarea')
+                          ta.value = v
+                          ta.style.position = 'fixed'
+                          ta.style.opacity = '0'
+                          document.body.appendChild(ta)
+                          ta.focus()
+                          ta.select()
+                          document.execCommand('copy')
+                          document.body.removeChild(ta)
+                        }
+                        if (window.showToast) window.showToast(t('common.copied'))
+                        else alert(t('common.copied'))
+                      } catch (err) {
+                        alert(err.message || String(err))
+                      }
+                    }
+                    return (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span>{v.substring(0, 8)}****</span>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          title={t('common.copy')}
+                          onClick={handleCopy}
+                          style={{ padding: '0 6px', fontSize: 12 }}
+                        >
+                          {t('common.copy')}
+                        </button>
+                      </span>
+                    )
+                  },
+                },
                 { key: 'status', title: t('common.status'), sortable: true, render: (v) => <span><span className={`status-dot ${v === 2 ? 'status-off' : 'status-on'}`} />{v === 2 ? t('userManage.disable') : t('userManage.enable')}</span> },
                 {
                   key: 'analysis', title: t('userManage.analysis'),
