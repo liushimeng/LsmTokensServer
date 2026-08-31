@@ -46,3 +46,4 @@ python-generate-image-tool/
 ClientWeb/dist-manager/
 ClientWeb/dist-user/
 AutoTestProgress/
+LsmTokensServer.conf.example
