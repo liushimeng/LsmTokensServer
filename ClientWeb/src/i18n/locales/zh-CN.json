@@ -190,6 +190,8 @@
   "aiRouteManage.userMode": "用户模式：仅显示并允许编辑本人模型的路由",
   "chatAnalysis.action": "操作",
   "chatAnalysis.agentTool": "Agent工具",
+  "chatAnalysis.agentToolInfo": "Agent工具信息",
+  "chatAnalysis.agentToolBlock": "Agent工具信息块",
   "chatAnalysis.agentSessionId": "AgentSessionID",
   "chatAnalysis.aggParse": "聚合解析",
   "chatAnalysis.aggNoSummary": "该响应未包含可解析的 usage/text/tool_calls 摘要",

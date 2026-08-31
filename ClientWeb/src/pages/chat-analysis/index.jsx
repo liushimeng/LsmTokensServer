@@ -142,6 +142,11 @@ export default function ChatAnalysis({ route }) {
     { key: 'tokens_output_size', title: t('chatAnalysis.outputTokens'), render: (v) => fmtNum(v) },
     { key: 'elapsed_ms', title: t('chatAnalysis.duration'), render: (v) => fmtMs(v) },
     { key: 'agent_tool_name', title: t('chatAnalysis.agentTool'), render: (v) => v || '-' },
+    // v2.0.7x 阶段BG：agent_tool_info 列——Agent 工具扩展信息（版本、运行时等），
+    // 空值降级 '-'；title 展示完整内容，便于悬停查看；超长字符串截断。
+    { key: 'agent_tool_info', title: t('chatAnalysis.agentToolInfo'), render: (v) =>
+      v ? <span title={v}>{String(v).length > 60 ? String(v).slice(0, 60) + '…' : v}</span> : '-'
+    },
     // v2.0.76 阶段BD：AgentSessionID 列——优先展示 Agent 工具原生识别值（agent_tool_session_id），
     // 为空时降级展示生效 session_id；合成 ID（self_generate_ 前缀）灰色斜体区分，超 24 字符截断。
     { key: 'agent_tool_session_id', title: t('chatAnalysis.agentSessionId'), render: (v, row) => {

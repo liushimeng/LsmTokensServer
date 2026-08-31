@@ -305,6 +305,13 @@ a { color: var(--primary); text-decoration: none; }
 .detail-head-request .dhreq-status.ok { color: var(--ok); }
 .detail-head-request .dhreq-status.err { color: var(--danger); }
 
+/* Header：Agent 工具信息块（v2.0.7x 阶段BG）—— 三字段聚拢展示，便于排查 Agent 客户端差异 */
+.detail-head-agent { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-top: 8px; padding: 8px 12px; border-radius: 6px; background: var(--surface-2, #f6f7f9); border: 1px solid var(--border); }
+.detail-head-agent .dha-title { font-weight: 600; color: var(--text, #222); font-size: 13px; }
+.detail-head-agent .dha-item { display: inline-flex; gap: 4px; align-items: baseline; min-width: 0; max-width: 100%; }
+.detail-head-agent .dha-label { color: var(--muted, #888); font-size: 12px; white-space: nowrap; }
+.detail-head-agent .dha-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--text, #222); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 360px; }
+
 /* Tab导航：分组式 */
 .detail-tabs { display: flex; align-items: center; gap: 0; padding: 0 16px; border-bottom: 1px solid var(--border); background: #fafbfc; overflow-x: auto; }
 .detail-tab-group { display: flex; align-items: center; gap: 2px; padding: 6px 0; }

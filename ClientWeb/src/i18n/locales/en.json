@@ -158,6 +158,8 @@
   "aiRouteManage.userMode": "User mode: Only display and allow editing of your own model routes",
   "chatAnalysis.action": "Action",
   "chatAnalysis.agentTool": "Agent Tool",
+  "chatAnalysis.agentToolInfo": "Agent Tool Info",
+  "chatAnalysis.agentToolBlock": "Agent Tool Info Block",
   "chatAnalysis.agentSessionId": "Agent Session ID",
   "chatAnalysis.aggParse": "Aggregate Parse",
   "chatAnalysis.aggNoSummary": "The response contains no parseable usage/text/tool_calls summary",

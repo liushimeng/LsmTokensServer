@@ -58,6 +58,33 @@ export default function DetailHeader({ row }) {
         <span className={`dhreq-status ${statusOk ? 'ok' : 'err'}`}>{row.response_status}</span>
         <span>{fmtTime(row.created_at)}</span>
       </div>
+
+      {/* v2.0.7x 阶段BG：Agent 工具信息块 —— 展示三字段（agent_tool_name / agent_tool_info / agent_tool_session_id），
+          三字段全空时整块不渲染，避免无意义空块干扰阅读；详情头部仅展示 Agent 工具原生识别值
+          （不展示合成 session_id 的归一化逻辑，由列表列负责）。 */}
+      {(row.agent_tool_name || row.agent_tool_info || row.agent_tool_session_id) ? (
+        <div className="detail-head-agent">
+          <span className="dha-title">🤖 {t('chatAnalysis.agentToolBlock')}</span>
+          {row.agent_tool_name ? (
+            <span className="dha-item" title={row.agent_tool_name}>
+              <span className="dha-label">{t('chatAnalysis.agentTool')}：</span>
+              <span className="dha-value">{row.agent_tool_name}</span>
+            </span>
+          ) : null}
+          {row.agent_tool_info ? (
+            <span className="dha-item" title={row.agent_tool_info}>
+              <span className="dha-label">{t('chatAnalysis.agentToolInfo')}：</span>
+              <span className="dha-value">{row.agent_tool_info}</span>
+            </span>
+          ) : null}
+          {row.agent_tool_session_id ? (
+            <span className="dha-item" title={row.agent_tool_session_id}>
+              <span className="dha-label">{t('chatAnalysis.agentSessionId')}：</span>
+              <span className="dha-value">{row.agent_tool_session_id}</span>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </header>
   )
 }

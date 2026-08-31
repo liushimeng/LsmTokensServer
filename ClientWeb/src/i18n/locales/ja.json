@@ -158,6 +158,8 @@
   "aiRouteManage.userMode": "ユーザーモード：自分のモデルのルートのみ表示・編集可能",
   "chatAnalysis.action": "操作",
   "chatAnalysis.agentTool": "Agentツール",
+  "chatAnalysis.agentToolInfo": "Agentツール情報",
+  "chatAnalysis.agentToolBlock": "Agentツール情報ブロック",
   "chatAnalysis.agentSessionId": "AgentセッションID",
   "chatAnalysis.aggParse": "集計解析",
   "chatAnalysis.aggNoSummary": "レスポンスには解析可能な usage/text/tool_calls 概要が含まれていません",
