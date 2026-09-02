@@ -13,7 +13,7 @@
 ## 日常命令
 
 ```bash
-# 编译（迁移期默认）
+# 编译（默认推荐）
 ./rebuild_restart_app.sh --build-only
 
 # 仅后端

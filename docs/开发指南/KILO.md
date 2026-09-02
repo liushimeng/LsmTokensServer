@@ -1,9 +1,9 @@
 # KILO.md - LsmTokensServer Kilo Code 规范
 
 > **加载顺序**: Kilo Code 先读本文件，再按需读 [`AGENT.md`](AGENT.md)（通用规则）、[`Developer_SOP.md`](Developer_SOP.md)（详细 SOP）、[`AGENT_INDEX.md`](AGENT_INDEX.md)（源码索引）。本文件只保留 Kilo Code / VS Code 特定约束。
-> **版本历史**: 完整版本历史（v2.0.0-v2.0.66）见 [`CHANGELOG.md`](CHANGELOG.md)，强制规则归档见 [`CLAUDE.md`](CLAUDE.md)。
+> **版本历史**: 完整版本历史见 [`CHANGELOG.md`](../历史归档/CHANGELOG.md)，强制规则归档见 [`CLAUDE.md`](../../CLAUDE.md)。
 
-**当前版本**: v2.0.66（详见 [`CLAUDE.md`](CLAUDE.md)）
+**当前版本**: v2.0.77（详见 [`CLAUDE.md`](../../CLAUDE.md)）
 
 ---
 
@@ -13,10 +13,10 @@
 
 | 文档 | 用途 |
 |------|------|
-| [`Mission_Spider_MCP_Proc.md`](Mission_Spider_MCP_Proc.md) | **首先阅读**：Agent 任务流程 |
-| [`MCP_SpiderWebData_def.md`](MCP_SpiderWebData_def.md) | `/SpiderWebData` 详细定义 |
-| [`MCP_GetSpiderDataSource_def.md`](MCP_GetSpiderDataSource_def.md) | `/GetSpiderDataSource` |
-| [`MCP_InputSpiderDailyInfo_def.md`](MCP_InputSpiderDailyInfo_def.md) | `/InputSpiderDailyInfo` |
+| [`Mission_Spider_MCP_Proc.md`](../mcp/Mission_Spider_MCP_Proc.md) | **首先阅读**：Agent 任务流程 |
+| [`MCP_SpiderWebData_def.md`](../mcp/MCP_SpiderWebData_def.md) | `/SpiderWebData` 详细定义 |
+| [`MCP_GetSpiderDataSource_def.md`](../mcp/MCP_GetSpiderDataSource_def.md) | `/GetSpiderDataSource` |
+| [`MCP_InputSpiderDailyInfo_def.md`](../mcp/MCP_InputSpiderDailyInfo_def.md) | `/InputSpiderDailyInfo` |
 
 实现文件（v2.0.0 重构后）：
 - `mcp_interface_common.go` - 共享类型 + 会话管理 + 内容提取
@@ -205,7 +205,7 @@ cd go-web-debug-tool && go build -o GoWebDebugTool .      # 编译
 
 三层互为冗余。需要原始 chromedp 行为时改 `anti_detect=false`。
 
-完整规范：[`go-web-debug-tool/MCP_Proc_Def.md`](go-web-debug-tool/MCP_Proc_Def.md)。
+完整规范：[`go-web-debug-tool/MCP_Proc_Def.md`](../../go-web-debug-tool/MCP_Proc_Def.md)。
 
 ---
 

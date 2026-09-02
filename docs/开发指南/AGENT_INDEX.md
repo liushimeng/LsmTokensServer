@@ -3,23 +3,23 @@
 > 本文档为所有 AI Agent 工具（Claude Code、Kilo Code、OpenCode、pi、OpenClaw 等）提供源码文件快速定位。
 > **结构说明**：
 > 工程按模块分包组织（见 [docs/INDEX.md](../INDEX.md)）。
-> 本文保留旧版平铺文件名说明，便于对照检索；新路径按 [迁移方案](项目迁移解决方案/00-总体迁移方案.md) 映射。
+> 本文保留旧版平铺文件名说明，便于对照检索；新路径按 [迁移方案](../项目迁移解决方案/00-总体迁移方案.md) 映射。
 > 新版源码根目录：`ServerGo/`（`config/` `logger/` `database/` `models/` `proxy/` `protocol/` `api/` `spider/` `websocket/` `system/` `webserver/`）。
 > 新版前端：`ClientWeb/`（React + Vite，阶段T 起双构建：`dist-manager` / `dist-user` 两套隔离产物，见 `../项目迁移解决方案/管理员与用户Web服务双构建隔离升级方案_20260825.md`）。
 
-> 修改代码前，请先阅读与你所用工具对应的上下文文件（[`AGENT.md`](AGENT.md) / [`CLAUDE.md`](CLAUDE.md) / [`KILO.md`](KILO.md)）。
+> 修改代码前，请先阅读与你所用工具对应的上下文文件（[`AGENT.md`](AGENT.md) / [`CLAUDE.md`](../../CLAUDE.md) / [`KILO.md`](KILO.md)）。
 
 ## 文档导航
 
 | 文件 | 用途 |
 |------|------|
 | [`AGENT.md`](AGENT.md) | 通用核心规范 — 项目概述、强制工作流、编码规范、代理流程 |
-| [`CLAUDE.md`](CLAUDE.md) | Claude Code 补充规范 |
+| [`CLAUDE.md`](../../CLAUDE.md) | Claude Code 补充规范 |
 | [`KILO.md`](KILO.md) | Kilo Code 补充规范 |
 | [`Developer_SOP.md`](Developer_SOP.md) | 详细开发规范 — 数据库/缓存/前端/测试/MOE 规则 |
 | [`SKILL.md`](SKILL.md) | 紧凑 AI Agent Skill（Claude Code / Kilo Code / OpenCode） |
-| [`MEMORY.md`](MEMORY.md) | 项目记忆与上下文 |
-| [`CHANGELOG.md`](CHANGELOG.md) | 完整版本历史（v2.0.0-v2.0.66 根因分析、修复步骤、测试详情） |
+| [`MEMORY.md`](../历史归档/MEMORY.md) | 项目记忆与上下文 |
+| [`CHANGELOG.md`](../历史归档/CHANGELOG.md) | 完整版本历史（根因分析、修复步骤、测试详情） |
 
 ### 🧰 本地私有 Python 工具（AI Agent 加载）
 
@@ -33,10 +33,10 @@
 
 | 文件 | 用途 |
 |------|------|
-| [`MCP_SpiderWebData_def.md`](MCP_SpiderWebData_def.md) | `/SpiderWebData` 接口定义 — 网页爬取（chromedp 模式） |
-| [`MCP_GetSpiderDataSource_def.md`](MCP_GetSpiderDataSource_def.md) | `/GetSpiderDataSource` 接口定义 |
-| [`MCP_InputSpiderDailyInfo_def.md`](MCP_InputSpiderDailyInfo_def.md) | `/InputSpiderDailyInfo` 接口定义 |
-| [`Mission_Spider_MCP_Proc.md`](Mission_Spider_MCP_Proc.md) | **Agent 爬虫任务指南** — 完整调用流程、示例代码、错误处理 |
+| [`MCP_SpiderWebData_def.md`](../mcp/MCP_SpiderWebData_def.md) | `/SpiderWebData` 接口定义 — 网页爬取（chromedp 模式） |
+| [`MCP_GetSpiderDataSource_def.md`](../mcp/MCP_GetSpiderDataSource_def.md) | `/GetSpiderDataSource` 接口定义 |
+| [`MCP_InputSpiderDailyInfo_def.md`](../mcp/MCP_InputSpiderDailyInfo_def.md) | `/InputSpiderDailyInfo` 接口定义 |
+| [`Mission_Spider_MCP_Proc.md`](../mcp/Mission_Spider_MCP_Proc.md) | **Agent 爬虫任务指南** — 完整调用流程、示例代码、错误处理 |
 
 ## 服务端口速查
 

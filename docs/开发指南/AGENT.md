@@ -1,9 +1,9 @@
 # AGENT.md - LsmTokensServer 通用 AI Agent 规范
 
-> 面向 Claude Code、Kilo Code、OpenCode、pi、OpenClaw 等 AI Agent 的高密度入口。工具特定说明见 [`CLAUDE.md`](CLAUDE.md) / [`KILO.md`](KILO.md)，爬虫任务流程见 [`Mission_Spider_MCP_Proc.md`](Mission_Spider_MCP_Proc.md)。
-> **版本历史**: 完整版本历史（v2.0.0-v2.0.66）见 [`CHANGELOG.md`](CHANGELOG.md)，强制规则归档见 [`CLAUDE.md`](CLAUDE.md)。
+> 面向 Claude Code、Kilo Code、OpenCode、pi、OpenClaw 等 AI Agent 的高密度入口。工具特定说明见 [`CLAUDE.md`](../../CLAUDE.md) / [`KILO.md`](KILO.md)，爬虫任务流程见 [`Mission_Spider_MCP_Proc.md`](../mcp/Mission_Spider_MCP_Proc.md)。
+> **版本历史**: 完整版本历史见 [`CHANGELOG.md`](../历史归档/CHANGELOG.md)，工程强制规则见根目录 [`CLAUDE.md`](../../CLAUDE.md) / [`AGENTS.md`](../../AGENTS.md)。
 
-**当前版本**: v2.0.66（详见 [`CLAUDE.md`](CLAUDE.md)）
+**当前版本**: v2.0.77（`ServerGo/config/config.go` 中 `APP_VERSION`）
 
 ---
 
@@ -40,10 +40,10 @@ API Key 加载优先级：环境变量 `ARK_API_KEY` > `.env` > 代码内置默�
 
 | 文档 | 用途 |
 |------|------|
-| [`Mission_Spider_MCP_Proc.md`](Mission_Spider_MCP_Proc.md) | **首先阅读**：Agent 任务流程（v2.0.0 chromedp 模式） |
-| [`MCP_SpiderWebData_def.md`](MCP_SpiderWebData_def.md) | `/SpiderWebData` 详细定义 |
-| [`MCP_GetSpiderDataSource_def.md`](MCP_GetSpiderDataSource_def.md) | `/GetSpiderDataSource` 详细定义 |
-| [`MCP_InputSpiderDailyInfo_def.md`](MCP_InputSpiderDailyInfo_def.md) | `/InputSpiderDailyInfo` 详细定义 |
+| [`Mission_Spider_MCP_Proc.md`](../mcp/Mission_Spider_MCP_Proc.md) | **首先阅读**：Agent 任务流程（v2.0.0 chromedp 模式） |
+| [`MCP_SpiderWebData_def.md`](../mcp/MCP_SpiderWebData_def.md) | `/SpiderWebData` 详细定义 |
+| [`MCP_GetSpiderDataSource_def.md`](../mcp/MCP_GetSpiderDataSource_def.md) | `/GetSpiderDataSource` 详细定义 |
+| [`MCP_InputSpiderDailyInfo_def.md`](../mcp/MCP_InputSpiderDailyInfo_def.md) | `/InputSpiderDailyInfo` 详细定义 |
 
 **三接口**：
 - `/SpiderWebData` - 爬取（支持 8 个交互 action：navigate/click/scroll/scroll_to/fill_form/extract/screenshot/get_state）
@@ -73,9 +73,11 @@ LsmTokensServer = AI 代理服务 + AI 信息爬虫：
 | 服务           | 端口      | 协议       | 说明                                                |
 | -------------- | --------- | ---------- | --------------------------------------------------- |
 | Agent Proxy    | 29000     | HTTP       | AI API 代理入口                                     |
+| Agent Proxy    | 29003     | HTTPS      | AI API 代理入口（TLS）                              |
 | Manager Web    | 9101      | HTTP       | 管理员后台：用户/模型/源站/路由/浏览记录/协议分析器 |
 | User Web       | 29001     | HTTP/HTTPS | 用户门户（v1.3.0+ 支持 HTTPS）                      |
 | **Spider MCP** | **29002** | HTTP       | 爬虫 MCP 服务（Agent 入口）                         |
+| Spider CDP     | 9222      | CDP        | 爬虫 Chrome DevTools Protocol 端口                  |
 
 **HTTPS（v1.3.0+）**：仅 User Web 支持；通过 `userWebUseHTTPS` / `userWebCertFile` / `userWebKeyFile` 配置；自签证书放项目根目录 `server.crt` / `server.key`。
 
@@ -117,14 +119,15 @@ gofmt -w <修改的 .go>
 
 ## 4. 前端 SubAgent 规则（强制）
 
-修改以下内容时**必须**先调用前端 SubAgent：
-1. `server_web_*.go` 中的 HTML 模板字符串
-2. 内联 CSS / `<style>`
-3. 内联 JavaScript / `<script>`
-4. Web 页面路由或模板
-5. `server_web_common_*.go` 共享前端组件
+前端已迁移至 React + Vite（`ClientWeb/` 双构建）；旧 `server_web_*.go` HTML 模板已废弃，`webserver/` 仅做 SPA 静态托管 + API 路由挂载。
 
-检查项：模板拼接顺序、DOM 闭合、CSS 作用域、相对路径、`.header-bar`/`.nav-bar` sticky 定位、相同功能 JS 的 MOE 一致性、响应式断点（主断点 `768px`）。
+修改以下内容时**必须**先调用前端 SubAgent（角色与系统词见根目录 [`AGENTS.md`](../../AGENTS.md)）：
+1. `ClientWeb/src/pages/` 页面组件与交互逻辑
+2. `ClientWeb/src/index.css` 全局/组件样式
+3. 前端路由（`App.jsx`）与双构建门控（`__APP_ROLE__`）
+4. i18n 三语文案（`src/i18n/locales/{zh-CN,en,ja}.json` 必须同步新增/修改）
+
+检查项：双构建门控完整（用户端产物零管理代码，构建后 grep 复验）、三语 i18n key 一致、CSS 作用域、相对路径、响应式断点（主断点 `768px`）、localStorage 限条数与过期。
 
 **Web UI 约定（高频）**：
 - 页面链接一律相对路径，`encodeURIComponent` 编码查询参数
@@ -132,8 +135,7 @@ gofmt -w <修改的 .go>
 - `/ChatAnalysis` 首屏默认 page=1（不恢复 localStorage 深分页）；筛选状态 + 分页用 localStorage 同步 URL
 - `/ProtocolConvertAnalyzer` 管理/用户端布局一致：列表展示 ID 列；`转换方向` 只读；`执行转换` 才填 Output；4 项筛选用 localStorage 持久化（`lsm_protocol_converter_filters` / `lsm_protocol_converter_user_filters`）；URL 参数优先于 localStorage；`结构转换成功率`/`字段转换率` 由后端 `CalculateConversionMetricsForSection` 实际转换后计算
 - 启用态核心按钮避免黑/灰背景；优先蓝/紫/青/绿/红等语义色 + hover 态
-- `/ChatAnalysis` 浏览记录页已拆分为 `server_web_manager_chat_page_{html,styles,body,scripts}.go`；`agentPageTemplate` 是组合入口；修改时禁止改变 `template.New(...).Parse(...)` 拼接方式
-- **ChatAnalysis 前端模块化**：`ClientWeb/src/pages/ChatAnalysis.jsx` 仅为重导出入口（`export { default } from './chat-analysis'`），实际代码位于 `ClientWeb/src/pages/chat-analysis/` 目录，按职责拆分为：主组件 `index.jsx`、筛选工具栏 `ChatAnalysisToolbar.jsx`、内联展开详情面板 `InlineDetailRow.jsx`（替代旧 Modal）、详情子组件 `Detail{Header,Tabs,Body,Footer}.jsx`、筛选 Hook `useChatAnalysisFilters.js`、数据查询 Hook `useChatAnalysisData.js`、常量 `constants.js`；新增页面组件时参考此模块化模式
+- **ChatAnalysis 前端模块化**：`ClientWeb/src/pages/ChatAnalysis.jsx` 仅为重导出入口（`export { default } from './chat-analysis'`），实际代码位于 `ClientWeb/src/pages/chat-analysis/` 目录，按职责拆分为：主组件 `index.jsx`、筛选工具栏 `ChatAnalysisToolbar.jsx`、内联展开详情面板 `InlineDetailRow.jsx`（替代旧 Modal）、详情子组件 `Detail{Header,Tabs,Body,Footer}.jsx`、筛选 Hook `useChatAnalysisFilters.js`、数据查询 Hook `useChatAnalysisData.js`、常量 `constants.js`、自检脚本 `agentToolFields.test.js`（`node` 直接运行）；新增页面组件时参考此模块化模式。「Agent工具定义」列与详情块数据源为交易表 `RequestTools` 字段（`request_tools`，请求体解析出的工具列表，逗号分隔），详情块中独占一行多行换行展示
 
 ## 5. 代理核心流程与约束
 
@@ -399,7 +401,7 @@ go build -o GoWebDebugTool .      # 编译
 - 每个 `page_id` 的生命周期由 **创建它的 Agent** 负责。
 - SubAgent 结束时 **必须** 对自己创建的所有 `page_id` 调用 `/CloseChromePage`；返回 `2000` 视为已清理。
 
-完整规范：[`go-web-debug-tool/MCP_Proc_Def.md`](go-web-debug-tool/MCP_Proc_Def.md)。
+完整规范：[`go-web-debug-tool/MCP_Proc_Def.md`](../../go-web-debug-tool/MCP_Proc_Def.md)。
 
 ## 15. AI 信息爬虫功能（v1.4.0+ / 接口 v2.0.0）
 

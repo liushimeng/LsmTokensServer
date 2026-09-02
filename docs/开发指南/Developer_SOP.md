@@ -8,12 +8,12 @@ LsmTokensServer 是 Lsm AI Tokens 代理服务（AI Relay）+ AI 信息爬虫 MC
 
 | 类型     | 技术                                          |
 | -------- | --------------------------------------------- |
-| 语言     | Go 1.22+                                      |
+| 语言     | Go 1.26+                                      |
 | Web 框架 | 标准库 `net/http`                             |
 | ORM      | GORM 1.31.1 + MySQL Driver                    |
 | 浏览器   | chromedp + headless Chrome（v2.0.0 爬虫）     |
-| 前端     | 原生 HTML + JavaScript（模板渲染 + API 驱动） |
-| 架构     | 单一二进制，配置驱动，守护进程管理            |
+| 前端     | React 19 + Vite（`dist-manager`/`dist-user` 双构建，`__APP_ROLE__` 门控） |
+| 架构     | 后端单一二进制 + 前端双构建产物，配置驱动，守护进程管理 |
 
 ## 3. 数据库设计规范
 

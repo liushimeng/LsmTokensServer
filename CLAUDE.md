@@ -1,14 +1,14 @@
 # CLAUDE.md - LsmTokensServer 工程约束与代码规范（Claude Code 上下文）
 
-> 供 Claude Code / Claude Agent 工具加载使用。通用 AI Agent 规范见 [`docs/开发指南/AGENT.md`](docs/开发指南/AGENT.md)。
-> 完整源码索引见 [`docs/开发指南/AGENT_INDEX.md`](docs/开发指南/AGENT_INDEX.md)。
+> 供 Claude Code / Claude Agent 工具加载使用（当前版本 v2.0.77）。
+> 通用 AI Agent 入口与 SubAgent 规则见 [`AGENTS.md`](AGENTS.md)；完整源码索引见 [`docs/开发指南/AGENT_INDEX.md`](docs/开发指南/AGENT_INDEX.md)。
 
 ## 1. 工程定位
 
 LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架构。
 
 - 后端：`ServerGo/`（Go，按业务域分包）
-- 前端：`ClientWeb/`（React + Vite）
+- 前端：`ClientWeb/`（React + Vite，管理端/用户端双构建）
 - 文档：`docs/`
 - 脚本：`rebuild_restart_app.sh`
 
@@ -17,23 +17,22 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架�
 ### 2.1 编译 / 启动必须走脚本
 所有涉及编译、启动、重启的操作，必须通过 `./rebuild_restart_app.sh`：
 ```bash
-./rebuild_restart_app.sh --build-only           # 仅编译（不启动、不占端口）
+./rebuild_restart_app.sh --build-only            # 仅编译（不启动、不占端口）
 ./rebuild_restart_app.sh --build-only --skip-web # 仅编译后端
-./rebuild_restart_app.sh                        # 完整重启（编译 + 运行）
+./rebuild_restart_app.sh                         # 完整重启（编译 + 运行）
 ```
 禁止直接 `go build` 或 `nohup ./LsmTokensServer`。
 
 ### 2.2 端口规范
-- 端口规范：管理端 `9101`、AI 代理 `29000`（HTTP）/`29003`（HTTPS）、用户端 `29001`、MCP `29002`、爬虫 CDP `9222`。
+管理端 `9101`、AI 代理 `29000`（HTTP）/`29003`（HTTPS）、用户端 `29001`、MCP `29002`、爬虫 CDP `9222`。
 
 ### 2.3 敏感信息严禁提交
 以下文件/目录绝不能提交到 git（已在 `.gitignore` 中）：
 - `LsmTokensServer.conf`（MySQL 密码、openClaw API Key 等）
 - `server.crt` / `server.key`（TLS 证书私钥）
 - `*.log`、二进制、pid 文件
-- `go-web-debug-tool/`（本地私有子模块）
-- `python-generate-image-tool/`（本地私有子模块，图片生成 Python SDK）
-- `node_modules/`、`ClientWeb/dist/`
+- `go-web-debug-tool/`、`python-generate-image-tool/`（本地私有子模块）
+- `node_modules/`、`ClientWeb/dist*/`
 
 ### 2.4 提交规范
 - 中文 commit message，分阶段提交，格式：`阶段X：简要说明`
@@ -58,21 +57,25 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架�
 
 ## 3. 代码结构速查
 
-| 旧文件前缀 | 新位置（`ServerGo/` 下） | 说明 |
-|---|---|---|
-| `server_conf.go` | `config/` | 配置加载 |
-| `server_logger.go` | `logger/` | 日志轮转 |
-| `mysql_connect.go` / `mysql_*_sub_table.go` | `database/` + `models/` | DB 基础 + 业务模型 |
-| `agent_algorithm*.go` | `models/` | 路由选择算法（与 cache 同包避免循环依赖） |
-| `recognizer_*.go` | `recognizer/` | agent/session/tool 识别 |
-| `protocol_*.go` | `protocol/` | Anthropic↔OpenAI 协议转换 + SSE |
-| `server_http_ai_proxy*.go` / `server_http_agent_proxy.go` | `proxy/` | AI 代理转发 + 安全限流 |
-| `server_api_*.go` | `api/` | REST 接口（用户端 + 管理端） |
-| `spider_*.go` + `mcp_interface_*.go` | `spider/` | 爬虫 CDP + MCP 接口（同包避免循环依赖） |
-| `server_ws_*.go` | `websocket/` | WS 推送（ChatTotal 流式） |
-| `ai_api_connectivity.go` / `git_info.go` / `system_info_linux.go` | `system/` | 系统辅助 |
-| server_web_*.go（旧 HTML 生成） | 废弃，由前端实现 | `webserver/` 仅做 SPA 静态托管 + API 路由挂载 |
-| `ClientWeb/src/pages/chat-analysis/` | 前端模块化页面示例 | ChatAnalysis 从单文件拆分为 `index.jsx` + `ChatAnalysisToolbar.jsx` + `InlineDetailRow.jsx` + `Detail{Header,Tabs,Body,Footer}.jsx` + `useChatAnalysis{Filters,Data}.js` + `constants.js`；详情展示从 Modal 改为 DataTable 内联展开行 |
+**后端 `ServerGo/` 业务域分包**（迁移已完成，旧单体文件全部按域拆分）：
+
+| 包 | 职责 |
+|---|---|
+| `config/` | 配置加载（`LsmTokensServer.conf`） |
+| `logger/` | 日志轮转 |
+| `database/` + `models/` | DB 基础 + 业务模型 + 路由选择算法（与 cache 同包避免循环依赖） |
+| `recognizer/` | agent / session / tool 识别 |
+| `protocol/` | Anthropic↔OpenAI 协议转换 + SSE |
+| `proxy/` | AI 代理转发 + 安全限流 |
+| `api/` | REST 接口（用户端 + 管理端） |
+| `spider/` | 爬虫 CDP + MCP 接口（同包避免循环依赖） |
+| `websocket/` | WS 推送（ChatTotal 流式） |
+| `system/` | 系统辅助（连通性 / git 信息 / 系统信息） |
+| `webserver/` | SPA 静态托管 + API 路由挂载（双构建目录绑定，不再有 HTML 生成） |
+
+**前端 `ClientWeb/`**：React + Vite 双构建；模块化页面范例 `src/pages/chat-analysis/`——ChatAnalysis 由单文件拆分为 `index.jsx` + `ChatAnalysisToolbar.jsx` + `InlineDetailRow.jsx` + `Detail{Header,Tabs,Body,Footer}.jsx` + `useChatAnalysis{Filters,Data}.js` + `constants.js` + 自检脚本 `agentToolFields.test.js`；详情展示为 DataTable 内联展开行（替代 Modal）。
+
+**ChatAnalysis「Agent工具定义」**：列表列与详情块数据源均为交易表 `RequestTools` 字段（`request_tools`，请求体解析出的工具列表，逗号分隔）；详情块中该项独占一行、多行换行完整展示。
 
 ## 4. 工作流
 
@@ -92,22 +95,15 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架�
 > 这些工具以本地私有子模块形式存在（gitlink 提交到本仓库，实体库位于本地 `/usr/local/git-local-repos/`，不开源）。
 > AI Agent（Claude Code / Codex / OpenCode / pi / Hermes / OpenClaw）启动时会自动扫描项目根目录，结合本节说明即可加载。
 
-| 工具目录 | 用途 | 关键能力 |
-|----------|------|----------|
-| `python-generate-image-tool/` | 火山引擎方舟大模型 `doubao-seedream-5-0-pro-260628` 图片生成 SDK | `ArkImageGenerator().generate_and_save(prompt, size, watermark=False)`；默认输出 `ImageOutput/{prefix}_{timestamp}_{seq:03d}.png`；最小像素 3,686,400；可调用 `resize_image()` 二次缩放得到小图标 |
-
 ### 6.1 python-generate-image-tool 快速用法
 
+火山引擎方舟大模型图片生成 SDK：`ArkImageGenerator().generate_and_save(prompt, size, watermark=False)`；默认输出 `ImageOutput/{prefix}_{timestamp}_{seq:03d}.png`；最小像素 3,686,400；小图标先 `2048x2048` 生成再 `resize_image()` 二次缩放。
+
 ```bash
-# 安装依赖
 cd python-generate-image-tool
 pip install -r requirements.txt
-
-# 单元测试（mock，不消耗 API 配额）
-python -m pytest tests/ -v
-
-# 端到端测试（调用真实 API）
-python test_generate_e2e.py
+python -m pytest tests/ -v        # 单元测试（mock，不消耗 API 配额）
+python test_generate_e2e.py       # 端到端测试（调用真实 API）
 ```
 
 ```python
@@ -121,83 +117,12 @@ path = gen.generate_and_save(
     watermark=False,
     filename_prefix="cover",
 )
-print("图片已保存:", path)
 ```
 
-### 6.2 API Key 加载优先级（高 → 低）
-
-1. 环境变量 `ARK_API_KEY`
-2. `.env` 文件中的 `ARK_API_KEY`
-3. 代码内置 `DEFAULT_API_KEY`（仓库内已埋默认值，本机可直接调用）
-
-### 6.3 异常层级
-
-`ArkBaseError` → `ConfigError` / `ValidationError` / `ArkAPIError` / `NetworkError`，捕获基类即可统一处理。
-
-### 6.4 Agent 调用约束
-
-- **模型固定**：禁止修改 `model` 字段，必须为 `doubao-seedream-5-0-pro-260628`。
-- **超时**：HTTP 请求超时 120 秒（`ArkImageGenerator.REQUEST_TIMEOUT_SECONDS`）。
-- **小图标 workaround**：API 拒绝低于 3,686,400 像素，先用 `2048x2048` 生成，再用 `resize_image()` 缩到目标尺寸。
-- **多媒体处理**：图片/音频/视频优先使用本机 `ffmpeg`。
+- **API Key 加载优先级**（高→低）：环境变量 `ARK_API_KEY` > `.env` 中 `ARK_API_KEY` > 代码内置 `DEFAULT_API_KEY`（仓库已埋默认值，本机可直接调用）。
+- **异常层级**：`ArkBaseError` → `ConfigError` / `ValidationError` / `ArkAPIError` / `NetworkError`，捕获基类即可统一处理。
+- **Agent 调用约束**：模型固定 `doubao-seedream-5-0-pro-260628`（禁止修改）；HTTP 超时 120 秒；图片/音频/视频处理优先使用本机 `ffmpeg`。
 
 ## 7. SubAgent 角色定义与使用规则
 
-> 以下场景必须使用独立 SubAgent（`spawn_agent`），并为每个 SubAgent 自定义专属角色（role）和系统词（system prompt），确保专业分工与上下文隔离。
-
-### 7.1 Web 端游戏设计（`ClientWeb/`）
-
-- **触发场景**：涉及 `ClientWeb/` 文件夹下的游戏功能设计、游戏页面开发、游戏交互逻辑实现。
-- **SubAgent 角色**：`Web 游戏设计师 / 前端游戏开发工程师`
-- **系统词要点**：
-  - 熟悉 React + Vite 技术栈，擅长游戏化 UI/UX 设计
-  - 了解 `ClientWeb/` 双构建隔离机制（`__APP_ROLE__` 常量门控）
-  - 熟悉前端游戏动画（CSS Animation / Canvas / WebGL）、状态管理、音效集成
-  - 遵循前端安全红线（禁止持久化 API Key、localStorage 限条数）
-
-### 7.2 服务器端游戏设计（`ServerGo/`）
-
-- **触发场景**：涉及 `ServerGo/` 文件夹下的游戏后端逻辑、游戏数据接口、游戏业务域建模。
-- **SubAgent 角色**：`游戏后端架构师 / Go 游戏服务开发工程师`
-- **系统词要点**：
-  - 熟悉 Go 语言及 `ServerGo/` 业务域分包结构（`models/`、`api/`、`websocket/` 等）
-  - 了解游戏服务器常见架构（房间匹配、实时通信、状态同步、排行榜）
-  - 遵循后端安全红线（bcrypt 哈希、JWT 鉴权、禁止硬编码密钥）
-  - 输出代码需通过 `go build ./...` 与 `go test ./...`
-
-### 7.3 产品设计
-
-- **触发场景**：新功能的产品设计、需求拆解、交互流程设计、PRD 撰写。
-- **SubAgent 角色**：`产品经理 / 产品设计师`
-- **系统词要点**：
-  - 擅长用户需求分析、功能优先级排序、MVP 定义
-  - 熟悉 AI Tokens 代理与管理的业务场景
-  - 输出格式：用户故事 + 功能清单 + 交互流程图描述 + 验收标准
-
-### 7.4 产品界面设计与图片生成
-
-- **触发场景**：产品界面视觉设计、UI 原型设计，以及使用 `python-generate-image-tool` 生成图片资源。
-- **SubAgent 角色**：`UI/UX 设计师 / AI 图像创作师`
-- **系统词要点**：
-  - 擅长将产品需求转化为高保真界面描述与 prompt
-  - 熟悉 `python-generate-image-tool` 调用方式（模型固定 `doubao-seedream-5-0-pro-260628`，最小像素 3,686,400）
-  - 了解图片输出路径规则（`ImageOutput/{prefix}_{timestamp}_{seq:03d}.png`）
-  - 小图标需先生成 `2048x2048` 再用 `resize_image()` 缩放
-
-### 7.5 复杂功能测试与独立游戏产品开发
-
-- **触发场景**：需要前后端配合的复杂功能测试、或独立游戏产品的完整开发流程。
-- **SubAgent 角色**：`全栈游戏开发工程师 / QA 测试工程师`
-- **系统词要点**：
-  - 同时具备前端（React）和后端（Go）开发能力
-  - 熟悉前后端联调流程、接口契约（REST/WebSocket）
-  - 擅长编写集成测试、端到端测试用例
-  - 了解游戏产品完整生命周期（设计→开发→测试→部署）
-  - 部署验证走 `./rebuild_restart_app.sh --build-only`
-
-### 7.6 SubAgent 使用原则
-
-1. **角色隔离**：不同场景使用不同 SubAgent，避免单一 Agent 承担过多上下文。
-2. **系统词定制**：每次 `spawn_agent` 必须传入与场景匹配的 `message`（含角色定义与系统词）。
-3. **结果整合**：SubAgent 完成后，主 Agent 负责审核、集成与最终提交。
-4. **并行优先**：无依赖的多个 SubAgent 应并行执行（同时 `spawn_agent`），提升效率。
+统一维护在 [`AGENTS.md`](AGENTS.md)「SubAgent 角色定义与使用规则」：五类强制场景（Web 端游戏设计 / 服务器端游戏设计 / 产品设计 / 界面设计与图片生成 / 复杂功能测试与独立游戏产品），含触发条件、角色、系统词要点与四条使用原则（角色隔离、系统词定制、结果整合、并行优先）。Claude Code 同样适用。
