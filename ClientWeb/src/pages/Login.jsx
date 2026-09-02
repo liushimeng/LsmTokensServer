@@ -5,6 +5,8 @@ import { useI18n } from '../i18n'
 
 // 登录页：双登录方式（模型名登录 + 用户名登录）+ 验证码
 // 阶段AQ（20260831）：新增用户名+密码+手机号登录，通过 Tab 切换
+// 阶段BO（20260902）：用户名登录成功后手机号自动保存 localStorage 并自动回填；
+// 手机号输入框与密码一致，默认掩码隐藏、支持显示/隐藏切换。
 export default function Login() {
   const { t } = useI18n()
   const [loginType, setLoginType] = useState('model') // 'model' 或 'user'
@@ -23,6 +25,7 @@ export default function Login() {
   const [error, setError] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [showPhone, setShowPhone] = useState(false) // 阶段BO：手机号默认隐藏（敏感信息遮蔽）
   const [busy, setBusy] = useState(false)
   // 阶段AO：组件卸载后 setState 静默丢弃，避免 React StrictMode 双调用或路由切换时的
   // "Can't perform a React state update on an unmounted component" warning。
@@ -58,6 +61,10 @@ export default function Login() {
       if (creds.userData && creds.userData.mn) {
         setUserName(creds.userData.mn)
       }
+      // 阶段BO：恢复用户名 Tab 的已保存手机号（登录成功即自动保存，读取回填不依赖"记住我"）
+      if (creds.userData && creds.userData.ph) {
+        setPhone(creds.userData.ph)
+      }
       // 记住我状态跟随当前 active Tab
       if (activeType === 'user') {
         setRemember(!!(creds.userData && creds.userData.mn))
@@ -74,7 +81,8 @@ export default function Login() {
     // 保存当前 Tab 的凭据（勾选了"记住我"时）
     if (remember) {
       const savedName = loginType === 'model' ? modelName : userName
-      if (savedName) saveCredentials(loginType, savedName)
+      // 阶段BO：离开用户名 Tab 时携带当前手机号，保持存储新鲜
+      if (savedName) saveCredentials(loginType, savedName, loginType === 'user' ? phone : undefined)
     }
     setLoginType(type)
     setError('')
@@ -84,6 +92,7 @@ export default function Login() {
     if (type === 'user') {
       const ud = savedCredsRef.current.userData
       if (ud && ud.mn && !userName) setUserName(ud.mn)
+      if (ud && ud.ph && !phone) setPhone(ud.ph) // 阶段BO：手机号回填兜底
       setRemember(!!(ud && ud.mn))
     } else {
       const md = savedCredsRef.current.modelData
@@ -124,7 +133,15 @@ export default function Login() {
       if (d.success) {
         // 记住我：保存登录类型和名称
         const savedName = loginType === 'model' ? modelName : userName
-        if (remember) saveCredentials(loginType, savedName); else clearCredentials()
+        if (loginType === 'user' && phone) {
+          // 阶段BO：用户名登录成功且填写了手机号 → 恒自动保存手机号；
+          // 勾选"记住我"时连同用户名一起保存，未勾选时仅存手机号（mn 置空）。
+          saveCredentials('user', remember ? userName : '', phone)
+        } else if (remember) {
+          saveCredentials(loginType, savedName)
+        } else {
+          clearCredentials()
+        }
         window.location.hash = '#/Home'
         window.location.reload()
       } else {
@@ -200,10 +217,19 @@ export default function Login() {
             </label>
             <label className="field">
               <span>{t('login.phone')}</span>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)}
-                     autoComplete="tel" placeholder={t('login.emptyPhone')} />
+              {/* 阶段BO：手机号与密码一致——默认掩码隐藏，支持显示/隐藏切换 */}
+              <span className="field-inline">
+                <input type={showPhone ? 'text' : 'password'} value={phone}
+                       onChange={(e) => setPhone(e.target.value)}
+                       autoComplete="off" inputMode="tel" placeholder={t('login.emptyPhone')} />
+                <button type="button" className="btn btn-link" onClick={() => setShowPhone(!showPhone)}>
+                  {showPhone ? t('common.hide') : t('common.show')}
+                </button>
+              </span>
               {/* 阶段AR：手机号可选，未填写时按 DB 中实际手机号（可能为空）校验 */}
               <span className="field-hint">{t('login.phoneOptionalHint')}</span>
+              {/* 阶段BO：告知用户手机号将自动保存在本机浏览器 */}
+              <span className="field-hint">{t('login.phoneSaveHint')}</span>
             </label>
           </>
         )}
