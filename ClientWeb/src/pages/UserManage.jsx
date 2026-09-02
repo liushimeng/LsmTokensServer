@@ -4,6 +4,7 @@ import { clearUserModelOptionsCache } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import { useI18n } from '../i18n'
+import { copyToClipboard } from '../shared/clipboard'
 
 // 用户管理：UserManageInterface + UserModelManageInterface（均 POST JSON {action:...}）
 // 分析页跳转：#/ChatAnalysis?user_name=..&model_name=.. 等（对照旧版 nav）
@@ -199,27 +200,20 @@ export default function UserManage() {
                 {
                   key: 'api_key',
                   title: t('userManage.apiKey'),
-                  render: (v) => {
+                  render: (v, m) => {
                     if (!v) return '-'
                     const handleCopy = async (e) => {
                       e.stopPropagation()
                       try {
-                        if (navigator.clipboard && navigator.clipboard.writeText) {
-                          await navigator.clipboard.writeText(v)
-                        } else {
-                          // 兜底走 document.execCommand 兼容旧版浏览器/HTTP 环境
-                          const ta = document.createElement('textarea')
-                          ta.value = v
-                          ta.style.position = 'fixed'
-                          ta.style.opacity = '0'
-                          document.body.appendChild(ta)
-                          ta.focus()
-                          ta.select()
-                          document.execCommand('copy')
-                          document.body.removeChild(ta)
+                        // 列表默认脱敏，点击复制时经 reveal_key 按需获取完整 Key
+                        const resp = await post('UserModelManageInterface', { action: 'reveal_key', id: m.id, user_id: m.user_id })
+                        const fullKey = resp && resp.data && resp.data.api_key
+                        if (!fullKey) {
+                          alert((resp && resp.message) || '获取 API Key 失败')
+                          return
                         }
-                        if (window.showToast) window.showToast(t('common.copied'))
-                        else alert(t('common.copied'))
+                        const ok = await copyToClipboard(fullKey)
+                        if (!ok) alert('复制失败，请手动复制')
                       } catch (err) {
                         alert(err.message || String(err))
                       }

@@ -204,6 +204,21 @@ func userModelManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		// 响应脱敏：API Key 仅返回前 8 位掩码（前端仅展示前缀，编辑回传空值表示未修改）
 		maskUserModelAPIKeys(models)
 		json.NewEncoder(w).Encode(userManageResp{Success: true, Data: models})
+	case "reveal_key":
+		if req.ID == 0 {
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "缺少模型 ID"})
+			return
+		}
+		model, err := modelsdb.GetUserModelByID(req.ID)
+		if err != nil {
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "模型不存在: " + err.Error()})
+			return
+		}
+		if model.UserID != req.UserID {
+			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "无权访问该模型"})
+			return
+		}
+		json.NewEncoder(w).Encode(userManageResp{Success: true, Data: map[string]interface{}{"api_key": model.APIKey}})
 	case "add":
 		modelName, err := ValidateField(strings.TrimSpace(req.ModelName), 64, "模型名称")
 		if err != nil {

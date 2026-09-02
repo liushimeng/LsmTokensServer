@@ -249,3 +249,96 @@ func TestChatDialogManagerRevealKey(t *testing.T) {
 		t.Fatalf("reveal_key api_key = %q, want 完整 Key", got)
 	}
 }
+
+// TestUserModelManageRevealKey 管理端 UserModelManageInterface reveal_key 返回完整 API Key；
+// 越权（模型不属于该 user_id）被拒绝。
+func TestUserModelManageRevealKey(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	user, fullKey := setupMaskUserModel(t, "revealuser", "reveal-model-01")
+	other, _ := setupMaskUserModel(t, "revealother", "reveal-model-02")
+
+	// reveal_key：返回完整 Key
+	body, _ := json.Marshal(map[string]interface{}{"action": "reveal_key", "id": user.ID, "user_id": user.ID})
+	// 注意：这里 id 是 user ID，但我们需要的是 model ID；先获取模型列表拿到 model ID
+	listBody, _ := json.Marshal(map[string]interface{}{"action": "list", "user_id": user.ID})
+	listReq := httptest.NewRequest("POST", "/UserModelManageInterface", bytes.NewReader(listBody))
+	listReq.Header.Set("Content-Type", "application/json")
+	listRec := httptest.NewRecorder()
+	userModelManageInterfaceHandle(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body: %s", listRec.Code, listRec.Body.String())
+	}
+	var listResp struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			ID        uint64 `json:"id"`
+			ModelName string `json:"model_name"`
+			UserID    uint64 `json:"user_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("unmarshal list: %v, body: %s", err, listRec.Body.String())
+	}
+	if !listResp.Success || len(listResp.Data) != 1 {
+		t.Fatalf("list success=%v data=%d", listResp.Success, len(listResp.Data))
+	}
+	modelID := listResp.Data[0].ID
+
+	// reveal_key：正确 user_id + model ID → 返回完整 Key
+	body, _ = json.Marshal(map[string]interface{}{"action": "reveal_key", "id": modelID, "user_id": user.ID})
+	req := httptest.NewRequest("POST", "/UserModelManageInterface", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	userModelManageInterfaceHandle(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Success bool                   `json:"success"`
+		Message string                 `json:"message"`
+		Data    map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v, body: %s", err, rec.Body.String())
+	}
+	if !resp.Success {
+		t.Fatalf("reveal_key failed: %s", resp.Message)
+	}
+	if got, _ := resp.Data["api_key"].(string); got != fullKey {
+		t.Fatalf("reveal_key api_key = %q, want 完整 Key %q", got, fullKey)
+	}
+
+	// 越权：模型属于 user，但请求用 other.UserID → 被拒绝
+	body, _ = json.Marshal(map[string]interface{}{"action": "reveal_key", "id": modelID, "user_id": other.ID})
+	req = httptest.NewRequest("POST", "/UserModelManageInterface", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	userModelManageInterfaceHandle(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v, body: %s", err, rec.Body.String())
+	}
+	if resp.Success || !strings.Contains(resp.Message, "无权") {
+		t.Fatalf("越权 reveal 应被拒绝, success=%v msg=%q", resp.Success, resp.Message)
+	}
+
+	// 缺少 ID → 失败
+	body, _ = json.Marshal(map[string]interface{}{"action": "reveal_key", "user_id": user.ID})
+	req = httptest.NewRequest("POST", "/UserModelManageInterface", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	userModelManageInterfaceHandle(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v, body: %s", err, rec.Body.String())
+	}
+	if resp.Success || !strings.Contains(resp.Message, "缺少") {
+		t.Fatalf("缺少 ID 应被拒绝, success=%v msg=%q", resp.Success, resp.Message)
+	}
+}
