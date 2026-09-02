@@ -3,7 +3,7 @@
 // ChatAnalysis AgentTool* 三字段显示的轻量自检脚本（无第三方测试框架）。
 // 覆盖：
 //   1. 三语 i18n key（chatAnalysis.agentToolInfo / chatAnalysis.agentToolBlock）完整性
-//   2. Agent工具信息 列渲染纯函数（数据源 tool_identifier 字段；长截断 + 空降级 + title 属性）
+//   2. Agent工具定义 列渲染纯函数（数据源 tool_identifier 字段；长截断 + 空降级 + title 属性）
 //   3. Agent 工具详情块条件渲染逻辑（三字段全空 → 不渲染；任一非空 → 渲染对应项）
 //
 // 运行：
@@ -53,7 +53,7 @@ for (const key of preservedKeys) {
   ok(typeof ja[key] === 'string' && ja[key].length > 0, `[ja]    保留 ${key} 非空`)
 }
 
-// ===== 2. Agent工具信息 列渲染纯函数（与 index.jsx 的 render 行为一致） =====
+// ===== 2. Agent工具定义 列渲染纯函数（与 index.jsx 的 render 行为一致） =====
 // v2.0.7x：该列数据源由 agent_tool_info 字段切换为 tool_identifier 字段，渲染逻辑不变。
 // 重构自 index.jsx 的 render 表达式：
 //   v => v ? <span title={v}>{String(v).length > 60 ? String(v).slice(0, 60) + '…' : v}</span> : '-'
@@ -99,7 +99,7 @@ ok(sixtyOneOut.text.length === 61, '61 字符截断（60 + ellipsis）')
 ok(sixtyOneOut.text.endsWith('…'), '61 字符以 ellipsis 结尾')
 
 // ===== 3. Agent 工具详情块条件渲染逻辑（与 DetailHeader.jsx 行为一致） =====
-// v2.0.7x：详情块「Agent工具信息」项数据源由 agent_tool_info 字段切换为 tool_identifier 字段。
+// v2.0.7x：详情块「Agent工具定义」项数据源由 agent_tool_info 字段切换为 tool_identifier 字段。
 // 重构自 DetailHeader.jsx 的三元判断：
 //   const hasAny = row.agent_tool_name || row.tool_identifier || row.agent_tool_session_id
 //   const itemName = row.agent_tool_name ? { label: '...', value: row.agent_tool_name } : null

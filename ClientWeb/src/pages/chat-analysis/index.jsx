@@ -142,7 +142,7 @@ export default function ChatAnalysis({ route }) {
     { key: 'tokens_output_size', title: t('chatAnalysis.outputTokens'), render: (v) => fmtNum(v) },
     { key: 'elapsed_ms', title: t('chatAnalysis.duration'), render: (v) => fmtMs(v) },
     { key: 'agent_tool_name', title: t('chatAnalysis.agentTool'), render: (v) => v || '-' },
-    // v2.0.7x 阶段BG：Agent工具信息 列——展示调用工具标识（tool_identifier 字段），
+    // v2.0.7x 阶段BG：Agent工具定义 列——展示调用工具标识（tool_identifier 字段），
     // 不再使用 agent_tool_info 字段；空值降级 '-'；title 展示完整内容，便于悬停查看；超长字符串截断。
     { key: 'tool_identifier', title: t('chatAnalysis.agentToolInfo'), render: (v) =>
       v ? <span title={v}>{String(v).length > 60 ? String(v).slice(0, 60) + '…' : v}</span> : '-'

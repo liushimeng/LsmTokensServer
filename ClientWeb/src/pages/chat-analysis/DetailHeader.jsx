@@ -59,8 +59,8 @@ export default function DetailHeader({ row }) {
         <span>{fmtTime(row.created_at)}</span>
       </div>
 
-      {/* v2.0.7x 阶段BG：Agent 工具信息块 —— 展示三字段（agent_tool_name / tool_identifier / agent_tool_session_id），
-          其中「Agent工具信息」项使用调用工具标识 tool_identifier 字段（不再使用 agent_tool_info 字段），
+      {/* v2.0.7x 阶段BG：Agent 工具定义块 —— 展示三字段（agent_tool_name / tool_identifier / agent_tool_session_id），
+          其中「Agent工具定义」项使用调用工具标识 tool_identifier 字段（不再使用 agent_tool_info 字段），
           三字段全空时整块不渲染，避免无意义空块干扰阅读；详情头部仅展示 Agent 工具原生识别值
           （不展示合成 session_id 的归一化逻辑，由列表列负责）。 */}
       {(row.agent_tool_name || row.tool_identifier || row.agent_tool_session_id) ? (
