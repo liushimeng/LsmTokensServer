@@ -59,10 +59,11 @@ export default function DetailHeader({ row }) {
         <span>{fmtTime(row.created_at)}</span>
       </div>
 
-      {/* v2.0.7x 阶段BG：Agent 工具信息块 —— 展示三字段（agent_tool_name / agent_tool_info / agent_tool_session_id），
+      {/* v2.0.7x 阶段BG：Agent 工具信息块 —— 展示三字段（agent_tool_name / tool_identifier / agent_tool_session_id），
+          其中「Agent工具信息」项使用调用工具标识 tool_identifier 字段（不再使用 agent_tool_info 字段），
           三字段全空时整块不渲染，避免无意义空块干扰阅读；详情头部仅展示 Agent 工具原生识别值
           （不展示合成 session_id 的归一化逻辑，由列表列负责）。 */}
-      {(row.agent_tool_name || row.agent_tool_info || row.agent_tool_session_id) ? (
+      {(row.agent_tool_name || row.tool_identifier || row.agent_tool_session_id) ? (
         <div className="detail-head-agent">
           <span className="dha-title">🤖 {t('chatAnalysis.agentToolBlock')}</span>
           {row.agent_tool_name ? (
@@ -71,10 +72,10 @@ export default function DetailHeader({ row }) {
               <span className="dha-value">{row.agent_tool_name}</span>
             </span>
           ) : null}
-          {row.agent_tool_info ? (
-            <span className="dha-item" title={row.agent_tool_info}>
+          {row.tool_identifier ? (
+            <span className="dha-item" title={row.tool_identifier}>
               <span className="dha-label">{t('chatAnalysis.agentToolInfo')}：</span>
-              <span className="dha-value">{row.agent_tool_info}</span>
+              <span className="dha-value">{row.tool_identifier}</span>
             </span>
           ) : null}
           {row.agent_tool_session_id ? (
