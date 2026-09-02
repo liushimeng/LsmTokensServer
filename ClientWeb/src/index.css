@@ -309,6 +309,9 @@ a { color: var(--primary); text-decoration: none; }
 .detail-head-agent { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-top: 8px; padding: 8px 12px; border-radius: 6px; background: var(--surface-2, #f6f7f9); border: 1px solid var(--border); }
 .detail-head-agent .dha-title { font-weight: 600; color: var(--text, #222); font-size: 13px; }
 .detail-head-agent .dha-item { display: inline-flex; gap: 4px; align-items: baseline; min-width: 0; max-width: 100%; }
+/* 阶段BL：Agent工具定义（request_tools 逗号分隔长列表）独占一行 + 多行换行完整展示，不截断 */
+.detail-head-agent .dha-item-full { flex-basis: 100%; }
+.detail-head-agent .dha-item-full .dha-value { white-space: normal; word-break: break-word; max-width: none; overflow: visible; text-overflow: unset; line-height: 1.6; }
 .detail-head-agent .dha-label { color: var(--muted, #888); font-size: 12px; white-space: nowrap; }
 .detail-head-agent .dha-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--text, #222); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 360px; }
 

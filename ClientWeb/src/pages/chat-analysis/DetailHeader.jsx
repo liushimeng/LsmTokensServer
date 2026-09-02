@@ -61,6 +61,7 @@ export default function DetailHeader({ row }) {
 
       {/* v2.0.7x 阶段BG：Agent 工具定义块 —— 展示三字段（agent_tool_name / request_tools / agent_tool_session_id），
           其中「Agent工具定义」项使用请求体解析出的工具列表 request_tools 字段（不再使用 agent_tool_info / tool_identifier 字段），
+          「Agent工具定义」独占一行完整展示（逗号分隔长列表自动多行换行，不截断），
           三字段全空时整块不渲染，避免无意义空块干扰阅读；详情头部仅展示 Agent 工具原生识别值
           （不展示合成 session_id 的归一化逻辑，由列表列负责）。 */}
       {(row.agent_tool_name || row.request_tools || row.agent_tool_session_id) ? (
@@ -73,7 +74,7 @@ export default function DetailHeader({ row }) {
             </span>
           ) : null}
           {row.request_tools ? (
-            <span className="dha-item" title={row.request_tools}>
+            <span className="dha-item dha-item-full" title={row.request_tools}>
               <span className="dha-label">{t('chatAnalysis.agentToolInfo')}：</span>
               <span className="dha-value">{row.request_tools}</span>
             </span>
