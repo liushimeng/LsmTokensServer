@@ -17,7 +17,7 @@ LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，前后端分
 ## Agent 必读
 
 1. **端口规范**：管理端 `9101`、AI 代理 `29000`（HTTP）/`29003`（HTTPS）、用户端 `29001`、MCP `29002`、爬虫 CDP `9222`。
-2. **编译/启动走脚本**：`./rebuild_restart_app.sh`（完整重启）；仅编译 `--build-only`；仅后端加 `--skip-web`。禁止直接 `go build` 或 `nohup ./LsmTokensServer`。
+2. **编译/启动走脚本**：必须且只能使用 `./rebuild_restart_app.sh`（不带任何参数，完整重启）。禁止带 `--build-only`、`--skip-web` 等参数；禁止直接 `go build` 或 `nohup ./LsmTokensServer`。
 3. **敏感信息不提交**：`LsmTokensServer.conf`、证书、日志、`tmpPlan/`、`.env`、私有子模块（`go-web-debug-tool/`、`python-generate-image-tool/`）。
 4. **中文 commit**：分阶段提交，格式 `阶段X：说明`；每阶段保证 `go build ./...` 通过。
 5. **前端双构建隔离**（阶段T 起强制）：`npm run build` 一条命令产出 `dist-manager`/`dist-user` 两套产物，`webserver` 按角色绑定目录、禁止共享或跨目录回落；角色由构建期常量 `__APP_ROLE__`（vite `define`）决定，禁止运行时嗅探；管理员专属页面与接口调用必须 `__APP_ROLE__ === 'manager'` 常量门控 + 动态 `import()`，确保用户端产物零管理代码。
@@ -63,3 +63,4 @@ LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，前后端分
 | 复杂功能测试与独立游戏产品 | 前后端配合复杂功能测试、独立游戏完整开发 | 全栈游戏开发工程师 / QA 测试工程师 | React+Go 全栈；REST/WebSocket 接口契约；集成与端到端测试用例；产品全生命周期（设计→开发→测试→部署）；部署验证走 `./rebuild_restart_app.sh --build-only` |
 
 **使用原则**：① 角色隔离——不同场景用不同 SubAgent，避免单一 Agent 承担过多上下文；② 系统词定制——每次 `spawn_agent` 必传角色定义与系统词；③ 结果整合——SubAgent 完成后由主 Agent 审核、集成与最终提交；④ 并行优先——无依赖的多个 SubAgent 并行执行。
+ | 复杂功能测试与独立游戏产品 | 前后端配合复杂功能测试、独立游戏完整开发 | 全栈游戏开发工程师 / QA 测试工程师 | React+Go 全栈；REST/WebSocket 接口契约；集成与端到端测试用例；产品全生命周期（设计→开发→测试→部署）；部署验证走 `./rebuild_restart_app.sh` |

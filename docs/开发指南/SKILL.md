@@ -39,8 +39,7 @@ nohup ./LsmTokensServer
 
 ```bash
 go test ./...
-./rebuild_restart_app.sh --build-only
-./rebuild_restart_app.sh
+./rebuild_restart_app.sh                # 完整重启（编译 + 运行）
 ```
 
 规则：
@@ -48,7 +47,8 @@ go test ./...
 - 修改 Go 文件后必须 `gofmt -w` 修改过的 `.go` 文件
 - 测试失败必须先修复；不要带失败测试继续编译或重启
 - 配置变更（用户、模型、源站、路由）正常通过 Web 页面实时生效，不需要重启
-- LsmTokensServer 是 AI IDE 代理依赖，重启会中断流式响应；仅代码变更或必须重载二进制时重启
+- LsmTokensServer 是 AI IDE 代理依赖，重启会中断流式响应；仅代码变更或必须重载二进制时重启。
+- **禁止**给 `rebuild_restart_app.sh` 带 `--build-only`、`--skip-web` 等参数（完整重启即可）。
 
 ## 3. 前端修改 Skill
 
@@ -234,10 +234,7 @@ go test -run TestAgentToolRecognition -count=1 -v
 # 全量
 go test ./...
 
-# 编译但不重启
-./rebuild_restart_app.sh --build-only
-
-# 滚动重启并验证端口
+# 完整重启（编译 + 滚动重启 + 验证端口）
 ./rebuild_restart_app.sh
 ```
 

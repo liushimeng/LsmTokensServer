@@ -13,11 +13,8 @@
 ## 日常命令
 
 ```bash
-# 编译（默认推荐）
-./rebuild_restart_app.sh --build-only
-
-# 仅后端
-./rebuild_restart_app.sh --build-only --skip-web
+# 完整重启（编译 + 运行）
+./rebuild_restart_app.sh
 
 # 运行后端测试
 cd ServerGo && go test ./... && go vet ./...
@@ -28,6 +25,8 @@ npm run build                    # 生产构建
 
 # 数据库迁移 / 表初始化（有 MySQL 时）
 # 首次启动会自动建表（见 ServerGo/main.go）
+
+> **注意**：`./rebuild_restart_app.sh` 必须不带任何参数（禁止 `--build-only`、`--skip-web`）。
 ```
 
 ## 配置

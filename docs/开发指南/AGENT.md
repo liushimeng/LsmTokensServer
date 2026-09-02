@@ -95,13 +95,13 @@ LsmTokensServer = AI 代理服务 + AI 信息爬虫：
 ```bash
 go test ./...
 gofmt -w <修改的 .go>
-./rebuild_restart_app.sh --build-only   # 仅编译
-./rebuild_restart_app.sh                # 滚动重启
+./rebuild_restart_app.sh                # 完整重启（编译 + 运行）
 ```
 
-- 修改 Go 文件后必须 `gofmt -w`
+- **禁止**给 `rebuild_restart_app.sh` 带 `--build-only`、`--skip-web` 等参数（完整重启即可）。
+- 修改 Go 文件后必须 `gofmt -w`。
 - 测试失败必须先修复再编译重启
-- 重启会中断流式响应，确认没有进行中的长连接后再执行
+- 重启会中断流式响应，确认没有进行中的长连接后再执行。
 
 ### 运行保护
 

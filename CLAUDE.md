@@ -15,13 +15,11 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架�
 ## 2. 必须遵守的规则
 
 ### 2.1 编译 / 启动必须走脚本
-所有涉及编译、启动、重启的操作，必须通过 `./rebuild_restart_app.sh`：
+所有涉及编译、启动、重启的操作，必须且只能使用 `./rebuild_restart_app.sh`（不带任何参数）：
 ```bash
-./rebuild_restart_app.sh --build-only            # 仅编译（不启动、不占端口）
-./rebuild_restart_app.sh --build-only --skip-web # 仅编译后端
 ./rebuild_restart_app.sh                         # 完整重启（编译 + 运行）
 ```
-禁止直接 `go build` 或 `nohup ./LsmTokensServer`。
+禁止直接 `go build` 或 `nohup ./LsmTokensServer`。禁止带 `--build-only`、`--skip-web` 等参数（完整重启即可，脚本内部已处理前后端编译与服务启停）。
 
 ### 2.2 端口规范
 管理端 `9101`、AI 代理 `29000`（HTTP）/`29003`（HTTPS）、用户端 `29001`、MCP `29002`、爬虫 CDP `9222`。
@@ -82,7 +80,7 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架�
 1. 先读 `docs/项目迁移解决方案/` 对应阶段文档，确认设计。
 2. 在对应包内实现/修改，保持包内自洽，减少跨包循环依赖。
 3. 单元测试 + `go vet` 通过。
-4. `./rebuild_restart_app.sh --build-only` 编译验证。
+4. `./rebuild_restart_app.sh` 完整重启验证。
 5. 中文 commit 提交。
 
 ## 5. 敏感配置获取

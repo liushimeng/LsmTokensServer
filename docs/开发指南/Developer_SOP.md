@@ -241,15 +241,13 @@ if err != nil {
 **必须**使用 `./rebuild_restart_app.sh` 滚动重启（脚本内部完成新实例启动 + 端口验证 + 旧实例停止）：
 
 ```bash
-# 仅编译（不重启）
-./rebuild_restart_app.sh --build-only
-
-# 滚动重启（启动新实例 + 验证端口 + 停止旧实例）
+# 完整重启（编译 + 启动新实例 + 验证端口 + 停止旧实例）
 ./rebuild_restart_app.sh
 ```
 
 **禁止的操作**：
 - 手动 `go build` / `nohup ./LsmTokensServer &` / `./LsmTokensServer -d`
+- **禁止**给 `rebuild_restart_app.sh` 带 `--build-only`、`--skip-web` 等参数（完整重启即可）。
 - 在 AI IDE 正在长对话或流式响应过程中重启
 - 不验证新实例就停止旧实例
 

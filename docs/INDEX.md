@@ -55,12 +55,11 @@ LsmTokensServer/
 ## 快速开始
 
 ```bash
-# 编译前后端（不启动、不占端口）
-./rebuild_restart_app.sh --build-only
-
-# 仅编译后端
-./rebuild_restart_app.sh --build-only --skip-web
+# 完整重启（编译 + 运行）
+./rebuild_restart_app.sh
 
 # 运行测试
 cd ServerGo && go test ./...
 ```
+
+> **注意**：`./rebuild_restart_app.sh` 必须不带任何参数（禁止 `--build-only`、`--skip-web`）。
