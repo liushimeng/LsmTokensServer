@@ -80,7 +80,8 @@ func managerLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.CaptchaID == "" || req.CaptchaCode == "" || !captcha.VerifyString(req.CaptchaID, req.CaptchaCode) {
-		recordLoginFailure("manager:" + clientIP)
+		// 阶段BQ：验证码错误不再计入防爆破锁定（同用户端）——验证码本身即防机器手段，
+		// 肉眼输错不应触发 IP 锁定把正常管理员锁死。
 		json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: "验证码错误或已过期"})
 		return
 	}

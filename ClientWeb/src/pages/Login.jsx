@@ -8,6 +8,9 @@ import { useI18n } from '../i18n'
 // 阶段BO（20260902）：用户名登录成功后手机号自动保存 localStorage 并自动回填；
 // 手机号输入框与密码一致，默认掩码隐藏、支持显示/隐藏切换。
 // 阶段BP（20260903）：双 Tab 自动填充隔离（autoComplete 差异化）+ 手机号加密存储。
+// 阶段BQ（20260903）：双 Tab 记忆完全独立化——rememberModel/rememberUser 独立 state；
+// 模型 Tab 记住模型名+API Key，用户 Tab 记住用户名+密码+手机号（全部 AES-GCM 加密）；
+// submit 按 Tab 独立清除（clearCredentials(type)）；验证码错误不触发锁定（后端修复）。
 export default function Login() {
   const { t } = useI18n()
   const [loginType, setLoginType] = useState('model') // 'model' 或 'user'
@@ -22,14 +25,15 @@ export default function Login() {
   const [phone, setPhone] = useState('')
   // 通用字段
   const [captchaCode, setCaptchaCode] = useState('')
-  const [remember, setRemember] = useState(false)
+  // 阶段BQ：双 Tab 独立"记住我"状态（不再共享单一 remember）
+  const [rememberModel, setRememberModel] = useState(false)
+  const [rememberUser, setRememberUser] = useState(false)
   const [error, setError] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showPhone, setShowPhone] = useState(false) // 阶段BO：手机号默认隐藏（敏感信息遮蔽）
   const [busy, setBusy] = useState(false)
-  // 阶段AO：组件卸载后 setState 静默丢弃，避免 React StrictMode 双调用或路由切换时的
-  // "Can't perform a React state update on an unmounted component" warning。
+  // 阶段AO：组件卸载后 setState 静默丢弃
   const aliveRef = useRef(true)
 
   const refreshCaptcha = async () => {
@@ -37,18 +41,18 @@ export default function Login() {
       const d = await get('CaptchaGenerate')
       if (!aliveRef.current) return
       if (d.success) { setCaptchaId(d.captcha_id); setCaptchaUrl(d.image_url) }
-    } catch { /* 忽略 */ }
+      else { setError(t('login.captchaRefreshFailed') || '验证码刷新失败') }
+    } catch { setError(t('login.captchaRefreshFailed') || '验证码刷新失败，请检查网络') }
   }
 
-  // 阶段AS：v4 双份记忆——同时恢复两种登录方式的已保存名称，
+  // 阶段AS：双份记忆——同时恢复两种登录方式的已保存名称，
   // 切换 Tab 时保存当前 Tab 的凭据后恢复另一 Tab 的已存名称。
-  // 每个 Tab 的"记住我"状态独立维护。
   const savedCredsRef = useRef({ modelData: null, userData: null })
 
   useEffect(() => {
     aliveRef.current = true
     refreshCaptcha()
-    // v6：加载保存的登录凭据（async：手机号需解密），同时恢复两种登录方式各自记忆的名称
+    // v7：加载保存的登录凭据（async：手机号/密码/API Key 需解密），恢复两种登录方式各自记忆的值
     ;(async () => {
       const creds = await loadCredentials()
       if (!aliveRef.current) return
@@ -56,24 +60,20 @@ export default function Login() {
         savedCredsRef.current = { modelData: creds.modelData, userData: creds.userData }
         const activeType = creds.loginType || 'model'
         setLoginType(activeType)
-        // 恢复模型名 Tab 的已保存值
-        if (creds.modelData && creds.modelData.mn) {
-          setModelName(creds.modelData.mn)
+        // 恢复模型名 Tab 的已保存值（含 API Key）
+        if (creds.modelData) {
+          if (creds.modelData.mn) setModelName(creds.modelData.mn)
+          if (creds.modelData.ak) setApiKey(creds.modelData.ak)
         }
-        // 恢复用户名 Tab 的已保存值
-        if (creds.userData && creds.userData.mn) {
-          setUserName(creds.userData.mn)
+        // 恢复用户名 Tab 的已保存值（含密码 + 手机号）
+        if (creds.userData) {
+          if (creds.userData.mn) setUserName(creds.userData.mn)
+          if (creds.userData.pw) setPassword(creds.userData.pw)
+          if (creds.userData.ph) setPhone(creds.userData.ph)
         }
-        // 阶段BO：恢复用户名 Tab 的已保存手机号（登录成功即自动保存，读取回填不依赖"记住我"）
-        if (creds.userData && creds.userData.ph) {
-          setPhone(creds.userData.ph)
-        }
-        // 记住我状态跟随当前 active Tab
-        if (activeType === 'user') {
-          setRemember(!!(creds.userData && creds.userData.mn))
-        } else {
-          setRemember(!!(creds.modelData && creds.modelData.mn))
-        }
+        // 阶段BQ：双 Tab 独立恢复"记住我"状态
+        setRememberModel(!!(creds.modelData && creds.modelData.mn))
+        setRememberUser(!!(creds.userData && creds.userData.mn))
       }
     })()
     return () => { aliveRef.current = false }
@@ -82,11 +82,15 @@ export default function Login() {
   // 切换 Tab：保存当前 Tab 凭据后刷新验证码，并恢复目标 Tab 的已存名称与记住状态
   const switchTab = async (type) => {
     if (type === loginType) return
-    // 保存当前 Tab 的凭据（勾选了"记住我"时）
-    if (remember) {
-      const savedName = loginType === 'model' ? modelName : userName
-      // 阶段BO：离开用户名 Tab 时携带当前手机号，保持存储新鲜
-      if (savedName) await saveCredentials(loginType, savedName, loginType === 'user' ? phone : undefined)
+    // 保存当前 Tab 的凭据（勾选了"记住我"时），保持存储新鲜
+    if (loginType === 'model') {
+      if (rememberModel && modelName) {
+        await saveCredentials('model', modelName, { apiKey })
+      }
+    } else {
+      if (rememberUser && userName) {
+        await saveCredentials('user', userName, { password, phone })
+      }
     }
     setLoginType(type)
     setError('')
@@ -95,13 +99,17 @@ export default function Login() {
     // 恢复目标 Tab 的已保存值和"记住我"状态
     if (type === 'user') {
       const ud = savedCredsRef.current.userData
-      if (ud && ud.mn && !userName) setUserName(ud.mn)
-      if (ud && ud.ph && !phone) setPhone(ud.ph) // 阶段BO：手机号回填兜底
-      setRemember(!!(ud && ud.mn))
+      if (ud) {
+        if (ud.mn && !userName) setUserName(ud.mn)
+        if (ud.pw && !password) setPassword(ud.pw)
+        if (ud.ph && !phone) setPhone(ud.ph)
+      }
     } else {
       const md = savedCredsRef.current.modelData
-      if (md && md.mn && !modelName) setModelName(md.mn)
-      setRemember(!!(md && md.mn))
+      if (md) {
+        if (md.mn && !modelName) setModelName(md.mn)
+        if (md.ak && !apiKey) setApiKey(md.ak)
+      }
     }
   }
 
@@ -135,28 +143,38 @@ export default function Login() {
 
       const d = await post('UserLoginInterface', reqBody)
       if (d.success) {
-        // 记住我：保存登录类型和名称
-        const savedName = loginType === 'model' ? modelName : userName
-        if (loginType === 'user' && phone) {
-          // 阶段BO：用户名登录成功且填写了手机号 → 恒自动保存手机号；
-          // 勾选"记住我"时连同用户名一起保存，未勾选时仅存手机号（mn 置空）。
-          await saveCredentials('user', remember ? userName : '', phone)
-        } else if (remember) {
-          await saveCredentials(loginType, savedName)
+        // 阶段BQ：按 Tab 独立保存/清除凭据（不再整体 clearCredentials）
+        if (loginType === 'model') {
+          if (rememberModel) {
+            await saveCredentials('model', modelName, { apiKey })
+          } else {
+            clearCredentials('model') // 仅清除模型 Tab 条目
+          }
         } else {
-          clearCredentials()
+          if (rememberUser) {
+            await saveCredentials('user', userName, { password, phone })
+          } else {
+            clearCredentials('user') // 仅清除用户 Tab 条目
+          }
         }
         window.location.hash = '#/Home'
         window.location.reload()
       } else {
         setError(d.message || t('login.loginFailed'))
-        refreshCaptcha(); setCaptchaCode('')
+        // 阶段BQ：await refreshCaptcha 消除竞态（避免旧图/旧 id 残留）
+        setCaptchaCode('')
+        await refreshCaptcha()
       }
     } catch (err) {
       setError(err.message || t('login.loginFailed'))
-      refreshCaptcha(); setCaptchaCode('')
+      setCaptchaCode('')
+      await refreshCaptcha()
     } finally { setBusy(false) }
   }
+
+  // 当前 Tab 的"记住我"状态与 setter
+  const remember = loginType === 'model' ? rememberModel : rememberUser
+  const setRemember = loginType === 'model' ? setRememberModel : setRememberUser
 
   return (
     <div className="login-page">
@@ -190,7 +208,7 @@ export default function Login() {
             <label className="field">
               <span>{t('login.apiKey')}</span>
               <span className="field-inline">
-                {/* 阶段BP：autoComplete="off" 隔离浏览器自动填充，避免跨 Tab 错乱 */}
+                {/* 阶段BP：autoComplete="off" 隔离浏览器自动填充 */}
                 <input type={showKey ? 'text' : 'password'} value={apiKey}
                        onChange={(e) => setApiKey(e.target.value)}
                        autoComplete="off" placeholder={t('login.emptyApiKey')} />
@@ -235,7 +253,7 @@ export default function Login() {
               </span>
               {/* 阶段AR：手机号可选，未填写时按 DB 中实际手机号（可能为空）校验 */}
               <span className="field-hint">{t('login.phoneOptionalHint')}</span>
-              {/* 阶段BO：告知用户手机号将自动保存在本机浏览器 */}
+              {/* 阶段BO/BQ：告知用户勾选记住我后手机号自动保存在本机浏览器 */}
               <span className="field-hint">{t('login.phoneSaveHint')}</span>
             </label>
           </>
@@ -256,6 +274,7 @@ export default function Login() {
 
         <label className="field-check">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          {/* 阶段BQ：双 Tab 独立文案 */}
           <span>{loginType === 'model' ? t('login.rememberModelName') : t('login.rememberUserName')}</span>
         </label>
         <button className="btn btn-primary login-submit" type="submit" disabled={busy}>

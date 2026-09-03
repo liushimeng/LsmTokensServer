@@ -294,7 +294,8 @@ func captchaGenerateHandle(w http.ResponseWriter, r *http.Request) {
 
 	captchaID := captcha.NewLen(4)
 	var buf strings.Builder
-	err := captcha.WriteImage(&buf, captchaID, 120, 40)
+	// 阶段BQ：验证码图片 120x40 → 160x50，数字更大更清晰，降低肉眼误识别率
+	err := captcha.WriteImage(&buf, captchaID, 160, 50)
 	if err != nil {
 		json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: "生成验证码失败"})
 		return
@@ -371,7 +372,9 @@ func userLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !captcha.VerifyString(req.CaptchaID, req.CaptchaCode) {
-		recordLoginFailure(clientIP)
+		// 阶段BQ：验证码错误不再计入防爆破锁定——验证码本身就是防机器打码手段，
+		// 输错验证码多为真人肉眼辨认失误（图片扭曲），计入失败会把正常用户锁死
+		// （3 次锁 10 分钟），陷入"看错→锁定→再看错"死循环。仅凭据错误才计数。
 		json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: "验证码错误或已过期"})
 		return
 	}

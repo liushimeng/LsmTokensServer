@@ -195,7 +195,7 @@ a { color: var(--primary); text-decoration: none; }
 .login-title { margin: 0; text-align: center; font-size: 22px; }
 .login-sub { text-align: center; color: var(--muted); margin: 6px 0 22px; }
 .login-error { background: #fef2f2; color: var(--danger); border: 1px solid #fecaca; border-radius: 6px; padding: 8px 12px; margin-bottom: 14px; font-size: 13px; }
-.captcha-img { height: 38px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); }
+.captcha-img { height: 48px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); } /* 阶段BQ：配合验证码图片 160x50 放大显示 */
 .login-submit { width: 100%; padding: 10px; font-size: 15px; }
 /* 阶段AQ：登录页 Tab 选项卡 */
 .login-tabs { display: flex; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
