@@ -21,6 +21,13 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架�
 ```
 禁止直接 `go build` 或 `nohup ./LsmTokensServer`。禁止带 `--build-only`、`--skip-web` 等参数（完整重启即可，脚本内部已处理前后端编译与服务启停）。
 
+**⚠️ 服务中断规则（rebuild 会 kill 旧进程 + 重启新进程）**：
+- rebuild 会**终止所有在线服务**（9101/29001/29000+29003/29002），中断窗口通常 **5–15 秒**。
+- 前端 chunk hash 变化时，正在访问页面的浏览器会触发 404 → 主页面"全局错误监听"自动 `location.reload()`。
+- **禁止在自动化测试循环、Agent 调用 API、用户登录使用页面期间调用 rebuild**。
+- **同一阶段只允许一个 Agent 调用 rebuild**（并发 rebuild 会导致端口冲突与雪崩）。
+- 完整规则、禁止场景、多 Agent 协调规则见 [`AGENTS.md`](AGENTS.md) §「rebuild_restart_app.sh 服务中断规则」。
+
 ### 2.2 端口规范
 管理端 `9101`、AI 代理 `29000`（HTTP）/`29003`（HTTPS）、用户端 `29001`、MCP `29002`、爬虫 CDP `9222`。
 

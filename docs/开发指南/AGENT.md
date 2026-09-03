@@ -101,7 +101,33 @@ gofmt -w <修改的 .go>
 - **禁止**给 `rebuild_restart_app.sh` 带 `--build-only`、`--skip-web` 等参数（完整重启即可）。
 - 修改 Go 文件后必须 `gofmt -w`。
 - 测试失败必须先修复再编译重启
-- 重启会中断流式响应，确认没有进行中的长连接后再执行。
+
+#### ⚠️ rebuild_restart_app.sh 服务中断规则（v2.0.78+ 强制）
+
+`./rebuild_restart_app.sh` 是**会中断所有在线服务的重启脚本**，不仅是"编译命令"。
+
+| 行为 | 影响 |
+|---|---|
+| `kill` 旧 LsmTokensServer 进程 | **管理端 9101 / 用户端 29001 / AI 代理 29000+29003 / MCP 29002 全部停止** |
+| 等待端口释放 → 启动新进程 | 服务中断窗口通常 **5–15 秒** |
+| 重建期间前端 hash 文件变化（如 `Login-xxx.js`） | 用户浏览器加载旧 hash 触发 404，**前端全局错误监听会自动 `location.reload()`** |
+
+**禁止场景**：
+
+1. ❌ **禁止在自动化测试循环中调用 rebuild**——测试运行期间触发 rebuild 会让 in-flight HTTP 请求 `connection refused`
+2. ❌ **禁止在另一个 Agent 正在调用 API 时调用 rebuild**——抓数据、跑 E2E、CDP 自动化、上传爬虫结果等长任务期间会让正在进行的请求全部失败
+3. ❌ **禁止在用户正在登录或使用页面时调用 rebuild**——用户体验断裂（前端会触发 chunk 404 全局重载）
+4. ❌ **多 Agent 并行禁止并发调用 rebuild**——同一阶段只允许一个 Agent 调用 rebuild（端口冲突/旧进程互相 kill/雪崩）
+5. ❌ **跨阶段并行（SubAgent A 后端 + SubAgent B 前端）**——A rebuild 后 B 提交代码，**必须单独再 rebuild 一次**让 B 的提交生效
+
+**强制场景**：
+
+- ✅ 本阶段代码修改完毕、自检与单元测试全绿后 → 调用 rebuild 验证集成效果
+- ✅ 跨阶段（涉及后端 Go 二进制变化）必须 rebuild 才能生效时
+
+**临时调试**：仅修改 `ClientWeb/src/` 时可绕过 rebuild 直接由 webserver 服务源文件验证（但**生产双构建隔离产物仍来自 rebuild**）；后端代码热重启需 `go run` 或 IDE 调试器 attach（项目未提供进程内热重启钩子）。
+
+**错误恢复**：rebuild 中断或新进程未就绪时，`ps aux | grep LsmTokensServer` 检查进程、`ss -tlnp | grep -E "9101|29001"` 检查端口；都没有则手动 `nohup ./LsmTokensServer -c ../LsmTokensServer.conf >/tmp/lsm.log 2>&1 &`（仅限恢复用）。
 
 ### 运行保护
 

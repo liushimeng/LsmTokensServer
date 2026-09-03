@@ -22,6 +22,48 @@ LsmTokensServer（开源版）是 AI Tokens 代理与管理服务，前后端分
 4. **中文 commit**：分阶段提交，格式 `阶段X：说明`；每阶段保证 `go build ./...` 通过。
 5. **前端双构建隔离**（阶段T 起强制）：`npm run build` 一条命令产出 `dist-manager`/`dist-user` 两套产物，`webserver` 按角色绑定目录、禁止共享或跨目录回落；角色由构建期常量 `__APP_ROLE__`（vite `define`）决定，禁止运行时嗅探；管理员专属页面与接口调用必须 `__APP_ROLE__ === 'manager'` 常量门控 + 动态 `import()`，确保用户端产物零管理代码。
 
+## ⚠️ rebuild_restart_app.sh 服务中断规则（v2.0.78+ 强制）
+
+`./rebuild_restart_app.sh` 是**会中断所有在线服务的重启脚本**，不仅是"编译命令"。
+
+### 中断影响清单
+
+| 行为 | 影响 |
+|---|---|
+| `kill` 旧 LsmTokensServer 进程 | **管理端 9101 / 用户端 29001 / AI 代理 29000+29003 / MCP 29002 全部停止** |
+| 等待端口释放 → 启动新进程 | 服务中断窗口通常 **5–15 秒**（取决于编译耗时，旧进程被杀到新进程就绪的间隔） |
+| **重建期间用户端 HTML 入口的 hash 文件变化**（如 `Login-CWBegAxZ.js`） | 用户浏览器加载旧 hash 触发 404，**前端全局错误监听会自动 `location.reload()`**——对登录页用户是体验跳变；对正在调用 API 的 Agent 是直接失败 |
+
+### 禁止场景
+
+1. **禁止在自动化测试循环中调用 rebuild**：单元测试/集成测试运行期间触发 rebuild，会让测试中的 HTTP 请求 `connection refused`。
+3. **禁止在另一个 Agent 正在调用 API 时调用 rebuild**：抓数据、跑 E2E、CDP 自动化、上传爬虫结果等长任务期间，重启会让正在 in-flight 的请求全部失败，Agent 需要从头重试并可能误判为业务错误。
+4. **禁止在用户正在登录或使用页面时调用 rebuild**：用户体验断裂（前端会触发 chunk 404 全局重载）。
+
+### 何时调用 rebuild（强制场景）
+
+- ✅ 本阶段代码修改完毕，自检与单元测试全绿后 → 调用 rebuild 验证集成效果
+- ✅ 跨阶段（涉及后端 Go 二进制变化）必须 rebuild 才能生效时
+- ❌ 仅前端改动但本阶段不需要端到端验证时——**可不调用**，下次阶段一起 rebuild
+
+### 多 Agent 并行场景的协调规则
+
+- **同一阶段只允许一个 Agent 调用 rebuild**：并发 rebuild 会导致端口冲突、旧进程互相 kill、新进程端口未就绪等雪崩。
+- **跨阶段并行**（如 SubAgent A 写后端 + SubAgent B 写前端）：A 先 rebuild 验证后端 → B 提交代码后**单独再 rebuild**一次（B 的提交未在 A 的 rebuild 中生效）。
+- rebuild 前应 `git status` 与 `git diff` 确认本次提交已落地，避免本地未提交改动被旧进程覆盖。
+
+### 临时调试需要"不停服务热重启"？
+
+- 后端代码：直接 `go run` 或 IDE 调试器 attach（绕过 rebuild）；端口已被占用 → 进程内 `kill -SIGUSR1` 或类似自重启钩子（项目未提供，不在支持范围）。
+- 前端代码：仅修改 `ClientWeb/src/` 时可绕过 rebuild，由 `webserver` 直接服务源文件（具体配置见 `webserver/` 包）；但**生产双构建隔离的产物仍来自 rebuild**。
+
+### 错误处理建议
+
+调用 rebuild 后若脚本被中断或新进程未就绪：
+1. `ps aux | grep LsmTokensServer` 检查是否有进程
+2. `ss -tlnp | grep -E "9101|29001"` 检查端口监听
+3. 都没有则手动启动：`cd ServerGo && nohup ./LsmTokensServer -c ../LsmTokensServer.conf >/tmp/lsm.log 2>&1 &`（**仅限恢复**，不要作为常规启动方式）
+
 ## 安全红线（v2.0.56 起强制）
 
 - **禁止硬编码任何密钥/密码/IP**：JWT 密钥、管理员凭证只能放 `LsmTokensServer.conf` 的 `security` 段；Python 分析脚本数据库凭证走环境变量 `LSM_MYSQL_*`。
