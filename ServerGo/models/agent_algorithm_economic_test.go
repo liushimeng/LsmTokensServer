@@ -1329,3 +1329,406 @@ func TestSelectForSession_MappingToDisabledEndpoint(t *testing.T) {
 func formatStatusList(statuses []int) string {
 	return FormatDstEndPointIDStatusList(statuses)
 }
+
+// ============================================================================
+// v2.0.77 阶段BS：智能路由算法切换 Session 粘性兼容 —— 通配映射测试
+//
+// 场景：指定型 / 稳定型 → 经济型 切换时，SelectForSession 命中通配映射，
+// 保持切换前正在使用的目标源站不被静默切换。
+// ============================================================================
+
+// TestSeedEconomicWildcardSession_BasicFlow
+// 验证 SeedEconomicWildcardSession 把 currentEffective 写入通配映射
+// 并从 livePool 中移除（源站可用 + 未冷却场景）。
+func TestSeedEconomicWildcardSession_BasicFlow(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	routeID := uint64(3000)
+	ResetEconomicRouteState(routeID)
+	defer ResetEconomicRouteState(routeID)
+
+	// 注册到缓存（isEndpointEnabled 需要查缓存，缓存中没有该路由视为全部启用）
+	addRouteToCache(&TAgentHttpAIRoute{
+		ID:                routeID,
+		UserModelID:       routeID * 10,
+		DstEndPointIDList: "11,22,33",
+	})
+	defer removeRouteFromCache(routeID*10, routeID)
+
+	route := makeTestRoute(routeID, []uint64{11, 22, 33})
+	sel := &EconomicAlgorithmSelector{}
+
+	// 预热：建一个 session 让 livePool 被消费
+	if _, ok := sel.SelectForSession(route, "warmup-session"); !ok {
+		t.Fatal("warmup SelectForSession failed")
+	}
+
+	// 模拟「稳定型 → 经济型」切换：通配预填到 DstEndPointIDs[0] = 11
+	SeedEconomicWildcardSession(routeID, 11)
+
+	// 1) sessionIndex 应包含通配键
+	info, _, _ := GetEconomicStateInfo(routeID)
+	if info == nil {
+		t.Fatal("expected economic state to exist after seed")
+	}
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	wEntry, wOK := state.sessionIndex[EconomicWildcardSessionID]
+	state.mu.Unlock()
+	if !wOK {
+		t.Fatal("expected wildcard session entry to exist")
+	}
+	if wEntry.EndPointID != 11 {
+		t.Errorf("expected wildcard endpoint=11, got %d", wEntry.EndPointID)
+	}
+
+	// 2) 通配源站应从 livePool 中被移除
+	state.mu.Lock()
+	for _, id := range state.livePool {
+		if id == 11 {
+			t.Errorf("expected endpoint 11 to be removed from livePool, but found in %v", state.livePool)
+		}
+	}
+	state.mu.Unlock()
+}
+
+// TestSeedEconomicWildcardSession_DisabledFallback
+// 验证：通配源站被禁用时，SeedEconomicWildcardSession 仍写入通配映射
+// 但保留在 livePool（SelectForSession 会校验可用性自动 fallthrough）。
+func TestSeedEconomicWildcardSession_DisabledFallback(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	routeID := uint64(3100)
+	ResetEconomicRouteState(routeID)
+	defer ResetEconomicRouteState(routeID)
+
+	// 源站本体禁用需注册到 endpoint 缓存
+	addDstEndPointToCache(&TAgentDstEndPoint{
+		ID:     11,
+		Status: 0, // 禁用
+	})
+	defer func() {
+		invalidateDstEndPointCache(11)
+	}()
+
+	addRouteToCache(&TAgentHttpAIRoute{
+		ID:                routeID,
+		UserModelID:       routeID * 10,
+		DstEndPointIDList: "11,22,33",
+	})
+	defer removeRouteFromCache(routeID*10, routeID)
+
+	route := makeTestRoute(routeID, []uint64{11, 22, 33})
+	sel := &EconomicAlgorithmSelector{}
+
+	// 模拟 UpdateAIRoute 调用顺序：先 SyncEconomicRouteEndpoints 填充 livePool，
+	// 再 SeedEconomicWildcardSession 预填通配映射
+	SyncEconomicRouteEndpoints(routeID, []uint64{11, 22, 33})
+	SeedEconomicWildcardSession(routeID, 11)
+
+	// 通配映射应存在
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	_, wOK := state.sessionIndex[EconomicWildcardSessionID]
+	contains11 := containsUint64(state.livePool, 11)
+	state.mu.Unlock()
+	if !wOK {
+		t.Fatal("expected wildcard entry to exist even when endpoint disabled")
+	}
+	// 源站被禁用，应保留在 livePool（不消费）
+	if !contains11 {
+		t.Errorf("expected disabled endpoint 11 to remain in livePool, got %v", state.livePool)
+	}
+
+	// SelectForSession 命中通配分支时应校验失败，fallthrough 到哈希重选
+	id, ok := sel.SelectForSession(route, "real-session-1")
+	if !ok {
+		t.Fatal("SelectForSession should succeed via fallback")
+	}
+	if id == 11 {
+		t.Errorf("expected fallback to NOT pick disabled endpoint 11, got %d", id)
+	}
+}
+
+// TestSelectForSession_WildcardSingleUse
+// 验证：通配条目被命中一次后立即清掉，第二个不同 session 的请求不再命中通配，
+// 走「新 session 哈希分配」。
+func TestSelectForSession_WildcardSingleUse(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	routeID := uint64(3200)
+	ResetEconomicRouteState(routeID)
+	defer ResetEconomicRouteState(routeID)
+
+	addRouteToCache(&TAgentHttpAIRoute{
+		ID:                routeID,
+		UserModelID:       routeID * 10,
+		DstEndPointIDList: "11,22,33",
+	})
+	defer removeRouteFromCache(routeID*10, routeID)
+
+	route := makeTestRoute(routeID, []uint64{11, 22, 33})
+	sel := &EconomicAlgorithmSelector{}
+
+	// 预热
+	_, _ = sel.SelectForSession(route, "warmup")
+
+	// 切换：通配预填到 11
+	SeedEconomicWildcardSession(routeID, 11)
+
+	// 第一个 session：应命中通配 → 端到 11
+	id1, ok := sel.SelectForSession(route, "session-1")
+	if !ok {
+		t.Fatal("first SelectForSession failed")
+	}
+	if id1 != 11 {
+		t.Errorf("expected wildcard hit to endpoint 11, got %d", id1)
+	}
+
+	// 通配条目应已被清掉
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	_, wStillOK := state.sessionIndex[EconomicWildcardSessionID]
+	state.mu.Unlock()
+	if wStillOK {
+		t.Errorf("expected wildcard entry to be cleared after single use, but still exists")
+	}
+
+	// 第二个 session：通配已清掉，走「新 session 哈希分配」
+	id2, ok := sel.SelectForSession(route, "session-2")
+	if !ok {
+		t.Fatal("second SelectForSession failed")
+	}
+	// session-2 不应再命中 11（11 已从 livePool 移除，且 session-2 是新 session 走哈希）
+	if id2 == 11 {
+		t.Errorf("expected second session to NOT hit endpoint 11 (should pick from remaining livePool), got %d", id2)
+	}
+
+	// 第三个 session：与 session-1 相同的 session_id，应走真实映射粘性
+	id3, ok := sel.SelectForSession(route, "session-1")
+	if !ok {
+		t.Fatal("third SelectForSession (same as first) failed")
+	}
+	if id3 != 11 {
+		t.Errorf("expected session-1 to remain sticky to endpoint 11, got %d", id3)
+	}
+}
+
+// TestSeedEconomicWildcardSession_LRUEviction
+// 验证：通配条目受 LRU 上限约束（EconomicSessionQueueMaxSize = 50），
+// 大量新 session 写入后通配条目可能被驱逐（设计预期：通配条目通常在切换后
+// 第一次请求就被消费掉，不会长期驻留）。
+func TestSeedEconomicWildcardSession_LRUEviction(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	routeID := uint64(3300)
+	ResetEconomicRouteState(routeID)
+	defer ResetEconomicRouteState(routeID)
+
+	addRouteToCache(&TAgentHttpAIRoute{
+		ID:                routeID,
+		UserModelID:       routeID * 10,
+		DstEndPointIDList: "11,22,33,44,55",
+	})
+	defer removeRouteFromCache(routeID*10, routeID)
+
+	route := makeTestRoute(routeID, []uint64{11, 22, 33, 44, 55})
+	sel := &EconomicAlgorithmSelector{}
+
+	SeedEconomicWildcardSession(routeID, 11)
+
+	// 连续写 EconomicSessionQueueMaxSize + 5 个新 session，触发 LRU 驱逐通配条目
+	for i := 0; i < EconomicSessionQueueMaxSize+5; i++ {
+		_, _ = sel.SelectForSession(route, fmt.Sprintf("session-%d", i))
+	}
+
+	// 通配条目应被 LRU 驱逐（被挤到队首）
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	_, wStillOK := state.sessionIndex[EconomicWildcardSessionID]
+	state.mu.Unlock()
+	if wStillOK {
+		t.Errorf("expected wildcard entry to be evicted by LRU after %d sessions, but still exists",
+			EconomicSessionQueueMaxSize+5)
+	}
+}
+
+// TestSyncEconomicRouteEndpoints_RemovesWildcardEntry
+// 验证：SyncEconomicRouteEndpoints 在 DstEndPointIDList 变化时
+// 正确处理通配条目（与普通 session 条目同等对待）：
+//   - 通配源站被 Web 删除：通配条目重新分配到剩余源站
+//   - 整个 DstEndPointIDList 被清空：通配条目直接清理
+func TestSyncEconomicRouteEndpoints_RemovesWildcardEntry(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	routeID := uint64(3400)
+	ResetEconomicRouteState(routeID)
+	defer ResetEconomicRouteState(routeID)
+
+	addRouteToCache(&TAgentHttpAIRoute{
+		ID:                routeID,
+		UserModelID:       routeID * 10,
+		DstEndPointIDList: "11,22,33",
+	})
+	defer removeRouteFromCache(routeID*10, routeID)
+
+	SeedEconomicWildcardSession(routeID, 11)
+
+	// 场景 1: Web 删除通配源站 11，剩余 22,33 → 通配条目应被重分配到 22 或 33
+	SyncEconomicRouteEndpoints(routeID, []uint64{22, 33})
+
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	wEntry, wOK := state.sessionIndex[EconomicWildcardSessionID]
+	state.mu.Unlock()
+	if !wOK {
+		t.Fatal("expected wildcard entry to remain and be reassigned")
+	}
+	if wEntry.EndPointID == 11 {
+		t.Errorf("expected wildcard endpoint to be reassigned away from 11, got %d", wEntry.EndPointID)
+	}
+	if wEntry.EndPointID != 22 && wEntry.EndPointID != 33 {
+		t.Errorf("expected wildcard endpoint=22 or 33, got %d", wEntry.EndPointID)
+	}
+
+	// 场景 2: 清空整个 DstEndPointIDList → 通配条目应被清理
+	SyncEconomicRouteEndpoints(routeID, []uint64{})
+	state.mu.Lock()
+	_, wStillOK := state.sessionIndex[EconomicWildcardSessionID]
+	state.mu.Unlock()
+	if wStillOK {
+		t.Errorf("expected wildcard entry to be cleared when DstEndPointIDList becomes empty")
+	}
+}
+
+// TestUpdateAIRoute_StableToEconomic_SeedWildcard
+// 端到端模拟：模拟 UpdateAIRoute 中「稳定型 → 经济型」的兼容分支调用 SeedEconomicWildcardSession
+// 验证切换后第一次有 session 的请求命中原 DstEndPointIDs[0]。
+//
+// 注：本测试不调用 UpdateAIRoute（涉及数据库），仅复用其算法切换逻辑：
+// 1) 调用 SeedEconomicWildcardSession(routeID, newEndpointIDs[0]) 模拟兼容分支
+// 2) 调用 SelectForSession 验证通配命中
+func TestUpdateAIRoute_StableToEconomic_SeedWildcard(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	routeID := uint64(3500)
+	ResetEconomicRouteState(routeID)
+	defer ResetEconomicRouteState(routeID)
+
+	addRouteToCache(&TAgentHttpAIRoute{
+		ID:                routeID,
+		UserModelID:       routeID * 10,
+		DstEndPointIDList: "11,22,33",
+	})
+	defer removeRouteFromCache(routeID*10, routeID)
+
+	route := makeTestRoute(routeID, []uint64{11, 22, 33})
+	sel := &EconomicAlgorithmSelector{}
+
+	// 1) 模拟「稳定型」正在服务：DstEndPointIDs[0] = 11 是当前生效源站
+	currentEffective := route.DstEndPointIDs[0]
+	if currentEffective != 11 {
+		t.Fatalf("expected current effective=11, got %d", currentEffective)
+	}
+
+	// 2) 模拟 UpdateAIRoute 的兼容分支：调用 SeedEconomicWildcardSession
+	SeedEconomicWildcardSession(routeID, currentEffective)
+
+	// 3) 切换后第一次带 session 的请求：应命中 11（与切换前一致）
+	id, ok := sel.SelectForSession(route, "ongoing-session")
+	if !ok {
+		t.Fatal("post-switch SelectForSession failed")
+	}
+	if id != 11 {
+		t.Errorf("expected ongoing-session to keep using endpoint 11 after switch, got %d", id)
+	}
+
+	// 4) 同一个 session 的后续请求：仍粘性命中 11
+	id2, ok := sel.SelectForSession(route, "ongoing-session")
+	if !ok {
+		t.Fatal("sticky follow-up SelectForSession failed")
+	}
+	if id2 != 11 {
+		t.Errorf("expected ongoing-session to remain sticky to 11, got %d", id2)
+	}
+}
+
+// TestSeedEconomicWildcardSession_ZeroEndpoint
+// 边界场景：传入 currentEffective=0 时直接返回，不写入任何状态。
+func TestSeedEconomicWildcardSession_ZeroEndpoint(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	routeID := uint64(3600)
+	ResetEconomicRouteState(routeID)
+	defer ResetEconomicRouteState(routeID)
+
+	SeedEconomicWildcardSession(routeID, 0)
+
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	_, wOK := state.sessionIndex[EconomicWildcardSessionID]
+	state.mu.Unlock()
+	if wOK {
+		t.Errorf("expected no wildcard entry when currentEffective=0")
+	}
+}
+
+// TestSelectForSession_WildcardNoRealHit
+// 验证：通配命中不会破坏「新 session 路径」的语义。
+// 当通配源站不可用时，SelectForSession 应跳过通配分支走哈希重选。
+func TestSelectForSession_WildcardNoRealHit(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	routeID := uint64(3700)
+	ResetEconomicRouteState(routeID)
+	defer ResetEconomicRouteState(routeID)
+
+	// 注册源站缓存：把 11 禁用
+	addDstEndPointToCache(&TAgentDstEndPoint{
+		ID:     11,
+		Status: 0,
+	})
+	defer func() {
+		invalidateDstEndPointCache(11)
+	}()
+
+	addRouteToCache(&TAgentHttpAIRoute{
+		ID:                routeID,
+		UserModelID:       routeID * 10,
+		DstEndPointIDList: "11,22,33",
+	})
+	defer removeRouteFromCache(routeID*10, routeID)
+
+	route := makeTestRoute(routeID, []uint64{11, 22, 33})
+	sel := &EconomicAlgorithmSelector{}
+
+	// 模拟 UpdateAIRoute 调用顺序：先 SyncEconomicRouteEndpoints 填充 livePool，再 Seed
+	SyncEconomicRouteEndpoints(routeID, []uint64{11, 22, 33})
+	SeedEconomicWildcardSession(routeID, 11)
+
+	// 通配源站 11 不可用 → 应跳过通配分支 → 走「新 session 哈希分配」
+	id, ok := sel.SelectForSession(route, "real-session")
+	if !ok {
+		t.Fatal("SelectForSession should succeed via fallback")
+	}
+	if id == 11 {
+		t.Errorf("expected fallback to NOT pick disabled endpoint 11, got %d", id)
+	}
+
+	// 通配条目应保留（未被消费）
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	_, wStillOK := state.sessionIndex[EconomicWildcardSessionID]
+	state.mu.Unlock()
+	if !wStillOK {
+		t.Errorf("expected wildcard entry to remain when disabled (not consumed)")
+	}
+}

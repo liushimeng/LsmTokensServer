@@ -94,6 +94,17 @@ const (
 	EconomicEndpointCooldownDuration = 10 * time.Minute
 )
 
+// EconomicWildcardSessionID 经济型「全 Session 通配」预填键（v2.0.77 阶段BS）。
+// 用于兼容「指定型 / 稳定型 → 经济型」算法切换场景：
+// 切换前路由没有 session 维度的运行时状态，把"当前生效源站"
+// （= DstEndPointIDs[0]，与指定型/稳定型 Select 语义一致）以通配键预填入
+// sessionIndex/sessionQueue，所有新 session 的首次 SelectForSession 命中
+// 该预填映射，避免当前正在使用的会话被静默切换到其他源站。
+//
+// 约定：真实 session_id 由 Agent 客户端控制，按惯例不会包含"__"前缀，
+// 因此 "__economic_wildcard__" 不会与真实 session 冲突。
+const EconomicWildcardSessionID = "__economic_wildcard__"
+
 // hashSessionToEndpoint 使用 FNV-1a 哈希将 session_id 确定性映射到 livePool 中的索引。
 // 输入包含 session_id + route_id + 启动时间戳，保证：
 //  1. 同一 session 在当前服务生命周期内总是分配到同一端点（session 粘性）
@@ -302,6 +313,54 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 			}
 		}
 		state.livePool = nil
+	}
+
+	// v2.0.77 阶段BS：通配映射兜底命中（指定型/稳定型 → 经济型 切换兼容）
+	//   仅在真实 session_id 未命中且通配条目存在时生效：
+	//   1) 校验通配源站当前是否仍可用（路由内状态 + 源站本体状态 + 非冷却）
+	//   2) 命中后消费通配条目（避免后续 session 都被吸到同一源站）
+	//   3) 为当前真实 session 写入独立映射，保证后续同 session 仍粘性
+	//   4) 通配源站被禁用/冷却时跳过本分支，自动 fallthrough 到「新 session 哈希重选」
+	if _, hasReal := state.sessionIndex[sessionID]; !hasReal {
+		if wEntry, wOK := state.sessionIndex[EconomicWildcardSessionID]; wOK {
+			idx := -1
+			for i, id := range route.DstEndPointIDs {
+				if id == wEntry.EndPointID {
+					idx = i
+					break
+				}
+			}
+			if idx != -1 {
+				status := 1
+				if idx < len(route.DstEndPointIDStatuses) {
+					status = route.DstEndPointIDStatuses[idx]
+				}
+				if status == 1 && isEndpointEnabled(route, wEntry.EndPointID) {
+					if deadline, cooling := state.cooldownEndpoints[wEntry.EndPointID]; !cooling || time.Now().After(deadline) {
+						// 命中通配：消费通配条目 + 写入真实 session 映射 + 返回通配源站
+						delete(state.sessionIndex, EconomicWildcardSessionID)
+						for i, e := range state.sessionQueue {
+							if e.SessionID == EconomicWildcardSessionID {
+								state.sessionQueue = append(state.sessionQueue[:i], state.sessionQueue[i+1:]...)
+								break
+							}
+						}
+						realEntry := &sessionMapEntry{SessionID: sessionID, EndPointID: wEntry.EndPointID}
+						state.sessionIndex[sessionID] = realEntry
+						state.sessionQueue = append(state.sessionQueue, realEntry)
+						// LRU 驱逐（与既有新 session 路径语义一致）
+						for len(state.sessionQueue) > EconomicSessionQueueMaxSize {
+							evicted := state.sessionQueue[0]
+							state.sessionQueue = state.sessionQueue[1:]
+							delete(state.sessionIndex, evicted.SessionID)
+						}
+						logger.Printf("[ECONOMIC] Route %d: wildcard session hit → endpoint %d (session=%s)", route.ID, wEntry.EndPointID, sessionID)
+						RecordSelection(AlgorithmStrategyType_Economic)
+						return wEntry.EndPointID, true
+					}
+				}
+			}
+		}
 	}
 
 	// 新 session 分配
@@ -664,6 +723,70 @@ func isEndpointEnabled(cachedRoute *CachedAIRoute, endpointID uint64) bool {
 		}
 	}
 	return true
+}
+
+// SeedEconomicWildcardSession 把指定源站预填为经济型的「全 Session 通配」映射（v2.0.77 阶段BS）。
+// 用途：兼容「指定型 / 稳定型 → 经济型」算法切换场景，避免当前正在使用的会话
+// 被静默切换到其他源站。指定型/稳定型 Select 始终返回 DstEndPointIDs[0]，
+// 因此 currentEffective 应传入切换前的"当前生效源站"（= 新路由列表的第 0 个）。
+//
+// 行为：
+//  1. 写入 sessionIndex[EconomicWildcardSessionID] 与 sessionQueue 队尾（去重）
+//  2. 确保 currentEffective 出现在 livePool（首次初始化或曾被消费掉时补回），
+//     这样 SelectForSession 的「新 session 路径」在通配失效时也能正确考虑它
+//  3. 若通配源站当前可用（路由内状态 + 源站本体状态 + 非冷却），
+//     从 livePool swap-remove（避免 SelectForSession 的「新 session 路径」再次分配）
+//  4. 若通配源站已禁用/冷却，保留在 livePool，由 SelectForSession 兜底重选
+//
+// 注：不调用 ResetEconomicRouteState —— 仅追加一个通配键，不破坏其它状态。
+func SeedEconomicWildcardSession(routeID uint64, currentEffective uint64) {
+	if currentEffective == 0 {
+		return
+	}
+	state := getEconomicState(routeID)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	cachedRoute, _ := GetCachedRouteByID(routeID)
+	enabled := isEndpointEnabled(cachedRoute, currentEffective)
+	inCooldown := isEndpointCoolingLocked(state, currentEffective)
+
+	// 把通配源站加入 knownEndpoints（v2.0.77 阶段BS）：
+	// 让 SyncEconomicRouteEndpoints 在 Web 调整路由源站列表时把通配条目
+	// 视为指向"路由曾配置的源站"，从而在源站被 Web 删除时正确处理重分配。
+	state.knownEndpoints[currentEffective] = true
+
+	// 写入通配映射（无论是否可用都写；SelectForSession 会基于可用性决定是否命中）
+	entry := &sessionMapEntry{
+		SessionID:  EconomicWildcardSessionID,
+		EndPointID: currentEffective,
+	}
+	// 清理已有队列项（避免重复；切换算法可能多次调用）
+	for i, e := range state.sessionQueue {
+		if e.SessionID == EconomicWildcardSessionID {
+			state.sessionQueue = append(state.sessionQueue[:i], state.sessionQueue[i+1:]...)
+			break
+		}
+	}
+	state.sessionIndex[EconomicWildcardSessionID] = entry
+	state.sessionQueue = append(state.sessionQueue, entry)
+
+	// 确保 currentEffective 出现在 livePool 中：
+	//   - livePool 为空：从未初始化过（如本次调用前从未走 SelectForSession 路径）
+	//     → 把通配源站填入，后续 SelectForSession 「新 session 路径」也能考虑它
+	//   - livePool 中不含 currentEffective：曾被 swap-remove 消费
+	//     → 补回，避免通配失效时哈希重选"漏选"
+	if !containsUint64(state.livePool, currentEffective) {
+		state.livePool = append(state.livePool, currentEffective)
+	}
+
+	// 仅在源站可用且未冷却时再从 livePool 中移除（消费通配源站）
+	if enabled && !inCooldown {
+		state.livePool = removeFromLivePool(state.livePool, currentEffective)
+	}
+
+	logger.Printf("[ECONOMIC] Route %d: seeded wildcard session → endpoint %d (enabled=%v, cooling=%v)",
+		routeID, currentEffective, enabled, inCooldown)
 }
 
 // ResetEconomicRouteState 重置指定路由的经济型算法状态

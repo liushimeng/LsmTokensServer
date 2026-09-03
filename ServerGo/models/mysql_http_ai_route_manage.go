@@ -501,6 +501,9 @@ func UpdateAIRoute(item *TAgentHttpAIRoute) error {
 
 	// 经济型算法：在锁外同步状态（避免与 agentAIRouteMutex 交叉持锁）
 	//   - 切到非经济型：清空经济型状态
+	//   - 非经济型 → 经济型：把"当前生效源站"（DstEndPointIDs[0]，与指定型/稳定型 Select 语义一致）
+	//                    预填为「全 Session 通配」映射（SeedEconomicWildcardSession），
+	//                    保证切换前正在使用的会话不会被静默切换到其他源站
 	//   - 切到/保持经济型：把 livePool + session 队列 + 失败计数与新源站列表对齐
 	if oldStrategy == AlgorithmStrategyType_Economic && updated.AlgorithmStrategyType != AlgorithmStrategyType_Economic {
 		ResetEconomicRouteState(updated.ID)
@@ -508,6 +511,12 @@ func UpdateAIRoute(item *TAgentHttpAIRoute) error {
 	if updated.AlgorithmStrategyType == AlgorithmStrategyType_Economic {
 		newEndpointIDs, _ := ParseDstEndPointIDList(updated.DstEndPointIDList)
 		SyncEconomicRouteEndpoints(updated.ID, newEndpointIDs)
+		// v2.0.77 阶段BS：非经济型 → 经济型 兼容处理
+		//   oldStrategy != 0 排除"首次创建即经济型"的场景（new route 无切换语义）
+		//   oldStrategy != Economic 排除"保持经济型仅改源站"的场景（已有 session 不变）
+		if oldStrategy != 0 && oldStrategy != AlgorithmStrategyType_Economic && len(newEndpointIDs) > 0 {
+			SeedEconomicWildcardSession(updated.ID, newEndpointIDs[0])
+		}
 	}
 
 	logger.Printf("[database.DB] Updated AI route (id=%d)", item.ID)
