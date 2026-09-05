@@ -3,9 +3,11 @@
 import { useState } from 'react'
 import { post } from '../../shared/api'
 import { useI18n } from '../../i18n'
+import { useConfirm } from '../../components/ConfirmModal'
 
 export default function useChatAnalysisData(isAdmin, userName, modelName, days, pageSize, filters) {
   const { t } = useI18n()
+  const sysConfirm = useConfirm()
 
   // 列表数据
   const [rows, setRows] = useState([])
@@ -127,7 +129,7 @@ export default function useChatAnalysisData(isAdmin, userName, modelName, days, 
   const batchDelete = async () => {
     if (__APP_ROLE__ !== 'manager') return
     if (!selected.length) return
-    if (!window.confirm(t('chatAnalysis.deleteConfirm', { count: selected.length }))) return
+    if (!(await sysConfirm(t('chatAnalysis.deleteConfirm', { count: selected.length })))) return
     setDeleting(true); setError(''); setOkMsg('')
     try {
       const d = await post('ChatAnalysisBatchDeleteInterface', {

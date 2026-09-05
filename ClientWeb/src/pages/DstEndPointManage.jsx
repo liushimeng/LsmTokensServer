@@ -4,6 +4,7 @@ import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import { useI18n } from '../i18n'
+import { useConfirm } from '../components/ConfirmModal'
 
 // 源站管理（管理端）：DstEndPointManageInterface（POST JSON {action:...}）
 // action: list / add / update / toggle_status / delete / batch_enable / batch_disable / batch_delete / test / list_platforms / list_models
@@ -35,6 +36,7 @@ function formatJSON(s) {
 
 export default function DstEndPointManage() {
   const { t } = useI18n()
+  const sysConfirm = useConfirm()
   const isAdmin = __APP_ROLE__ === 'manager' ? isAdminRole() : false // 用户端：只读列表 + 连通性测试（构建期裁剪管理分支）
   const [users, setUsers] = useState([])
   const [endpoints, setEndpoints] = useState([])
@@ -108,7 +110,7 @@ export default function DstEndPointManage() {
 
   const toggleStatus = async (ep) => {
     const status = ep.status == 1 ? 0 : 1 // eslint-disable-line eqeqeq
-    if (!confirm(t('dstEndPoint.confirmToggle', { action: status === 1 ? t('dstEndPoint.enableAction') : t('dstEndPoint.disableAction'), platform: ep.platform_name, model: ep.model_name }))) return
+    if (!(await sysConfirm(t('dstEndPoint.confirmToggle', { action: status === 1 ? t('dstEndPoint.enableAction') : t('dstEndPoint.disableAction'), platform: ep.platform_name, model: ep.model_name })))) return
     try {
       await post('DstEndPointManageInterface', { action: 'toggle_status', id: ep.id, status })
       loadData()
@@ -116,7 +118,7 @@ export default function DstEndPointManage() {
   }
 
   const deleteItem = async (ep) => {
-    if (!confirm(t('dstEndPoint.confirmDeleteEndpoint', { platform: ep.platform_name, model: ep.model_name }))) return
+    if (!(await sysConfirm(t('dstEndPoint.confirmDeleteEndpoint', { platform: ep.platform_name, model: ep.model_name })))) return
     try {
       await post('DstEndPointManageInterface', { action: 'delete', id: ep.id })
       loadData()
@@ -139,7 +141,7 @@ export default function DstEndPointManage() {
     if (ids.length > 500) { alert(t('dstEndPoint.max500', { count: ids.length })); return }
     const label = { batch_enable: t('dstEndPoint.batchEnable'), batch_disable: t('dstEndPoint.batchDisable'), batch_delete: t('dstEndPoint.batchDelete') }[actionName]
     const batchConfirmKey = { batch_enable: 'confirmBatchEnable', batch_disable: 'confirmBatchDisable', batch_delete: 'confirmBatchDelete' }[actionName]
-    if (!confirm(t(`dstEndPoint.${batchConfirmKey}`, { count: ids.length }))) return
+    if (!(await sysConfirm(t(`dstEndPoint.${batchConfirmKey}`, { count: ids.length })))) return
     try {
       await post('DstEndPointManageInterface', { action: actionName, ids })
       setSelected(new Set())
@@ -209,6 +211,7 @@ export default function DstEndPointManage() {
         <Modal
           title={form.id ? t('dstEndPoint.editEndPoint') : t('dstEndPoint.addEndPoint')}
           onClose={() => setForm(null)}
+          closeOnOverlayClick={false}
           footer={
             <>
               <button className="btn" onClick={() => setForm(null)}>{t('common.cancel')}</button>

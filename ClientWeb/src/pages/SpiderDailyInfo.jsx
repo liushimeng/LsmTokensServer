@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { get, post } from '../shared/api'
 import DataTable from '../components/DataTable'
 import { useI18n } from '../i18n'
+import { useConfirm } from '../components/ConfirmModal'
 
 // 每日 MCP 信息：SpiderDailyInfoInterface
 // 列表：GET ?page&page_size&platform&start_date&end_date（返回 {data:{infos,platforms}, total}）
@@ -37,6 +38,7 @@ function renderContent(text) {
 
 export default function SpiderDailyInfo(props) {
   const { t } = useI18n()
+  const sysConfirm = useConfirm()
 
   const q = props?.route?.query
   const [page, setPage] = useState(() => Math.max(1, parseInt(q?.get('page') || '1', 10) || 1))
@@ -99,7 +101,7 @@ export default function SpiderDailyInfo(props) {
   }
 
   const deleteInfo = async (id) => {
-    if (!confirm(t('spider.confirmDeleteRecord'))) return
+    if (!(await sysConfirm(t('spider.confirmDeleteRecord')))) return
     try {
       await post('SpiderDailyInfoInterface', { action: 'delete', id })
       setSelected((s) => { const n = new Set(s); n.delete(id); return n })
@@ -109,7 +111,7 @@ export default function SpiderDailyInfo(props) {
 
   const batchDelete = async () => {
     if (!selected.size) { alert(t('spider.selectRecordsToDelete')); return }
-    if (!confirm(t('spider.confirmBatchDelete', { count: selected.size }))) return
+    if (!(await sysConfirm(t('spider.confirmBatchDelete', { count: selected.size })))) return
     try {
       await post('SpiderDailyInfoInterface', { action: 'batch_delete', items: [...selected].map((id) => ({ id })) })
       setSelected(new Set())

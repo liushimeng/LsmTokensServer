@@ -7,6 +7,7 @@ import TimeRangeSelector from '../components/TimeRangeSelector'
 import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
 import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
+import { useConfirm } from '../components/ConfirmModal'
 
 // 折叠/分页 localStorage 工具（带容错）
 const safeGet = (k) => { try { return window.localStorage.getItem(k) } catch { return null } }
@@ -39,6 +40,7 @@ function emptyForm() {
 
 export default function AIRouteManage() {
   const { t } = useI18n()
+  const sysConfirm = useConfirm()
   const isAdmin = __APP_ROLE__ === 'manager' ? isAdminRole() : false // 用户端走 UserAIRouteInterface（本人路由 + 受限编辑，构建期裁剪管理分支）
   const [routes, setRoutes] = useState([])
   const [users, setUsers] = useState([])
@@ -298,7 +300,7 @@ export default function AIRouteManage() {
   }
 
   const deleteItem = async (route) => {
-    if (!confirm(t('aiRouteManage.deleteRouteConfirm', { userName: route.user_name || '', modelName: route.model_name || '' }))) return
+    if (!(await sysConfirm(t('aiRouteManage.deleteRouteConfirm', { userName: route.user_name || '', modelName: route.model_name || '' })))) return
     try {
       await post('AIRouteManageInterface', { action: 'delete', id: route.id })
       loadRoutes()
@@ -308,7 +310,7 @@ export default function AIRouteManage() {
   const batchDelete = async () => {
     const ids = [...selected]
     if (!ids.length) { alert(t('aiRouteManage.pleaseSelectRouteToDelete')); return }
-    if (!confirm(t('aiRouteManage.deleteSelectedConfirm', { count: ids.length }))) return
+    if (!(await sysConfirm(t('aiRouteManage.deleteSelectedConfirm', { count: ids.length })))) return
     try {
       await post('AIRouteManageInterface', { action: 'batch_delete', ids })
       setSelected(new Set())
@@ -460,6 +462,7 @@ export default function AIRouteManage() {
           title={form.id ? t('aiRouteManage.editRoute') : t('aiRouteManage.addRoute')}
           width={760}
           onClose={() => setForm(null)}
+          closeOnOverlayClick={false}
           footer={
             <>
               <button className="btn" onClick={() => setForm(null)}>{t('aiRouteManage.cancel')}</button>

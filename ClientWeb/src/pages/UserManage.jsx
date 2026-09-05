@@ -5,6 +5,7 @@ import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import { useI18n } from '../i18n'
 import { copyToClipboard } from '../shared/clipboard'
+import { useConfirm } from '../components/ConfirmModal'
 
 // 用户管理：UserManageInterface + UserModelManageInterface（均 POST JSON {action:...}）
 // 分析页跳转：#/ChatAnalysis?user_name=..&model_name=.. 等（对照旧版 nav）
@@ -26,6 +27,7 @@ const emptyModelForm = { id: 0, user_id: 0, user_name: '', model_name: '' }
 
 export default function UserManage() {
   const { t } = useI18n()
+  const sysConfirm = useConfirm()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -84,7 +86,7 @@ export default function UserManage() {
   const toggleUserStatus = async (u) => {
     const status = u.status === 2 ? 1 : 2
     const actionLabel = status === 2 ? t('userManage.disable') : t('userManage.enable')
-    if (!confirm(t('userManage.toggleStatusConfirm', { action: actionLabel }))) return
+    if (!(await sysConfirm(t('userManage.toggleStatusConfirm', { action: actionLabel })))) return
     try {
       await post('UserManageInterface', { action: 'update_status', id: u.id, status })
       loadUsers()
@@ -92,7 +94,7 @@ export default function UserManage() {
   }
 
   const deleteUser = async (u) => {
-    if (!confirm(t('userManage.deleteUserConfirm'))) return
+    if (!(await sysConfirm(t('userManage.deleteUserConfirm')))) return
     try {
       await post('UserManageInterface', { action: 'delete', id: u.id })
       clearUserModelOptionsCache()
@@ -123,7 +125,7 @@ export default function UserManage() {
   }
 
   const deleteModel = async (m, userId) => {
-    if (!confirm(t('userManage.deleteModelConfirm'))) return
+    if (!(await sysConfirm(t('userManage.deleteModelConfirm')))) return
     try {
       await post('UserModelManageInterface', { action: 'delete', id: m.id })
       clearUserModelOptionsCache()
@@ -269,6 +271,7 @@ export default function UserManage() {
           title={userForm.id ? t('userManage.editUser') : t('userManage.addUser')}
           width={480}
           onClose={() => setUserForm(null)}
+          closeOnOverlayClick={false}
           footer={
             <>
               <button className="btn" onClick={() => setUserForm(null)}>{t('common.cancel')}</button>
@@ -301,6 +304,7 @@ export default function UserManage() {
           title={modelForm.id ? t('userManage.editModel') : t('userManage.addModel')}
           width={420}
           onClose={() => setModelForm(null)}
+          closeOnOverlayClick={false}
           footer={
             <>
               <button className="btn" onClick={() => setModelForm(null)}>{t('common.cancel')}</button>

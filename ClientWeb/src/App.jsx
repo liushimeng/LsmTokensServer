@@ -3,6 +3,7 @@ import { get, baseUrl } from './shared/api'
 import Layout from './components/Layout'
 import ErrorBoundary from './components/ErrorBoundary'
 import { I18nProvider } from './i18n'
+import { ConfirmProvider } from './components/ConfirmModal'
 
 // 阶段T 双构建隔离：页面改为懒加载器，管理员专属页仅在 manager 构建注册。
 // 注意：判断必须直接使用 __APP_ROLE__ 字面量（vite define 全局文本替换），
@@ -85,17 +86,19 @@ export default function App() {
   const Page = PAGES[route.path] || PAGES.Home
   return (
     <I18nProvider>
-      <ErrorBoundary>
-        <Suspense fallback={<div className="page-loading" style={{ padding: 24 }}>加载中…</div>}>
-          {route.path === 'Login' || (__APP_ROLE__ === 'manager' && route.path === 'ManagerLogin') ? (
-            <Page route={route} />
-          ) : (
-            <Layout route={route.path} userInfo={userInfo}>
+      <ConfirmProvider>
+        <ErrorBoundary>
+          <Suspense fallback={<div className="page-loading" style={{ padding: 24 }}>加载中…</div>}>
+            {route.path === 'Login' || (__APP_ROLE__ === 'manager' && route.path === 'ManagerLogin') ? (
               <Page route={route} />
-            </Layout>
-          )}
-        </Suspense>
-      </ErrorBoundary>
+            ) : (
+              <Layout route={route.path} userInfo={userInfo}>
+                <Page route={route} />
+              </Layout>
+            )}
+          </Suspense>
+        </ErrorBoundary>
+      </ConfirmProvider>
     </I18nProvider>
   )
 }

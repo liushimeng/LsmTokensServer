@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { post } from '../shared/api'
 import { useI18n } from '../i18n'
+import { useConfirm } from './ConfirmModal'
 import Modal from './Modal'
 
 // 批量编辑路由弹窗：追加 / 删除 源站（逐条处理 + 算法策略可选）
@@ -11,6 +12,7 @@ import Modal from './Modal'
 //   onSuccess: () => void - 操作成功后回调（刷新列表）
 export default function BatchEditModal({ open, onClose, routes, onSuccess }) {
   const { t } = useI18n()
+  const sysConfirm = useConfirm()
   const [tab, setTab] = useState('append') // 'append' | 'remove'
   const [availableEndpoints, setAvailableEndpoints] = useState([])
   const [loadingEndpoints, setLoadingEndpoints] = useState(false)
@@ -67,7 +69,7 @@ export default function BatchEditModal({ open, onClose, routes, onSuccess }) {
     const confirmMsg = tab === 'append'
       ? t('aiRouteManage.confirmBatchAppend', { count: routes.length, epCount: selectedEpIds.length })
       : t('aiRouteManage.confirmBatchRemove', { count: routes.length, epCount: selectedEpIds.length })
-    if (!confirm(confirmMsg)) return
+    if (!(await sysConfirm(confirmMsg))) return
     setProcessing(true)
     setResult(null)
     try {
@@ -108,6 +110,7 @@ export default function BatchEditModal({ open, onClose, routes, onSuccess }) {
       title={t('aiRouteManage.batchEditRoute')}
       width={760}
       onClose={handleClose}
+      closeOnOverlayClick={false}
       footer={
         <>
           <button className="btn" onClick={handleClose} disabled={processing}>{t('aiRouteManage.cancel')}</button>

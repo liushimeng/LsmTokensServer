@@ -4,6 +4,7 @@ import { fmtTime } from '../shared/format'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import { useI18n } from '../i18n'
+import { useConfirm } from '../components/ConfirmModal'
 
 // 爬虫数据源管理（迁移自旧 server_web_spider_data_source.go / server_web_spider_crawl.go）
 // 数据源 CRUD（/SpiderDataSourceInterface，action=list/add/update/delete/toggle_status）
@@ -21,6 +22,7 @@ const EMPTY_FORM = { id: 0, platform_name: '', url_address: '', description: '',
 
 export default function SpiderDataSource() {
   const { t } = useI18n()
+  const sysConfirm = useConfirm()
 
   const [rows, setRows] = useState(null) // null = 加载中
   const [err, setErr] = useState('')
@@ -72,7 +74,7 @@ export default function SpiderDataSource() {
 
   // 删除（仅管理端）
   const remove = async (rec) => {
-    if (!window.confirm(t('spider.confirmDeleteSource', { name: rec.platform_name, id: rec.id }))) return
+    if (!(await sysConfirm(t('spider.confirmDeleteSource', { name: rec.platform_name, id: rec.id })))) return
     setErr(''); setMsg('')
     try {
       const d = await post('SpiderDataSourceInterface', { action: 'delete', id: rec.id })
@@ -184,6 +186,7 @@ export default function SpiderDataSource() {
       {editing && (
         <Modal title={editing.id ? `${t('spider.editDataSourceTitle')} #${editing.id}` : t('spider.addDataSource')}
                onClose={() => setEditing(null)}
+               closeOnOverlayClick={false}
                footer={<>
                  <button className="btn" onClick={() => setEditing(null)}>{t('common.cancel')}</button>
                  <button className="btn btn-primary" onClick={save} disabled={saving}>
@@ -211,7 +214,7 @@ export default function SpiderDataSource() {
 
       {/* 爬取弹窗：SSE 流式输出到 .log-box */}
       {crawling && (
-        <Modal title={t('spider.aiCrawl', { name: crawling.platform_name, id: crawling.id })} onClose={closeCrawl} width={860}
+        <Modal title={t('spider.aiCrawl', { name: crawling.platform_name, id: crawling.id })} onClose={closeCrawl} width={860} closeOnOverlayClick={false}
                footer={<>
                  <button className="btn" onClick={closeCrawl} disabled={crawlBusy}>{t('toolbar.close')}</button>
                  <button className="btn btn-primary" onClick={startCrawl} disabled={crawlBusy}>

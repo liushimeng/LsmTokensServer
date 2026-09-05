@@ -5,6 +5,7 @@ import { useUserModelOptions } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import { pickRouteQuery } from '../shared/format'
 import { useI18n } from '../i18n'
+import { useConfirm } from '../components/ConfirmModal'
 
 // 对话页（/ChatDialogInterface + 同源 AI 代理）
 // 两步配置：action=models 拉取模型列表 → action=config 拉取选中模型对话配置
@@ -15,6 +16,7 @@ import { useI18n } from '../i18n'
 // {AgentAnthropicListenURL} 与 {AgentOpenAIListenURL} 代理，无 CORS 问题）。
 export default function ChatDialog({ route }) {
   const { t } = useI18n()
+  const sysConfirm = useConfirm()
   const init = pickRouteQuery(route && route.query)
   const isAdmin = isAdminRole() // 管理端：用户名下拉选择（页面生命周期内缓存一次）；用户端登录态即身份，无用户名控件
   const { users: userOptions } = useUserModelOptions()
@@ -208,16 +210,16 @@ export default function ChatDialog({ route }) {
     next[editingIndex] = { ...next[editingIndex], content: editText.trim() }
     setMessages(next); setEditingIndex(-1); setEditText('')
   }
-  const deleteMessage = (i) => {
-    if (!window.confirm(t('chatDialog.confirmDeleteMessage'))) return
+  const deleteMessage = async (i) => {
+    if (!(await sysConfirm(t('chatDialog.confirmDeleteMessage')))) return
     const next = messages.slice()
     // user 消息连同紧随其后的 assistant 回复成对删除
     if (next[i].role === 'user' && i + 1 < next.length && next[i + 1].role === 'assistant') next.splice(i, 2)
     else next.splice(i, 1)
     setMessages(next)
   }
-  const clearHistory = () => {
-    if (!window.confirm(t('chatDialog.confirmClearHistory'))) return
+  const clearHistory = async () => {
+    if (!(await sysConfirm(t('chatDialog.confirmClearHistory')))) return
     setMessages([]); setSystemPrompt('')
   }
 
