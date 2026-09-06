@@ -186,6 +186,7 @@
   "aiRouteManage.targetModel": "目标模型",
   "aiRouteManage.title": "智能路由管理",
   "aiRouteManage.totalPages": "总计 {total} 条 · 第 {page} / {pages} 页 · 每页",
+  "aiRouteManage.totalEndpoints": "共 {count} 个源站",
   "aiRouteManage.transferError": "传输错误",
   "aiRouteManage.userMode": "用户模式：仅显示并允许编辑本人模型的路由",
   "chatAnalysis.action": "操作",

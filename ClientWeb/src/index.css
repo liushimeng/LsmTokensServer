@@ -249,8 +249,25 @@ a { color: var(--primary); text-decoration: none; }
 .collapsed-summary:hover { background: #f1f5f9; }
 .collapsed-summary .collapse-btn { flex-shrink: 0; }
 .collapsed-id { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--muted); font-size: 12px; min-width: 36px; }
-.collapsed-model { font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collapsed-user { color: var(--muted); font-size: 12px; flex-shrink: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collapsed-model { font-weight: 500; flex: 0 1 auto; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collapsed-endpoints { flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .collapsed-hint { color: var(--muted); font-size: 12px; flex-shrink: 0; }
+.collapsed-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
+
+/* ===== 通用可折叠列表组件（CollapsibleList） ===== */
+.cl-single { position: relative; display: inline-flex; align-items: center; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cl-more { color: #0c4a8f; font-weight: 600; margin-left: 4px; flex-shrink: 0; }
+.cl-single .ep-chip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.cl-multi { max-height: calc(22px * 6); overflow-y: auto; }
+.cl-tooltip {
+  position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 200;
+  background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.12); min-width: 280px; max-width: 480px; max-height: 320px; overflow: auto;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.cl-tooltip-item { display: block; font-size: 12px; line-height: 1.6; padding: 2px 4px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cl-tooltip-item-off { color: #bbb; text-decoration: line-through; }
 /* 折叠行：hover 保持折叠摘要色，不被 tr:hover 覆盖 */
 .data-table tr.row-collapsed td { padding: 0; }
 

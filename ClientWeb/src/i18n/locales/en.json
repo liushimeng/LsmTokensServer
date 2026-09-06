@@ -154,6 +154,7 @@
   "aiRouteManage.targetModel": "Target Model",
   "aiRouteManage.title": "Smart Route Management",
   "aiRouteManage.totalPages": "Total {total} · Page {page} / {pages} ·",
+  "aiRouteManage.totalEndpoints": "Total {count} endpoints",
   "aiRouteManage.transferError": "Transfer Error",
   "aiRouteManage.userMode": "User mode: Only display and allow editing of your own model routes",
   "chatAnalysis.action": "Action",

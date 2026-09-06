@@ -154,6 +154,7 @@
   "aiRouteManage.targetModel": "ターゲットモデル",
   "aiRouteManage.title": "スマートルート管理",
   "aiRouteManage.totalPages": "合計 {total} 件 · {page} / {pages} ページ ·",
+  "aiRouteManage.totalEndpoints": "計 {count} 件のエンドポイント",
   "aiRouteManage.transferError": "転送エラー",
   "aiRouteManage.userMode": "ユーザーモード：自分のモデルのルートのみ表示・編集可能",
   "chatAnalysis.action": "操作",

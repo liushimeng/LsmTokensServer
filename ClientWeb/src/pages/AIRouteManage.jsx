@@ -3,6 +3,7 @@ import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import CollapsibleList from '../components/CollapsibleList'
 import TimeRangeSelector from '../components/TimeRangeSelector'
 import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
 import { nearestSpan } from '../shared/timeSpan'
@@ -330,16 +331,44 @@ export default function AIRouteManage() {
     setSelected(next)
   }
 
+  // 将 route.endpoint_list 转换为 CollapsibleList 所需的 items
+  const toEpItems = (list) => (list || []).map((ep) => ({
+    id: ep.id,
+    off: ep.in_route_status === 0,
+    text: `${ep.platform_name} / ${ep.model_name}${ep.algorithm_name ? ' · ' + ep.algorithm_name : ''}`,
+  }))
+
+  // 展开态：完整多行 chip 列表
   const renderEpList = (route) => {
     const list = route.endpoint_list || []
-    if (!list.length) return `${route.platform_name || ''} / ${route.endpoint_model_name || ''}`
+    if (!list.length) return <span style={{ color: '#999', fontStyle: 'italic' }}>{t('aiRouteManage.noSelectedEndpoints')}</span>
+    return <CollapsibleList items={toEpItems(list)} mode="multi" maxLines={6} />
+  }
+
+  // 折叠摘要：首条 + 数量 + 悬停 tooltip 全部
+  const renderEpListPreview = (route) => {
+    const list = route.endpoint_list || []
+    if (!list.length) return <span style={{ color: '#999', fontStyle: 'italic' }}>{t('aiRouteManage.noSelectedEndpoints')}</span>
+    return <CollapsibleList items={toEpItems(list)} mode="single" />
+  }
+
+  // 折叠态自定义摘要行：完整保留关键字段 + 源站列表摘要（首条+数量+悬停 tooltip）
+  const renderCollapsedRow = (route, onToggle) => {
     return (
-      <div className="chip-list">
-        {list.map((ep, i) => (
-          <span key={ep.id + '-' + i} className={'ep-chip' + (ep.in_route_status === 0 ? ' ep-chip-off' : '')}>
-            {i + 1}. {ep.platform_name} / {ep.model_name}{ep.algorithm_name ? ' · ' + ep.algorithm_name : ''}
-          </span>
-        ))}
+      <div className="collapsed-summary" onClick={onToggle}>
+        <button type="button" className="collapse-btn" aria-label={t('common.expand')}>▶</button>
+        <span className="collapsed-id">#{route.id}</span>
+        {isAdmin && route.user_name ? <span className="collapsed-user">{route.user_name}</span> : null}
+        <span className="collapsed-model">{route.model_name}</span>
+        <span className={`protocol-badge protocol-${protocolSlug(route.protocol_type)}`}>{protocolName(route.protocol_type)}</span>
+        <span className="collapsed-endpoints">
+          {renderEpListPreview(route)}
+        </span>
+        <span className="collapsed-hint">{t('common.expand')}</span>
+        <span className="collapsed-actions">
+          <button className="btn btn-sm btn-primary" onClick={(e) => { e.stopPropagation(); openEdit(route) }}>{t('aiRouteManage.editRoute')}</button>
+          {isAdmin ? <button className="btn btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); deleteItem(route) }}>{t('aiRouteManage.deleteRoute')}</button> : null}
+        </span>
       </div>
     )
   }
@@ -445,7 +474,7 @@ export default function AIRouteManage() {
         <DataTable columns={columns} rows={pagedRoutes} loading={loading} empty={t('aiRouteManage.noRoutesConfig')} rowKey="id"
           rowClass={(r) => 'row-protocol-' + protocolSlug(r.protocol_type)}
           collapsible collapsedIds={collapsedIds} onToggleCollapse={toggleCollapse}
-          collapsedHiddenColumns={['endpoints', 'actions']}
+          renderCollapsedRow={renderCollapsedRow}
           sortStorageKey={`lsm:airoute:sort:${isAdmin ? 'manager' : 'user'}`} />
         <div className="pager">
           <span>{t('aiRouteManage.totalPages', { total: routes.length, page: safePage, pages: totalPages })}</span>
