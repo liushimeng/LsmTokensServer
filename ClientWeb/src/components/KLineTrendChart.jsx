@@ -14,7 +14,8 @@
 //
 // props:
 //   points: [{date:'YYYY-MM-DD HH:00',count,tokens_total,tokens_input,tokens_output}]
-//   containerWidth?: 父容器注入的实测宽度（可选；不传则内部 ResizeObserver 兜底）
+//   containerWidth?: 父容器（ResponsiveSvgChart）注入的组件整体实测宽度，含左右轴
+//                    2×AXIS_W，内部自动扣除得到绘图区宽度；不传则内部 ResizeObserver 兜底
 //   loading?: 是否显示加载遮罩
 //   emptyHint?: 空数据提示
 //   callLabel / tokenLabel: 左右轴名称
@@ -30,6 +31,7 @@ const PAD_B = 36
 const PAD_L = 4    // SVG 内留少量边（轴文字外置）
 const PAD_R = 4
 const MIN_WIDTH = 300 // 最小宽度保护
+const AXIS_W = 56   // 左右轴文字列宽（px），与三列网格 gridTemplateColumns 保持一致
 const INNER_H = VB_H - PAD_T - PAD_B // 绘图区高度（固定）
 
 const PALETTE = {
@@ -205,8 +207,15 @@ export default function KLineTrendChart(props) {
     return () => ro.disconnect()
   }, [externalWidth])
 
-  // 最终使用的 viewBox 宽度：外部注入 > 内部测量
-  const vbW = externalWidth != null ? Math.max(MIN_WIDTH, externalWidth) : internalWidth
+  // 最终使用的绘图区宽度（viewBox 宽度，与 SVG 实际渲染像素 1:1 映射）：
+  //   外部注入的 containerWidth 是组件整体宽度（含左右轴 2×AXIS_W），需扣除；
+  //   内部 ResizeObserver 兜底路径测量的就是中列宽度，直接使用。
+  const measuredW = externalWidth != null
+    ? Math.max(MIN_WIDTH, externalWidth - 2 * AXIS_W)
+    : internalWidth
+  const vbW = Math.max(MIN_WIDTH, measuredW)
+  // MIN_WIDTH 兜底收窄时 viewBox 大于实际渲染宽度，坐标需按比例还原（tooltip 定位用）
+  const renderScale = measuredW > 0 ? vbW / measuredW : 1
 
   const innerW = vbW - PAD_L - PAD_R
 
@@ -410,18 +419,20 @@ export default function KLineTrendChart(props) {
 
   const onMouseMove = useCallback((e) => {
     const drag = dragRef.current
-    if (!drag) return
-    if (drag.mode === 'pan') {
-      const svg = svgRef.current
-      const rect = svg.getBoundingClientRect()
-      const dxPx = e.clientX - drag.startX
-      const ratio = vbW / rect.width
-      const span = drag.startView.to - drag.startView.from
-      const shift = -dxPx * ratio / innerW * span
-      setView({ from: drag.startView.from + shift, to: drag.startView.to + shift })
-    } else if (drag.mode === 'brush') {
-      const x = eventToVbX(e)
-      setBrush({ x1: drag.startX, x2: x })
+    // 拖拽中：处理 pan / brush；未拖拽：仅跟随鼠标更新 hover 十字线与 tooltip
+    if (drag) {
+      if (drag.mode === 'pan') {
+        const svg = svgRef.current
+        const rect = svg.getBoundingClientRect()
+        const dxPx = e.clientX - drag.startX
+        const ratio = vbW / rect.width
+        const span = drag.startView.to - drag.startView.from
+        const shift = -dxPx * ratio / innerW * span
+        setView({ from: drag.startView.from + shift, to: drag.startView.to + shift })
+      } else if (drag.mode === 'brush') {
+        const x = eventToVbX(e)
+        setBrush({ x1: drag.startX, x2: x })
+      }
     }
     if (n) setHoverIdx(idxAtVbX(eventToVbX(e)))
   }, [eventToVbX, idxAtVbX, n, vbW, innerW])
@@ -526,7 +537,7 @@ export default function KLineTrendChart(props) {
 
       {/* 主图：左轴文字 / SVG / 右轴文字 三列 */}
       <div
-        style={{ display: 'grid', gridTemplateColumns: '56px 1fr 56px', alignItems: 'stretch', userSelect: 'none' }}
+        style={{ display: 'grid', gridTemplateColumns: `${AXIS_W}px 1fr ${AXIS_W}px`, alignItems: 'stretch', userSelect: 'none' }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
@@ -641,7 +652,8 @@ export default function KLineTrendChart(props) {
       {hover && hoverVbX !== null ? (
         <div style={{
           position: 'absolute',
-          left: `calc(${(hoverVbX - PAD_L) / innerW * 100}% + 56px)`,
+          // 精确像素定位：左轴列宽 + hover 点在中列内的像素偏移（renderScale 修正 MIN_WIDTH 收窄场景）
+          left: AXIS_W + (hoverVbX - PAD_L) / renderScale,
           top: PAD_T + 4,
           transform: hoverVbX > PAD_L + innerW * 0.7 ? 'translateX(-100%)' : 'none',
           padding: '6px 10px',
