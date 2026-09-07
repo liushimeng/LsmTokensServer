@@ -13,7 +13,8 @@ import { useConfirm } from '../components/ConfirmModal'
 // 折叠/分页 localStorage 工具（带容错）
 const safeGet = (k) => { try { return window.localStorage.getItem(k) } catch { return null } }
 const safeSet = (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* 忽略 */ } }
-const PAGE_SIZES = [10, 20, 30, 50, 100]
+// 分页选项：精简为 10/20/50/100，默认 50。localStorage 中旧值（如 30）由 PAGE_SIZES.includes 校验后自动回落。
+const PAGE_SIZES = [10, 20, 50, 100]
 const DEFAULT_PAGE_SIZE = 50
 
 // 智能路由管理（管理端）：AIRouteManageInterface（POST JSON {action:...}）
@@ -352,19 +353,60 @@ export default function AIRouteManage() {
     return <CollapsibleList items={toEpItems(list)} mode="single" />
   }
 
-  // 折叠态自定义摘要行：完整保留关键字段 + 源站列表摘要（首条+数量+悬停 tooltip）
+  // 折叠摘要行：紧凑单行布局。显示 ID / 用户（管理端） / 模型 / 协议 / 算法策略 /
+  // 源站摘要 / 汇总统计 / 最后成功记录 / 最后失败记录；操作列内容折叠态隐藏，
+  // 仅在展开态恢复，避免折叠行过度拥挤。
+  const renderAlgoTag = (route) => {
+    const v = route.algorithm_strategy_type || 1
+    const label = ALGO_NAMES[v] || '-'
+    return <span className={`algo-badge algo-${v}`} title={label}>{label}</span>
+  }
+
+  const renderCollapsedStats = (route) => {
+    const s = stats[route.id]
+    if (!s) return <span className="collapsed-stat" style={{ color: '#999' }}>—</span>
+    const a = s.anthropic_count || 0
+    const o = s.openai_count || 0
+    if (!a && !o) return <span className="collapsed-stat" style={{ color: '#999' }}>—</span>
+    return (
+      <span className="collapsed-stat">
+        {a > 0 ? <span className="a">A:{a}</span> : null}
+        {a > 0 && o > 0 ? <span style={{ color: '#c0c4cc', margin: '0 3px' }}>/</span> : null}
+        {o > 0 ? <span className="o">O:{o}</span> : null}
+      </span>
+    )
+  }
+
+  const renderCollapsedLast = (route, kind) => {
+    const failed = kind === 'success' ? route.last_success_failed : route.last_failure_failed
+    const has = kind === 'success' ? route.last_success_has_record : route.last_failure_has_record
+    if (failed) return <span className={`collapsed-last ${kind}`}><b>{t('aiRouteManage.queryFailed')}</b></span>
+    if (!has) return <span className={`collapsed-last ${kind}`} style={{ color: '#999' }}>—</span>
+    const status = (kind === 'success' ? route.last_success_status : route.last_failure_status) || t('aiRouteManage.transferError')
+    const time = kind === 'success' ? route.last_success_at_text : route.last_failure_at_text
+    return (
+      <span className={`collapsed-last ${kind}`} title={`${status} · ${time}`}>
+        <b>{status}</b>
+        <span>{time}</span>
+      </span>
+    )
+  }
+
   const renderCollapsedRow = (route, onToggle) => {
     return (
       <div className="collapsed-summary" onClick={onToggle}>
         <button type="button" className="collapse-btn" aria-label={t('common.expand')}>▶</button>
         <span className="collapsed-id">#{route.id}</span>
-        {isAdmin && route.user_name ? <span className="collapsed-user">{route.user_name}</span> : null}
-        <span className="collapsed-model">{route.model_name}</span>
+        {isAdmin && route.user_name ? <span className="collapsed-user" title={route.user_name}>{route.user_name}</span> : null}
+        <span className="collapsed-model" title={route.model_name}>{route.model_name}</span>
         <span className={`protocol-badge protocol-${protocolSlug(route.protocol_type)}`}>{protocolName(route.protocol_type)}</span>
+        {renderAlgoTag(route)}
         <span className="collapsed-endpoints">
           {renderEpListPreview(route)}
         </span>
-        <span className="collapsed-hint">{t('common.expand')}</span>
+        {renderCollapsedStats(route)}
+        {renderCollapsedLast(route, 'success')}
+        {renderCollapsedLast(route, 'failure')}
         <span className="collapsed-actions">
           <button className="btn btn-sm btn-primary" onClick={(e) => { e.stopPropagation(); openEdit(route) }}>{t('aiRouteManage.editRoute')}</button>
           {isAdmin ? <button className="btn btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); deleteItem(route) }}>{t('aiRouteManage.deleteRoute')}</button> : null}
@@ -436,9 +478,7 @@ export default function AIRouteManage() {
       render: (_, r) => (
         <span className="op-btns">
           <button className="btn btn-sm btn-primary" onClick={() => openEdit(r)}>{t('aiRouteManage.editRoute')}</button>
-          <a className="btn btn-link" href={`#/ChatDialog?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>{t('aiRouteManage.dialog')}</a>
-          <a className="btn btn-link" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>{t('aiRouteManage.dialogAnalysis')}</a>
-          <a className="btn btn-link" href={`#/ChatAnalysisTotal?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}${days !== null ? '&days=' + days : ''}`}>{t('aiRouteManage.summaryStats')}</a>
+          <a className="btn btn-sm btn-success" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>{t('aiRouteManage.dialogAnalysis')}</a>
           {isAdmin ? <button className="btn btn-sm btn-danger" onClick={() => deleteItem(r)}>{t('aiRouteManage.deleteRoute')}</button> : null}
         </span>
       ),

@@ -79,6 +79,8 @@ a { color: var(--primary); text-decoration: none; }
 .btn-primary { background: var(--primary); border-color: var(--primary); color: #fff; }
 .btn-primary:hover { background: var(--primary-dark); }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn-success { background: #28a745; border-color: #28a745; color: #fff; }
+.btn-success:hover { background: #218838; border-color: #1e7e34; }
 .btn-sm { padding: 3px 8px; font-size: 12px; }
 .btn-active { background: #eff6ff; border-color: var(--primary); color: var(--primary); font-weight: 600; }
 .btn-link { border: none; background: none; color: var(--primary); padding: 4px 6px; }
@@ -245,15 +247,39 @@ a { color: var(--primary); text-decoration: none; }
 .collapse-btn { background: none; border: 1px solid transparent; border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; color: var(--muted); line-height: 1; }
 .collapse-btn:hover { background: #f0f3f7; border-color: var(--border); color: var(--text); }
 .cell-collapsed-row { padding: 0 !important; }
-.collapsed-summary { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 13px; cursor: pointer; background: #fafbfc; transition: background .15s; }
+.collapsed-summary { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12.5px; cursor: pointer; background: #fafbfc; transition: background .15s; flex-wrap: nowrap; min-height: 36px; }
 .collapsed-summary:hover { background: #f1f5f9; }
+.collapsed-summary > * { flex-shrink: 0; }
 .collapsed-summary .collapse-btn { flex-shrink: 0; }
 .collapsed-id { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--muted); font-size: 12px; min-width: 36px; }
 .collapsed-user { color: var(--muted); font-size: 12px; flex-shrink: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collapsed-model { font-weight: 500; flex: 0 1 auto; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.collapsed-endpoints { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.collapsed-endpoints { flex: 1 1 200px; min-width: 0; overflow: hidden; position: relative; }
 .collapsed-hint { color: var(--muted); font-size: 12px; flex-shrink: 0; }
 .collapsed-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.collapsed-stat { font-size: 12px; color: #475569; white-space: nowrap; }
+.collapsed-stat .a { color: #6f42c1; font-weight: 600; }
+.collapsed-stat .o { color: #28a745; font-weight: 600; }
+.collapsed-last { font-size: 12px; display: inline-flex; gap: 4px; align-items: baseline; max-width: 160px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.collapsed-last.success b { color: #155724; }
+.collapsed-last.failure b { color: #721c24; }
+.collapsed-last span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.algo-badge { display: inline-block; padding: 1px 7px; border-radius: 8px; font-size: 11px; font-weight: 500; line-height: 1.5; white-space: nowrap; flex-shrink: 0; }
+.algo-badge.algo-1 { background: #dbeafe; color: #1e40af; }
+.algo-badge.algo-2 { background: #ede9fe; color: #6f42c1; }
+.algo-badge.algo-3 { background: #fed7aa; color: #c2410c; }
+/* 窄屏分级隐藏次要折叠字段，保证单行布局稳定 */
+@media (max-width: 1280px) {
+  .collapsed-last.failure { display: none; }
+}
+@media (max-width: 1024px) {
+  .collapsed-endpoints { flex-basis: 140px; max-width: 160px; }
+  .collapsed-last.success { display: none; }
+}
+@media (max-width: 768px) {
+  .collapsed-stat { display: none; }
+  .collapsed-user { display: none; }
+}
 
 /* ===== 通用可折叠列表组件（CollapsibleList） ===== */
 .cl-single { position: relative; display: inline-flex; align-items: center; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
