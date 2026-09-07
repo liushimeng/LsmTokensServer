@@ -2,11 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"strings"
+	"sync"
+
 	"github.com/lishimeng/LsmTokensServer/config"
 	"github.com/lishimeng/LsmTokensServer/logger"
 	modelsdb "github.com/lishimeng/LsmTokensServer/models"
 	"net/http"
-	"sync"
 )
 
 // ModelInfoManageInterfaceRequest 模型信息管理请求
@@ -39,14 +41,21 @@ func modelInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Action string `json:"action"`
-		Days   int    `json:"days"`
-		Hours  int    `json:"hours"` // trend 用：1~720；<=0 视为 24
+		Action    string `json:"action"`
+		Days      int    `json:"days"`
+		Hours     int    `json:"hours"`     // trend 用：1~720；<=0 视为 24
+		UserName  string `json:"user_name"` // 阶段BV：可选；指定后按单用户单模型视角聚合
+		ModelName string `json:"model_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "请求解析失败: " + err.Error()})
 		return
 	}
+	req.UserName = strings.TrimSpace(req.UserName)
+	req.ModelName = strings.TrimSpace(req.ModelName)
+	// 阶段BV：仅 user_name + model_name 同时指定才走单用户单模型分支；
+	// 仅指定 user_name 不指定 model_name 时回退全站聚合（避免无索引大表扫描失控）
+	scoped := req.UserName != "" && req.ModelName != ""
 
 	switch req.Action {
 	case "", "stats":
@@ -57,14 +66,25 @@ func modelInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 
 		var wg sync.WaitGroup
 		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			summary, modelList, statsErr = modelsdb.GetModelInfoUsageStatsAll(config.G.DBMysqlSubTableNumber, req.Days)
-		}()
-		go func() {
-			defer wg.Done()
-			trend, trendErr = modelsdb.GetDailyStatsAll(config.G.DBMysqlSubTableNumber, req.Days)
-		}()
+		if scoped {
+			// 单用户单模型视角无「日折线」趋势（按分表粒度过细，K 线图已由 trend action 提供）
+			trend = []modelsdb.DailyStat{}
+			wg.Add(-1) // 不再等待 trend 协程
+			go func() {
+				defer wg.Done()
+				summary, modelList, statsErr = modelsdb.GetModelInfoUsageStatsByUserModel(
+					req.UserName, req.ModelName, config.G.DBMysqlSubTableNumber, req.Days)
+			}()
+		} else {
+			go func() {
+				defer wg.Done()
+				summary, modelList, statsErr = modelsdb.GetModelInfoUsageStatsAll(config.G.DBMysqlSubTableNumber, req.Days)
+			}()
+			go func() {
+				defer wg.Done()
+				trend, trendErr = modelsdb.GetDailyStatsAll(config.G.DBMysqlSubTableNumber, req.Days)
+			}()
+		}
 		wg.Wait()
 
 		if statsErr != nil {
@@ -82,7 +102,13 @@ func modelInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	case "trend":
 		// 小时粒度 K 线图数据：与 stats 分离，避免大 stats 响应拖累趋势加载；
 		// 前端按窗口分批请求 24h / 72h / 168h / 720h。
-		res, err := modelsdb.GetHourlyTrendAll(config.G.DBMysqlSubTableNumber, req.Hours)
+		var res *modelsdb.HourlyTrendResult
+		var err error
+		if scoped {
+			res, err = modelsdb.GetHourlyTrendByUserModel(req.UserName, req.ModelName, config.G.DBMysqlSubTableNumber, req.Hours)
+		} else {
+			res, err = modelsdb.GetHourlyTrendAll(config.G.DBMysqlSubTableNumber, req.Hours)
+		}
 		if err != nil {
 			logger.Printf("[WARNING] ModelInfoInterface trend hourly failed: %v", err)
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})

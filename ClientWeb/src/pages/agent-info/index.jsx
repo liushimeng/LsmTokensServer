@@ -1,17 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
-import { post } from '../shared/api'
-import { isAdminRole } from '../shared/auth'
-import DataTable from '../components/DataTable'
-import HourlyTrendPanel from '../components/HourlyTrendPanel'
-import TimeRangeSelector from '../components/TimeRangeSelector'
-import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
-import { nearestSpan } from '../shared/timeSpan'
-import { useI18n } from '../i18n'
-
-// Agent 信息（统计页）：AgentInfoInterface
-//   - action='stats' 返回 summary/agents/trend（管理员端）
-//   - action='trend'（新增）小时级 K 线图：调用次数 + Tokens 数
-// 无第三方图表库：K 线图用自研 SVG HourlyTrendPanel + KLineTrendChart 组件。
+// 阶段BV：AgentInfo 页面主组件
+// 模块化拆分：toolbar + 主组件。
+// 后端 AgentInfoInterface action=stats/trend 支持可选 user_name+model_name 参数，
+// 同时指定时按单用户单模型视角聚合；否则走全站聚合（admin）或本人全模型聚合（user）。
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { post } from '../../shared/api'
+import { isAdminRole } from '../../shared/auth'
+import { useUserModelOptions, useMyModelNames } from '../../shared/userModelOptions'
+import DataTable from '../../components/DataTable'
+import HourlyTrendPanel from '../../components/HourlyTrendPanel'
+import useStatsPageFilters from '../../shared/useStatsPageFilters'
+import AgentInfoToolbar from './AgentInfoToolbar'
+import { useI18n } from '../../i18n'
 
 function fmt(n) {
   n = Number(n) || 0
@@ -21,38 +20,58 @@ function pct(v) {
   v = Number(v) || 0
   return Math.min(Math.max(v, 0), 100).toFixed(2) + '%'
 }
+
 export default function AgentInfo(props) {
   const { t } = useI18n()
-  const q = props?.route?.query
+  const route = props && props.route
   const isAdmin = isAdminRole()
-  const storageKey = `lsm:agentInfo:days:v1:${isAdmin ? 'admin:__all__' : 'user'}`
-  const { levels, loading: levelsLoading } = useTimeSpanLevels()
-  // 20260826 动态档位：span 统一编码（负值=小时）；档位加载后按旧 localStorage/URL 值就近迁移
-  const [span, setSpan] = useState(null)
+  const { users: userOptions } = useUserModelOptions()
+  const { modelNames: myModelNames } = useMyModelNames()
+
+  const filters = useStatsPageFilters('agent_info', route, isAdmin, 3)
+  const { userName, setUserName, modelName, setModelName, days, setDays, levels, levelsLoading } = filters
+
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const loadStats = useCallback((d) => {
+  const modelNameRef = useRef(modelName)
+  useEffect(() => { modelNameRef.current = modelName }, [modelName])
+  const userNameRef = useRef(userName)
+  useEffect(() => { userNameRef.current = userName }, [userName])
+
+  // 是否处于「单用户单模型」视角
+  const scopedAdmin = isAdmin && userName.trim() !== '' && modelName.trim() !== ''
+  const scopedUser = !isAdmin && modelName.trim() !== ''
+  const scoped = scopedAdmin || scopedUser
+
+  const loadStats = useCallback((d, u, m) => {
+    const un = (u !== undefined ? u : userNameRef.current).trim()
+    const mn = (m !== undefined ? m : modelNameRef.current).trim()
     setLoading(true)
     setError('')
-    post('AgentInfoInterface', { action: 'stats', days: d })
+    post('AgentInfoInterface', {
+      action: 'stats',
+      days: d,
+      user_name: isAdmin ? un : '',
+      model_name: mn,
+    })
       .then((res) => setData((res && res.data) || {}))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [isAdmin])
 
   useEffect(() => {
-    if (!levels.length) return
-    setSpan((cur) => cur ?? nearestSpan(levels, q?.get('days') || localStorage.getItem(storageKey) || 3))
+    if (days === null) return
+    loadStats(days)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levels])
+  }, [days])
 
   useEffect(() => {
-    if (span === null) return
-    localStorage.setItem(storageKey, String(span))
-    loadStats(span)
-  }, [span, loadStats])
+    if (days === null) return
+    loadStats(days)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userName, modelName])
 
   const summary = (data && data.summary) || {}
   const agents = (data && data.agents) || []
@@ -61,7 +80,9 @@ export default function AgentInfo(props) {
     if (!list.length) return <div className="table-empty">{t('agentInfo.noStatsData')}</div>
     return list.slice(0, 8).map((it) => {
       const share = Math.min(Math.max(Number(mode === 'token' ? it.token_share : it.call_share) || 0, 0), 100)
-      const value = mode === 'token' ? t('agentInfo.tokensUnit', { count: fmt(it.tokens_all_size) }) : t('agentInfo.callsUnit', { count: fmt(it.call_count) })
+      const value = mode === 'token'
+        ? t('agentInfo.tokensUnit', { count: fmt(it.tokens_all_size) })
+        : t('agentInfo.callsUnit', { count: fmt(it.call_count) })
       return (
         <div key={it.agent_tool_name} style={{ padding: '12px 0', borderTop: '1px solid #f1f5f9' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -69,7 +90,10 @@ export default function AgentInfo(props) {
             <span style={{ color: '#475569', fontSize: 12 }}>{value} · {pct(share)}</span>
           </div>
           <div style={{ height: 10, background: '#e2e8f0', borderRadius: 999, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: share + '%', minWidth: 2, borderRadius: 999, background: mode === 'call' ? 'linear-gradient(90deg,#34d399,#059669)' : 'linear-gradient(90deg,#c084fc,#7c3aed)' }} />
+            <div style={{
+              height: '100%', width: share + '%', minWidth: 2, borderRadius: 999,
+              background: mode === 'call' ? 'linear-gradient(90deg,#34d399,#059669)' : 'linear-gradient(90deg,#c084fc,#7c3aed)',
+            }} />
           </div>
         </div>
       )
@@ -79,12 +103,15 @@ export default function AgentInfo(props) {
   return (
     <div className="page">
       <h2 className="page-title">{t('agentInfo.title2')}</h2>
-      <div className="toolbar">
-        <span>{t('agentInfo.timeSpan')}</span>
-        <TimeRangeSelector span={span ?? 3} onChange={setSpan} levels={levels} loading={levelsLoading} />
-        <button className="btn btn-primary" disabled={loading} onClick={() => loadStats(days)}>{loading ? t('agentInfo.loading') : t('agentInfo.refresh')}</button>
-        <span style={{ color: '#888', fontSize: 13 }}>{t('agentInfo.agentStats')}</span>
-      </div>
+      <AgentInfoToolbar
+        isAdmin={isAdmin}
+        userName={userName} setUserName={setUserName}
+        modelName={modelName} setModelName={setModelName}
+        days={days} setDays={setDays}
+        levels={levels} levelsLoading={levelsLoading}
+        onQuery={() => loadStats(days)} loading={loading}
+        userOptions={userOptions} myModelNames={myModelNames}
+      />
       {error ? <div className="alert alert-error">{t('agentInfo.loadFailed', { error })}</div> : null}
       {loading ? <div className="table-loading">{t('agentInfo.loading')}</div> : !agents.length && !error ? <div className="table-empty">{t('agentInfo.noAgentData')}</div> : null}
 
@@ -102,7 +129,7 @@ export default function AgentInfo(props) {
               <h3>{t('agentInfo.hourlyTrend')}</h3>
               <HourlyTrendPanel
                 api="AgentInfoInterface"
-                span={span}
+                span={days}
                 labels={{
                   loading: t('agentInfo.trendLoading'),
                   empty: t('agentInfo.trendEmpty'),
@@ -113,6 +140,13 @@ export default function AgentInfo(props) {
                   reset: t('agentInfo.trendReset'),
                   truncated: t('agentInfo.trendTruncated'),
                 }}
+                extraParams={(() => {
+                  const un = isAdmin ? userName.trim() : ''
+                  const mn = modelName.trim()
+                  if (un && mn) return { user_name: un, model_name: mn }
+                  if (!isAdmin && mn) return { model_name: mn }
+                  return {}
+                })()}
               />
             </div>
           ) : null}
@@ -131,7 +165,7 @@ export default function AgentInfo(props) {
           </div>
 
           <div className="card">
-            <h3>{t('agentInfo.agentDetail', { view: isAdmin ? t('agentInfo.adminView') : t('agentInfo.userView') })}</h3>
+            <h3>{t('agentInfo.agentDetail', { view: scoped ? t('agentInfo.userModelScope') : (isAdmin ? t('agentInfo.adminView') : t('agentInfo.userView')) })}</h3>
             <DataTable
               rowKey="agent_tool_name"
               rows={agents}
@@ -144,7 +178,7 @@ export default function AgentInfo(props) {
                 { key: 'tokens_output_size', title: t('agentInfo.outputTokens'), render: fmt },
                 { key: 'tokens_all_size', title: t('agentInfo.totalTokens2'), render: (v, a) => <b title={t('agentInfo.tokenShare') + ' ' + pct(a.token_share)}>{fmt(v)}</b> },
                 { key: 'token_share', title: t('agentInfo.tokenShare'), render: (v) => <b style={{ color: '#7c3aed' }}>{pct(v)}</b> },
-                ...(isAdmin ? [{ key: 'user_count', title: t('agentInfo.activeUsers'), render: fmt }] : []),
+                ...(isAdmin && !scoped ? [{ key: 'user_count', title: t('agentInfo.activeUsers'), render: fmt }] : []),
               ]}
             />
           </div>

@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"net/http"
+	"strings"
+
 	"github.com/lishimeng/LsmTokensServer/config"
 	modelsdb "github.com/lishimeng/LsmTokensServer/models"
-	"net/http"
 )
 
 // userModelInfoInterfaceHandle 用户模型信息 API（只读）
@@ -29,9 +31,10 @@ func userModelInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Action string `json:"action"`
-		Days   int    `json:"days"`
-		Hours  int    `json:"hours"` // trend 用：1~720；<=0 视为 24
+		Action    string `json:"action"`
+		Days      int    `json:"days"`
+		Hours     int    `json:"hours"` // trend 用：1~720；<=0 视为 24
+		ModelName string `json:"model_name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{
@@ -40,20 +43,32 @@ func userModelInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	req.ModelName = strings.TrimSpace(req.ModelName)
+	// 阶段BV：user_name 强制以 JWT claims 为准（前端传了也无效），防止越权
+	effectiveUserName := claims.UserName
+	effectiveModelName := req.ModelName
 
 	switch req.Action {
 	case "trend":
-		// 小时粒度 K 线图数据：仅扫本用户模型对应的分表，JWT claims 保证越权防护。
-		userModels, err := modelsdb.GetUserModelsByUserID(claims.UserID)
-		if err != nil {
-			json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{Success: false, Message: err.Error()})
-			return
+		// 小时粒度 K 线图数据：JWT claims 保证越权防护。
+		// 阶段BV：若指定 model_name，则走单模型分表；否则按本人全模型聚合
+		var res *modelsdb.HourlyTrendResult
+		var err error
+		if effectiveModelName != "" {
+			res, err = modelsdb.GetHourlyTrendByUserModel(
+				effectiveUserName, effectiveModelName, config.G.DBMysqlSubTableNumber, req.Hours)
+		} else {
+			userModels, muErr := modelsdb.GetUserModelsByUserID(claims.UserID)
+			if muErr != nil {
+				json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{Success: false, Message: muErr.Error()})
+				return
+			}
+			modelNames := make([]string, 0, len(userModels))
+			for _, userModel := range userModels {
+				modelNames = append(modelNames, userModel.ModelName)
+			}
+			res, err = modelsdb.GetHourlyTrendByUser(claims.UserName, modelNames, config.G.DBMysqlSubTableNumber, req.Hours)
 		}
-		modelNames := make([]string, 0, len(userModels))
-		for _, userModel := range userModels {
-			modelNames = append(modelNames, userModel.ModelName)
-		}
-		res, err := modelsdb.GetHourlyTrendByUser(claims.UserName, modelNames, config.G.DBMysqlSubTableNumber, req.Hours)
 		if err != nil {
 			json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{Success: false, Message: err.Error()})
 			return
@@ -115,33 +130,47 @@ func userModelInfoInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			Data:    result,
 		})
 	case "stats":
-		userModels, err := modelsdb.GetUserModelsByUserID(claims.UserID)
-		if err != nil {
+		var summary *modelsdb.ModelInfoUsageSummary
+		var models []modelsdb.ModelInfoUsageStat
+		var statsErr error
+		if effectiveModelName != "" {
+			// 阶段BV：用户端单模型视角
+			summary, models, statsErr = modelsdb.GetModelInfoUsageStatsByUserModel(
+				effectiveUserName, effectiveModelName, config.G.DBMysqlSubTableNumber, req.Days)
+		} else {
+			// 原行为：本人全模型聚合
+			userModels, muErr := modelsdb.GetUserModelsByUserID(claims.UserID)
+			if muErr != nil {
+				json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{
+					Success: false,
+					Message: muErr.Error(),
+				})
+				return
+			}
+			modelNames := make([]string, 0, len(userModels))
+			for _, userModel := range userModels {
+				modelNames = append(modelNames, userModel.ModelName)
+			}
+			summary, models, statsErr = modelsdb.GetModelInfoUsageStatsByUser(claims.UserName, modelNames, config.G.DBMysqlSubTableNumber, req.Days)
+		}
+		if statsErr != nil {
 			json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{
 				Success: false,
-				Message: err.Error(),
+				Message: statsErr.Error(),
 			})
 			return
 		}
-		modelNames := make([]string, 0, len(userModels))
-		for _, userModel := range userModels {
-			modelNames = append(modelNames, userModel.ModelName)
-		}
-		summary, models, err := modelsdb.GetModelInfoUsageStatsByUser(claims.UserName, modelNames, config.G.DBMysqlSubTableNumber, req.Days)
-		if err != nil {
-			json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{
-				Success: false,
-				Message: err.Error(),
-			})
-			return
-		}
-		dstSummary, dstModels, err := modelsdb.GetModelInfoUsageStatsByUserDstModel(claims.UserName, modelNames, config.G.DBMysqlSubTableNumber, req.Days)
-		if err != nil {
-			json.NewEncoder(w).Encode(UserAIRouteInterfaceResponse{
-				Success: false,
-				Message: err.Error(),
-			})
-			return
+		// dst_summary / dst_models 仅在「本人全模型」视角下展示；
+		// 单模型视角下 dst 列表即 models 本身，dstSummary/Models 与 summary/Models 重复。
+		var dstSummary *modelsdb.ModelInfoUsageSummary
+		var dstModels []modelsdb.ModelInfoUsageStat
+		if effectiveModelName == "" {
+			userModels, _ := modelsdb.GetUserModelsByUserID(claims.UserID)
+			modelNames := make([]string, 0, len(userModels))
+			for _, userModel := range userModels {
+				modelNames = append(modelNames, userModel.ModelName)
+			}
+			dstSummary, dstModels, _ = modelsdb.GetModelInfoUsageStatsByUserDstModel(claims.UserName, modelNames, config.G.DBMysqlSubTableNumber, req.Days)
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,

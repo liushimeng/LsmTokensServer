@@ -211,3 +211,70 @@ func GetAgentInfoUsageStatsByUser(userName string, modelNames []string, subTable
 	summary, stats := finalizeAgentInfoUsageStats(acc)
 	return summary, stats, nil
 }
+
+// GetAgentInfoUsageStatsByUserModel 用户+模型维度：扫描一张分表，按 agent_tool_name 聚合
+// 调用次数和 Tokens。用于 /AgentInfo 页面在指定 user_name + model_name 后
+// 查看单一用户单一模型视角的 Agent 工具统计。
+//
+// days 参数为统一 span 编码：0 无限制；>0 最近 N 天（≤365）；<0 最近 |N| 小时（≤720）。
+// 调用方：
+//   - 管理端 /AgentInfoInterface action=stats（user_name + model_name 同时指定）
+//   - 用户端 /AgentInfoInterface action=stats（model_name 指定，user_name 强制取 JWT claims）
+func GetAgentInfoUsageStatsByUserModel(userName string, modelName string, subTableNum int, days int) (*AgentInfoUsageSummary, []AgentInfoUsageStat, error) {
+	if database.DB == nil {
+		return nil, nil, fmt.Errorf("database not initialized")
+	}
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		return nil, nil, fmt.Errorf("user_name is required")
+	}
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return nil, nil, fmt.Errorf("model_name is required")
+	}
+	subTableNum = normalizeSubTableNum(subTableNum)
+	days = ClampStatsSpan(days)
+
+	tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
+	if !IsTableExists(tableName) {
+		// 单用户单模型视角下分表不存在 → 返回空 summary，避免前端 NPE
+		return &AgentInfoUsageSummary{}, []AgentInfoUsageStat{}, nil
+	}
+
+	var rows []struct {
+		AgentToolName    string `gorm:"column:agent_tool_name"`
+		CallCount        int64  `gorm:"column:call_count"`
+		TokensAllSize    uint64 `gorm:"column:tokens_all_size"`
+		TokensInputSize  uint64 `gorm:"column:tokens_input_size"`
+		TokensOutputSize uint64 `gorm:"column:tokens_output_size"`
+	}
+	err := applyStatsSpanWhere(database.DB.Table(tableName), days).
+		Select("agent_tool_name, COUNT(*) as call_count, COALESCE(SUM(tokens_all_size), 0) as tokens_all_size, COALESCE(SUM(tokens_input_size), 0) as tokens_input_size, COALESCE(SUM(tokens_output_size), 0) as tokens_output_size").
+		Where("user_name = ?", userName).
+		Group("agent_tool_name").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get agent info usage stats for %s/%s: %w", userName, modelName, err)
+	}
+
+	acc := make(map[string]*agentInfoUsageAccumulator)
+	for _, row := range rows {
+		agentToolName := normalizeAgentToolName(row.AgentToolName)
+		item := acc[agentToolName]
+		if item == nil {
+			item = &agentInfoUsageAccumulator{
+				AgentInfoUsageStat: AgentInfoUsageStat{AgentToolName: agentToolName},
+				users:              make(map[string]struct{}),
+			}
+			acc[agentToolName] = item
+		}
+		item.CallCount += row.CallCount
+		item.TokensAllSize += row.TokensAllSize
+		item.TokensInputSize += row.TokensInputSize
+		item.TokensOutputSize += row.TokensOutputSize
+		item.users[userName] = struct{}{}
+	}
+
+	summary, stats := finalizeAgentInfoUsageStats(acc)
+	return summary, stats, nil
+}

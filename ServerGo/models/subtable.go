@@ -1868,6 +1868,75 @@ func GetModelInfoUsageStatsByUserDstModel(userName string, modelNames []string, 
 	return summary, stats, nil
 }
 
+// GetModelInfoUsageStatsByUserModel 用户+模型维度：扫描一张分表，按 dst_model_name 聚合
+// 调用次数和 Tokens。用于 /ModelInfo 页面在指定 user_name + model_name 后
+// 查看单一用户单一模型视角的目标模型分布。
+//
+// days 参数为统一 span 编码：0 无限制；>0 最近 N 天（≤365）；<0 最近 |N| 小时（≤720）。
+// 调用方：
+//   - 管理端 /ModelInfoInterface action=stats（user_name + model_name 同时指定）
+//   - 用户端 /ModelInfoInterface action=stats（model_name 指定，user_name 强制取 JWT claims）
+func GetModelInfoUsageStatsByUserModel(userName string, modelName string, subTableNum int, days int) (*ModelInfoUsageSummary, []ModelInfoUsageStat, error) {
+	if database.DB == nil {
+		return nil, nil, fmt.Errorf("database not initialized")
+	}
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		return nil, nil, fmt.Errorf("user_name is required")
+	}
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return nil, nil, fmt.Errorf("model_name is required")
+	}
+	subTableNum = normalizeSubTableNum(subTableNum)
+	days = ClampStatsSpan(days)
+
+	tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
+	if !IsTableExists(tableName) {
+		return &ModelInfoUsageSummary{}, []ModelInfoUsageStat{}, nil
+	}
+
+	var rows []struct {
+		ModelName        string `gorm:"column:model_name"`
+		CallCount        int64  `gorm:"column:call_count"`
+		TokensAllSize    uint64 `gorm:"column:tokens_all_size"`
+		TokensInputSize  uint64 `gorm:"column:tokens_input_size"`
+		TokensOutputSize uint64 `gorm:"column:tokens_output_size"`
+	}
+	err := applyStatsSpanWhere(database.DB.Table(tableName), days).
+		Select("dst_model_name as model_name, COUNT(*) as call_count, COALESCE(SUM(tokens_all_size), 0) as tokens_all_size, COALESCE(SUM(tokens_input_size), 0) as tokens_input_size, COALESCE(SUM(tokens_output_size), 0) as tokens_output_size").
+		Where("user_name = ? AND model_name = ? AND dst_model_name <> ''", userName, modelName).
+		Group("dst_model_name").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get model info usage stats for %s/%s: %w", userName, modelName, err)
+	}
+
+	acc := make(map[string]*modelInfoUsageAccumulator)
+	for _, row := range rows {
+		dstModelName := strings.TrimSpace(row.ModelName)
+		if dstModelName == "" {
+			continue
+		}
+		item := acc[dstModelName]
+		if item == nil {
+			item = &modelInfoUsageAccumulator{
+				ModelInfoUsageStat: ModelInfoUsageStat{ModelName: dstModelName},
+				users:              make(map[string]struct{}),
+			}
+			acc[dstModelName] = item
+		}
+		item.CallCount += row.CallCount
+		item.TokensAllSize += row.TokensAllSize
+		item.TokensInputSize += row.TokensInputSize
+		item.TokensOutputSize += row.TokensOutputSize
+		item.users[userName] = struct{}{}
+	}
+
+	summary, stats := finalizeModelInfoUsageStats(acc)
+	return summary, stats, nil
+}
+
 // GetModelUsageStatsAll 全平台维度：统计所有分表中指定模型的调用次数和Tokens（按 model_name 匹配 dst_model_name）
 func GetModelUsageStatsAll(modelName string, subTableNum int) (*ModelUsageStats, error) {
 	if database.DB == nil {
@@ -2879,6 +2948,94 @@ func GetHourlyTrendByUser(userName string, modelNames []string, subTableNum int,
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				break
 			}
+			return nil, fmt.Errorf("failed to query %s: %w", tableName, err)
+		}
+	}
+
+	points := buildHourlyTrendPoints(buckets, hours, granularity)
+	now := time.Now()
+	from := now.Add(-time.Duration(hours) * time.Hour)
+	return &HourlyTrendResult{
+		Points:      points,
+		Granularity: granularity,
+		Hours:       hours,
+		From:        from.Format(time.RFC3339),
+		To:          now.Format(time.RFC3339),
+	}, nil
+}
+
+// GetHourlyTrendByUserModel 用户+模型维度按小时/天桶聚合调用次数与 Tokens。
+// 与 GetHourlyTrendByUser 的区别：仅扫一张分表（按 user_name + model_name 路由），
+// 适用于 ModelInfo / AgentInfo 页面指定 user/model 后查看单一模型视角趋势。
+//
+// hours 语义：<=0 视为 24；1~168 小时桶；169~720 天桶。
+// 调用方：管理端 /ModelInfoInterface 与 /AgentInfoInterface action="trend"（指定 user_name+model_name），
+// 用户端同样场景（user_name 强制取 JWT claims，model_name 取请求体）。
+func GetHourlyTrendByUserModel(userName string, modelName string, subTableNum int, hours int) (*HourlyTrendResult, error) {
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		return nil, fmt.Errorf("user_name is required")
+	}
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return nil, fmt.Errorf("model_name is required")
+	}
+	hours = normalizeHourlyTrendHours(hours)
+	if database.DB == nil {
+		granularity := "hour"
+		if hours > hourlyTrendHourBucketThreshold {
+			granularity = "day"
+		}
+		return buildEmptyHourlyTrend(hours, granularity), nil
+	}
+	subTableNum = normalizeSubTableNum(subTableNum)
+
+	granularity := "hour"
+	if hours > hourlyTrendHourBucketThreshold {
+		granularity = "day"
+	}
+	goFmt := "2006-01-02 15:04"
+	if granularity == "day" {
+		goFmt = "2006-01-02"
+	}
+
+	sdb, cancel := database.StatsDB()
+	defer cancel()
+	if sdb == nil {
+		return buildEmptyHourlyTrend(hours, granularity), nil
+	}
+
+	tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
+	if !IsTableExists(tableName) {
+		return buildEmptyHourlyTrend(hours, granularity), nil
+	}
+
+	buckets := make(map[string]*hourlyTrendBucket)
+	daysForFilter := hours/24 + 1
+	if daysForFilter < 1 {
+		daysForFilter = 1
+	}
+
+	err := scanShardPaged(sdb, tableName,
+		"id, created_at, tokens_input_size, tokens_output_size, tokens_all_size",
+		daysForFilter, func(rows []shardScanRow) {
+			for _, r := range rows {
+				key := r.CreatedAt.Format(goFmt)
+				b, ok := buckets[key]
+				if !ok {
+					b = &hourlyTrendBucket{}
+					buckets[key] = b
+				}
+				b.count++
+				b.inTokens += r.TokensInputSize
+				b.outTokens += r.TokensOutputSize
+				b.allTokens += r.TokensAllSize
+			}
+		})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// ctx 超时：返回已有桶
+		} else {
 			return nil, fmt.Errorf("failed to query %s: %w", tableName, err)
 		}
 	}

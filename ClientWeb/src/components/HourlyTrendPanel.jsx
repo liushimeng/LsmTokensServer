@@ -25,6 +25,7 @@ export default function HourlyTrendPanel(props) {
     api,
     span,
     labels = {},
+    extraParams = {},
   } = props
 
   // span → hours 换算（超上限截断）
@@ -48,7 +49,8 @@ export default function HourlyTrendPanel(props) {
     const seq = ++seqRef.current
     setLoading(true)
     setError('')
-    post(api, { action: 'trend', hours: h })
+    // 阶段BV：透传 user_name / model_name，让后端 trend 接口走单用户单模型视角
+    post(api, { action: 'trend', hours: h, ...extraParams })
       .then((res) => {
         if (seqRef.current !== seq) return
         const data = (res && res.data) || {}
@@ -61,7 +63,7 @@ export default function HourlyTrendPanel(props) {
       .finally(() => {
         if (seqRef.current === seq) setLoading(false)
       })
-  }, [api])
+  }, [api, extraParams])
 
   useEffect(() => {
     load(hours)

@@ -1074,5 +1074,19 @@
   "userManage.userStatus": "ユーザー状態",
   "userManage.username": "ユーザー名",
   "userManage.usernamePlaceholder": "3-50文字",
-  "userManage.viewModels": "モデル表示"
+  "userManage.viewModels": "モデル表示",
+  "modelInfo.userNameLabel": "ユーザー名",
+  "modelInfo.modelNameLabel": "モデル名",
+  "modelInfo.selectUser": "ユーザーを選択",
+  "modelInfo.selectModel": "モデルを選択",
+  "modelInfo.scopedToUserModel": "限定中: ユーザー {user} / モデル {model}",
+  "modelInfo.scopedToModel": "限定中: モデル {model}",
+  "modelInfo.userModelScope": "単一ユーザー・モデル範囲",
+  "agentInfo.userNameLabel": "ユーザー名",
+  "agentInfo.modelNameLabel": "モデル名",
+  "agentInfo.selectUser": "ユーザーを選択",
+  "agentInfo.selectModel": "モデルを選択",
+  "agentInfo.scopedToUserModel": "限定中: ユーザー {user} / モデル {model}",
+  "agentInfo.scopedToModel": "限定中: モデル {model}",
+  "agentInfo.userModelScope": "単一ユーザー・モデル範囲"
 }

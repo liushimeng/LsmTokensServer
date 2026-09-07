@@ -1140,5 +1140,19 @@
   "userManage.userStatus": "User Status",
   "userManage.username": "Username",
   "userManage.usernamePlaceholder": "3-50 characters",
-  "userManage.viewModels": "View Models"
+  "userManage.viewModels": "View Models",
+  "modelInfo.userNameLabel": "User",
+  "modelInfo.modelNameLabel": "Model",
+  "modelInfo.selectUser": "Select user",
+  "modelInfo.selectModel": "Select model",
+  "modelInfo.scopedToUserModel": "Scoped to user: {user} / model: {model}",
+  "modelInfo.scopedToModel": "Scoped to model: {model}",
+  "modelInfo.userModelScope": "Single user & model scope",
+  "agentInfo.userNameLabel": "User",
+  "agentInfo.modelNameLabel": "Model",
+  "agentInfo.selectUser": "Select user",
+  "agentInfo.selectModel": "Select model",
+  "agentInfo.scopedToUserModel": "Scoped to user: {user} / model: {model}",
+  "agentInfo.scopedToModel": "Scoped to model: {model}",
+  "agentInfo.userModelScope": "Single user & model scope"
 }

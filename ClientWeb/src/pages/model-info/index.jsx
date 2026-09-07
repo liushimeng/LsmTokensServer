@@ -1,18 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
-import { post } from '../shared/api'
-import { isAdminRole } from '../shared/auth'
-import DataTable from '../components/DataTable'
-import HourlyTrendPanel from '../components/HourlyTrendPanel'
-import TimeRangeSelector from '../components/TimeRangeSelector'
-import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
-import { nearestSpan } from '../shared/timeSpan'
-import { useI18n } from '../i18n'
-
-// 模型信息（统计页）：ModelInfoInterface
-//   - action='stats' 返回 summary/models/dst_summary/dst_models（仅用户端）
-//   - action='list' 用户端「我的模型信息列表」（成本/能力/动态性能标签/源站数）
-//   - action='trend'（新增）小时级 K 线图：调用次数 + Tokens 数（小时桶/天桶自适应）
-// 无第三方图表库：K 线图用自研 SVG HourlyTrendPanel + KLineTrendChart 组件。
+// 阶段BV：ModelInfo 页面主组件
+// 模块化拆分：toolbar（用户名/模型名/时间档位）+ 主组件（KPI/趋势/明细表）。
+// 后端 ModelInfoInterface action=stats/trend 支持可选 user_name+model_name 参数，
+// 同时指定时按单用户单模型视角聚合；否则走全站聚合（admin）或本人全模型聚合（user）。
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { post } from '../../shared/api'
+import { isAdminRole } from '../../shared/auth'
+import { useUserModelOptions, useMyModelNames } from '../../shared/userModelOptions'
+import DataTable from '../../components/DataTable'
+import HourlyTrendPanel from '../../components/HourlyTrendPanel'
+import useStatsPageFilters from '../../shared/useStatsPageFilters'
+import ModelInfoToolbar from './ModelInfoToolbar'
+import { useI18n } from '../../i18n'
 
 function fmt(n) {
   n = Number(n) || 0
@@ -22,47 +20,79 @@ function pct(v) {
   v = Number(v) || 0
   return Math.min(Math.max(v, 0), 100).toFixed(2) + '%'
 }
+
 export default function ModelInfo(props) {
   const { t } = useI18n()
-  const q = props?.route?.query
+  const route = props && props.route
   const isAdmin = isAdminRole()
-  // 记忆 key 按角色隔离（用户端与管理端不复用同一天数偏好）
-  const storageKey = `lsm:modelInfo:days:v1:${isAdmin ? 'admin:__all__' : 'user'}`
-  const { levels, loading: levelsLoading } = useTimeSpanLevels()
-  // 20260826 动态档位：span 统一编码（负值=小时）；档位加载后按旧 localStorage/URL 值就近迁移
-  const [span, setSpan] = useState(null)
+  const { users: userOptions } = useUserModelOptions()
+  const { modelNames: myModelNames } = useMyModelNames()
+
+  // 筛选 + 记忆
+  const filters = useStatsPageFilters('model_info', route, isAdmin, 3)
+  const { userName, setUserName, modelName, setModelName, days, setDays, levels, levelsLoading } = filters
+
+  // 数据
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [myModels, setMyModels] = useState(null) // 用户端"我的模型信息列表"（action=list）
+  const [myModels, setMyModels] = useState(null) // 用户端「我的模型信息列表」
 
-  const loadStats = useCallback((d) => {
+  // modelName ref 跟踪最新值（避免 useEffect 闭包陷阱，与 chat-analysis 一致）
+  const modelNameRef = useRef(modelName)
+  useEffect(() => { modelNameRef.current = modelName }, [modelName])
+  const userNameRef = useRef(userName)
+  useEffect(() => { userNameRef.current = userName }, [userName])
+
+  // 是否处于「单用户单模型」视角（admin 端：user+model 同时指定；user 端：model 指定）
+  const scopedAdmin = isAdmin && userName.trim() !== '' && modelName.trim() !== ''
+  const scopedUser = !isAdmin && modelName.trim() !== ''
+  const scoped = scopedAdmin || scopedUser
+
+  const loadStats = useCallback((d, u, m) => {
+    const un = (u !== undefined ? u : userNameRef.current).trim()
+    const mn = (m !== undefined ? m : modelNameRef.current).trim()
     setLoading(true)
     setError('')
-    post('ModelInfoInterface', { action: 'stats', days: d })
+    // 管理端：未指定 user+model → 全站；指定 → 单用户单模型
+    // 用户端：未指定 model → 本人全模型；指定 → 本人单模型
+    const reqUserName = isAdmin ? un : ''
+    const reqModelName = mn
+    post('ModelInfoInterface', {
+      action: 'stats',
+      days: d,
+      user_name: reqUserName,
+      model_name: reqModelName,
+    })
       .then((res) => setData((res && res.data) || {}))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [isAdmin])
 
+  // 档位就绪后首查（不强制 user/model 必须有，因为允许全站/全模型视角）
   useEffect(() => {
-    if (!levels.length) return
-    setSpan((cur) => cur ?? nearestSpan(levels, q?.get('days') || localStorage.getItem(storageKey) || 3))
+    if (days === null) return
+    loadStats(days)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levels])
+  }, [days])
 
+  // user/model 变化后自动重新查询（与对话分析一致；scoped 时尤其需要）
   useEffect(() => {
-    if (span === null) return
-    localStorage.setItem(storageKey, String(span))
-    loadStats(span)
-    if (!isAdmin && myModels === null) {
-      // 用户端独有：我的模型信息列表（成本/能力/动态性能标签/源站数）
-      post('ModelInfoInterface', { action: 'list' })
-        .then((d) => setMyModels((d && d.data) || []))
-        .catch(() => setMyModels([]))
-    }
+    if (days === null) return
+    loadStats(days)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [span, loadStats])
+  }, [userName, modelName])
+
+  // 用户端「我的模型信息列表」：仅在「未限定单模型」且首次进入页面时拉一次
+  useEffect(() => {
+    if (days === null) return
+    if (isAdmin || scopedUser) return // 单模型视角下 dst_summary 与 models 重复，跳过
+    if (myModels !== null) return
+    post('ModelInfoInterface', { action: 'list' })
+      .then((d) => setMyModels((d && d.data) || []))
+      .catch(() => setMyModels([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days, scopedUser, isAdmin])
 
   const summary = (data && data.summary) || {}
   const models = (data && data.models) || []
@@ -75,7 +105,9 @@ export default function ModelInfo(props) {
     if (!list.length) return <div className="table-empty">{t('modelInfo.noStatsData')}</div>
     return list.slice(0, 8).map((it) => {
       const share = Math.min(Math.max(Number(mode === 'token' ? it.token_share : it.call_share) || 0, 0), 100)
-      const value = mode === 'token' ? t('modelInfo.tokensUnit', { count: fmt(it.tokens_all_size) }) : t('modelInfo.callsUnit', { count: fmt(it.call_count) })
+      const value = mode === 'token'
+        ? t('modelInfo.tokensUnit', { count: fmt(it.tokens_all_size) })
+        : t('modelInfo.callsUnit', { count: fmt(it.call_count) })
       return (
         <div key={it.model_name} style={{ padding: '12px 0', borderTop: '1px solid #f1f5f9' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -83,22 +115,31 @@ export default function ModelInfo(props) {
             <span style={{ color: '#475569', fontSize: 12 }}>{value} · {pct(share)}</span>
           </div>
           <div style={{ height: 10, background: '#e2e8f0', borderRadius: 999, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: share + '%', minWidth: 2, borderRadius: 999, background: mode === 'call' ? 'linear-gradient(90deg,#34d399,#059669)' : 'linear-gradient(90deg,#38bdf8,#2563eb)' }} />
+            <div style={{
+              height: '100%', width: share + '%', minWidth: 2, borderRadius: 999,
+              background: mode === 'call' ? 'linear-gradient(90deg,#34d399,#059669)' : 'linear-gradient(90deg,#38bdf8,#2563eb)',
+            }} />
           </div>
         </div>
       )
     })
   }
 
+  // 是否展示 dst_xxx 块：用户端且非单模型视角（与原有行为一致）
+  const showDst = !isAdmin && !scopedUser && dstModels.length
+
   return (
     <div className="page">
       <h2 className="page-title">{t('modelInfo.title2')}</h2>
-      <div className="toolbar">
-        <span>{t('modelInfo.timeSpan')}</span>
-        <TimeRangeSelector span={span ?? 3} onChange={setSpan} levels={levels} loading={levelsLoading} />
-        <button className="btn btn-primary" disabled={loading} onClick={() => loadStats(days)}>{loading ? t('modelInfo.loading') : t('modelInfo.refresh')}</button>
-        <span style={{ color: '#888', fontSize: 13 }}>{isAdmin ? t('modelInfo.adminStats') : t('modelInfo.userStats')}</span>
-      </div>
+      <ModelInfoToolbar
+        isAdmin={isAdmin}
+        userName={userName} setUserName={setUserName}
+        modelName={modelName} setModelName={setModelName}
+        days={days} setDays={setDays}
+        levels={levels} levelsLoading={levelsLoading}
+        onQuery={() => loadStats(days)} loading={loading}
+        userOptions={userOptions} myModelNames={myModelNames}
+      />
       {error ? <div className="alert alert-error">{t('modelInfo.loadFailed', { error })}</div> : null}
       {loading ? <div className="table-loading">{t('modelInfo.loading')}</div> : !models.length && !error ? <div className="table-empty">{t('modelInfo.noModelData')}</div> : null}
 
@@ -111,12 +152,12 @@ export default function ModelInfo(props) {
             <div className="card"><h3>{t('modelInfo.inputOutputTokens')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.tokens_input_size)} / {fmt(summary.tokens_output_size)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('modelInfo.tokenStructure')}</div></div>
           </div>
 
-          {models.length || dstModels.length ? (
+          {models.length ? (
             <div className="card">
               <h3>{t('modelInfo.hourlyTrend')}</h3>
               <HourlyTrendPanel
                 api="ModelInfoInterface"
-                span={span}
+                span={days}
                 labels={{
                   loading: t('modelInfo.trendLoading'),
                   empty: t('modelInfo.trendEmpty'),
@@ -127,6 +168,13 @@ export default function ModelInfo(props) {
                   reset: t('modelInfo.trendReset'),
                   truncated: t('modelInfo.trendTruncated'),
                 }}
+                extraParams={(() => {
+                  const un = isAdmin ? userName.trim() : ''
+                  const mn = modelName.trim()
+                  if (un && mn) return { user_name: un, model_name: mn }
+                  if (!isAdmin && mn) return { model_name: mn }
+                  return {}
+                })()}
               />
             </div>
           ) : null}
@@ -145,7 +193,7 @@ export default function ModelInfo(props) {
           </div>
 
           <div className="card">
-            <h3>{t('modelInfo.modelDetail', { view: isAdmin ? t('modelInfo.adminView') : t('modelInfo.userView') })}</h3>
+            <h3>{t('modelInfo.modelDetail', { view: scoped ? t('modelInfo.userModelScope') : (isAdmin ? t('modelInfo.adminView') : t('modelInfo.userView')) })}</h3>
             <DataTable
               rowKey="model_name"
               rows={models}
@@ -158,12 +206,12 @@ export default function ModelInfo(props) {
                 { key: 'tokens_output_size', title: t('modelInfo.outputTokens'), render: fmt },
                 { key: 'tokens_all_size', title: t('modelInfo.totalTokens2'), render: (v, m) => <b title={t('modelInfo.tokenShare') + ' ' + pct(m.token_share)}>{fmt(v)}</b> },
                 { key: 'token_share', title: t('modelInfo.tokenShare'), render: (v) => <b style={{ color: '#2563eb' }}>{pct(v)}</b> },
-                ...(isAdmin ? [{ key: 'user_count', title: t('modelInfo.activeUsers'), render: fmt }] : []),
+                ...(isAdmin && !scoped ? [{ key: 'user_count', title: t('modelInfo.activeUsers'), render: fmt }] : []),
               ]}
             />
           </div>
 
-          {!isAdmin && dstModels.length ? (
+          {showDst ? (
             <>
               <div className="card-grid kpi-grid">
                 <div className="card"><h3>{t('modelInfo.dstModelCount')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(dstSummary.model_count)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('modelInfo.byTargetModelAgg')}</div></div>
@@ -190,7 +238,7 @@ export default function ModelInfo(props) {
             </>
           ) : null}
 
-          {!isAdmin && myModels && myModels.length ? (
+          {!isAdmin && !scopedUser && myModels && myModels.length ? (
             <div className="card">
               <h3>{t('modelInfo.myModelList')}</h3>
               <DataTable
