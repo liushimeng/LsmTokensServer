@@ -1,14 +1,20 @@
 // KLineTrendChart：纯 SVG 双线趋势图（调用次数 + Tokens 数）
 // 工程惯例：不引入第三方图表库（无 echarts/recharts/d3）。
 //
-// v3 重做要点：
-//   1. 宽度自适应：ResizeObserver + 动态 viewBox width，SVG 水平占满容器无留白
-//   2. 平滑曲线：Catmull-Rom 样条转三次贝塞尔，张力 0.4
-//   3. 小时级精度：≤720h（30天）全小时桶，前端不再过早聚合
-//   4. 轴刻度文字 HTML 浮层（字号不变形）、滚轮缩放、框选缩放等交互保留
+// v4 改动（20260907）：
+//   - 宽度自适应逻辑上移至 ResponsiveSvgChart 通用容器
+//   - 新增 containerWidth prop 接受父容器注入的实测宽度
+//   - preserveAspectRatio 改为 "none"，确保 SVG 始终占满容器无留白
+//   - 未传 containerWidth 时回退到内部 ResizeObserver（向后兼容）
+//
+// v3 要点：
+//   1. 平滑曲线：Catmull-Rom 样条转三次贝塞尔，张力 0.4
+//   2. 小时级精度：≤720h（30天）全小时桶，前端不再过早聚合
+//   3. 轴刻度文字 HTML 浮层（字号不变形）、滚轮缩放、框选缩放等交互保留
 //
 // props:
 //   points: [{date:'YYYY-MM-DD HH:00',count,tokens_total,tokens_input,tokens_output}]
+//   containerWidth?: 父容器注入的实测宽度（可选；不传则内部 ResizeObserver 兜底）
 //   loading?: 是否显示加载遮罩
 //   emptyHint?: 空数据提示
 //   callLabel / tokenLabel: 左右轴名称
@@ -165,6 +171,7 @@ function buildSmoothPath(n, xAt, yAt, tension = 0.4) {
 export default function KLineTrendChart(props) {
   const {
     points = [],
+    containerWidth: externalWidth = null, // 父容器注入的实测宽度（可选）
     loading = false,
     emptyHint = '—',
     callLabel = '调用次数',
@@ -178,19 +185,28 @@ export default function KLineTrendChart(props) {
     bucketTemplate,
   } = props
 
-  // ---- 宽度自适应：ResizeObserver 监听容器 ----
+  // ---- 宽度自适应：优先使用外部注入宽度，否则内部 ResizeObserver 兜底 ----
   const svgContainerRef = useRef(null)
-  const [vbW, setVbW] = useState(VB_W_DEFAULT)
+  const [internalWidth, setInternalWidth] = useState(VB_W_DEFAULT)
+
+  // 内部 ResizeObserver（仅在未传 containerWidth 时生效，向后兼容）
   useEffect(() => {
+    if (externalWidth != null) return // 外部已提供宽度，跳过内部监听
     const el = svgContainerRef.current
     if (!el) return
+    // 首帧同步测量
+    const initW = el.clientWidth
+    if (initW > 0) setInternalWidth(Math.max(MIN_WIDTH, initW))
     const ro = new ResizeObserver((entries) => {
       const w = entries[0].contentRect.width
-      if (w > 0) setVbW(Math.max(MIN_WIDTH, w))
+      if (w > 0) setInternalWidth(Math.max(MIN_WIDTH, w))
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [externalWidth])
+
+  // 最终使用的 viewBox 宽度：外部注入 > 内部测量
+  const vbW = externalWidth != null ? Math.max(MIN_WIDTH, externalWidth) : internalWidth
 
   const innerW = vbW - PAD_L - PAD_R
 
@@ -531,13 +547,13 @@ export default function KLineTrendChart(props) {
           <span style={{ position: 'absolute', top: 4, right: 6, fontSize: 10, color: PALETTE.text, fontWeight: 600 }}>{callLabel}</span>
         </div>
 
-        {/* SVG 图区（宽度自适应） */}
-        <div ref={svgContainerRef} style={{ position: 'relative', minWidth: MIN_WIDTH }}>
+        {/* SVG 图区（宽度自适应：preserveAspectRatio="none" 占满容器无留白） */}
+        <div ref={svgContainerRef} style={{ position: 'relative' }}>
           <svg
             ref={svgRef}
             viewBox={`0 0 ${vbW} ${VB_H}`}
             style={{ width: '100%', height: VB_H, display: 'block', cursor: brush ? 'crosshair' : 'ew-resize' }}
-            preserveAspectRatio="xMidYMid meet"
+            preserveAspectRatio="none"
           >
             <defs>
               <linearGradient id="kl-fill-call" x1="0" x2="0" y1="0" y2="1">

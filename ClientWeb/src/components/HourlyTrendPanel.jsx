@@ -1,4 +1,6 @@
 // HourlyTrendPanel：调用次数 + Token 数趋势面板（受控版）
+// v4（20260907）：使用 ResponsiveSvgChart 通用容器包裹 KLineTrendChart，宽度自适应逻辑上移
+//
 // v3 受控版：接收页面级 span prop，不再自管窗口按钮；viewport/缩放完全交给 KLineTrendChart 内部
 //
 // 20260826 重构：
@@ -14,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { post } from '../shared/api'
 import KLineTrendChart from './KLineTrendChart'
+import ResponsiveSvgChart from './ResponsiveSvgChart'
 import { spanToHours } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
 
@@ -82,15 +85,21 @@ export default function HourlyTrendPanel(props) {
         </span>
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
-      <KLineTrendChart
-        points={points}
-        loading={loading && !points.length}
-        emptyHint={labels.empty || '暂无数据'}
-        callLabel={labels.call || '调用次数'}
-        tokenLabel={labels.token || 'Tokens'}
-        zoomHint={labels.zoomHint}
-        resetLabel={labels.reset}
-      />
+      {/* 使用 ResponsiveSvgChart 通用容器，宽度自适应逻辑上移 */}
+      <ResponsiveSvgChart minWidth={160} height={280}>
+        {(width) => (
+          <KLineTrendChart
+            points={points}
+            containerWidth={width}
+            loading={loading && !points.length}
+            emptyHint={labels.empty || '暂无数据'}
+            callLabel={labels.call || '调用次数'}
+            tokenLabel={labels.token || 'Tokens'}
+            zoomHint={labels.zoomHint}
+            resetLabel={labels.reset}
+          />
+        )}
+      </ResponsiveSvgChart>
     </div>
   )
 }
