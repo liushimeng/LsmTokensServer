@@ -6,12 +6,16 @@ import App from './App.jsx'
 // ── 全局错误监听：捕获 chunk 加载失败等未处理异常 ──────────────────────
 // 服务重启后旧构建产物 hash 变化，浏览器缓存的旧 chunk 文件 404，
 // 导致动态 import() 失败。通过全局监听检测并自动刷新页面恢复。
+//
+// 阶段BZ：收紧 isChunkLoadError 匹配 —— 去掉 /Failed to fetch/i（任何网络层失败
+// 都会命中），只保留真正的「chunk 文件 / 动态 import 失败」语义，避免
+// AIRouteManage 等页面的短暂 5xx 把用户卡进「页面反复刷新都显示请求超时」死循环。
 ;(function installGlobalErrorGuards() {
   // 防止死循环：sessionStorage 标记，刷新后仅自动 reload 一次
   const RELOAD_KEY = 'lsm_chunk_reload_done'
   const isChunkLoadError = (message) => {
     if (!message) return false
-    return /Loading chunk|Failed to fetch|error loading dynamically imported module|Importing a module script failed|chunk.*404/i.test(message)
+    return /Loading chunk|Loading CSS chunk|error loading dynamically imported module|Importing a module script failed|chunk.*404/i.test(message)
   }
   const tryAutoReload = (reason) => {
     if (sessionStorage.getItem(RELOAD_KEY)) return // 已自动刷新过一次，不再重复

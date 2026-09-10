@@ -898,6 +898,13 @@ func ResolveChatAnalysisDetailColumn(field string) (string, bool) {
 
 // GetAgentHttpTransactionFieldByID 根据 ID 只查询一个详情字段（用于列表页点击展开后按需加载）。
 func GetAgentHttpTransactionFieldByID(userName, modelName string, subTableNum int, id uint64, field string) (string, error) {
+	return GetAgentHttpTransactionFieldByIDCtx(context.Background(), userName, modelName, subTableNum, id, field)
+}
+
+// GetAgentHttpTransactionFieldByIDCtx 同 GetAgentHttpTransactionFieldByID，但接受外部 context。
+// 阶段BZ：让前端 chat-analysis 详情大字段按需加载走 r.Context()（中间件已设 60s ctx），
+// 单列 SELECT 命中主键，避免连接被默认 25s 切断。
+func GetAgentHttpTransactionFieldByIDCtx(ctx context.Context, userName, modelName string, subTableNum int, id uint64, field string) (string, error) {
 	column, ok := ResolveChatAnalysisDetailColumn(field)
 	if !ok {
 		return "", fmt.Errorf("unsupported detail field: %s", field)
@@ -914,7 +921,7 @@ func GetAgentHttpTransactionFieldByID(userName, modelName string, subTableNum in
 
 	tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
 	var value string
-	result := database.DB.Table(tableName).Select(column).
+	result := database.DB.WithContext(ctx).Table(tableName).Select(column).
 		Where("id = ? AND user_name = ? AND model_name = ?", id, userName, modelName).
 		Limit(1).Scan(&value)
 	if result.Error != nil {

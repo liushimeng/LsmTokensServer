@@ -63,23 +63,36 @@ export default function App() {
   useEffect(() => {
     if (route.path === 'Login' || (__APP_ROLE__ === 'manager' && route.path === 'ManagerLogin')) return
     let alive = true
-    // 角色由构建期常量决定（阶段T），不再运行时探测管理端接口
-    get('UserInfoInterface')
-      .then((d) => {
-        if (!alive) return
-        setUserInfo({ ...((d && d.data) || d), loaded: true, isAdmin: __APP_ROLE__ === 'manager' })
-      })
-      .catch((err) => {
-        if (!alive) return
-        // 阶段AO：401 时 api.js 已按构建角色跳转（详见 shared/api.js），这里不重复跳转避免竞态；
-        // 仅兜底处理 401 之外的失败（网络错误、超时、服务异常、5xx 等）。
-        const is401 = err && typeof err.message === 'string' && /^HTTP 401\b/.test(err.message)
-        if (is401) return
-        if (__APP_ROLE__ === 'manager') { window.location.href = baseUrl() + 'ManagerLogin'; return }
-        // 强制完整跳转 + reload，避免仅改 hash 导致页面残留破损状态
-        window.location.hash = '#/Login'
-        window.location.reload()
-      })
+    let attempts = 0
+    const tryFetchUser = () => {
+      attempts++
+      // 阶段BZ：UserInfoInterface 走短档 12s；非 401 失败时指数退避重试 2 次，
+      // 避免服务短暂重启时把用户直接踢回登录页。仅在所有重试都失败后才回 Login，
+      // 且不调用 window.location.reload()，避免与 main.jsx 全局监听形成重试风暴。
+      get('UserInfoInterface')
+        .then((d) => {
+          if (!alive) return
+          setUserInfo({ ...((d && d.data) || d), loaded: true, isAdmin: __APP_ROLE__ === 'manager' })
+        })
+        .catch((err) => {
+          if (!alive) return
+          const code = err && err.code
+          if (code === 'http_4xx') return // api.js 已按构建角色跳转
+          if ((code === 'timeout' || code === 'network' || code === 'http_5xx') && attempts <= 2) {
+            const delay = 800 * Math.pow(2, attempts - 1) + Math.random() * 200
+            setTimeout(tryFetchUser, delay)
+            return
+          }
+          // 三次都失败：按构建角色跳登录页，但用 location.replace 避免残留破损状态，
+          // 不调用 reload（避免与 main.jsx 全局 chunk-error 监听形成循环）。
+          if (__APP_ROLE__ === 'manager') {
+            window.location.replace(baseUrl() + 'ManagerLogin')
+          } else {
+            window.location.replace(baseUrl() + 'Login')
+          }
+        })
+    }
+    tryFetchUser()
     return () => { alive = false }
   }, [route.path])
 

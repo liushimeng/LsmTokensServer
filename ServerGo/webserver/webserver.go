@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lishimeng/LsmTokensServer/api"
+	"github.com/lishimeng/LsmTokensServer/api/middleware"
 	"github.com/lishimeng/LsmTokensServer/config"
 	"github.com/lishimeng/LsmTokensServer/logger"
 )
@@ -225,7 +226,12 @@ func buildUserMux(cfg *config.LsmTokensServerConfig) (*http.ServeMux, string) {
 // StartManagerWebServer 启动管理员 Web 服务（管理后台，默认 49101）
 func StartManagerWebServer(cfg *config.LsmTokensServerConfig) {
 	mux, managerDist := buildManagerMux(cfg)
-	handler := prefixStripMiddleware(api.ManagerAuthMiddleware(mux), mux, managerDist)
+	// 阶段BZ：长查询 ctx 分类中间件套在最外层（在 prefixStrip 前），保证剥前缀前后路径都被分类。
+	// QueryContextMiddleware 透传 ctx 超时到 handler（r.Context()）；长查询 handler 可用
+	// DB.WithContext(r.Context()) 把超时级联到 GORM，避免 25s 默认值一刀切。
+	handler := middleware.QueryContextMiddleware(
+		prefixStripMiddleware(api.ManagerAuthMiddleware(mux), mux, managerDist),
+	)
 	addr := fmt.Sprintf(":%d", cfg.ManagerWebListenPort)
 	server := &http.Server{
 		Addr:         addr,
@@ -244,7 +250,9 @@ func StartManagerWebServer(cfg *config.LsmTokensServerConfig) {
 // 与旧版一致：UserSecurityChain(userAuthMiddleware(mux))
 func StartUserWebServer(cfg *config.LsmTokensServerConfig) {
 	mux, userDist := buildUserMux(cfg)
-	handler := UserSecurityChain(prefixStripMiddleware(api.UserAuthMiddleware(mux), mux, userDist))
+	// 阶段BZ：长查询 ctx 分类中间件套在 prefixStrip 外层（与 Manager 同序）。
+	stripped := prefixStripMiddleware(api.UserAuthMiddleware(mux), mux, userDist)
+	handler := UserSecurityChain(middleware.QueryContextMiddleware(stripped))
 	addr := fmt.Sprintf(":%d", cfg.UserWebListenPort)
 	if cfg.UserWebUseHTTPS {
 		certFile := cfg.UserWebCertFile

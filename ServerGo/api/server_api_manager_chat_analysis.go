@@ -315,8 +315,8 @@ func chatAnalysisDetailInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	value, err := modelsdb.GetAgentHttpTransactionFieldByID(
-		req.UserName, req.ModelName, config.G.DBMysqlSubTableNumber, req.ID, req.Field,
+	value, err := modelsdb.GetAgentHttpTransactionFieldByIDCtx(
+		r.Context(), req.UserName, req.ModelName, config.G.DBMysqlSubTableNumber, req.ID, req.Field,
 	)
 	if err != nil {
 		json.NewEncoder(w).Encode(ChatAnalysisDetailResponse{

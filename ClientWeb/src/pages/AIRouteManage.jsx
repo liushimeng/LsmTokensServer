@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { post } from '../shared/api'
+import { retryGet } from '../shared/retry'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import CollapsibleList from '../components/CollapsibleList'
 import TimeRangeSelector from '../components/TimeRangeSelector'
+import Skeleton from '../components/Skeleton'
+import EmptyState from '../components/EmptyState'
 import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
 import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
@@ -107,12 +110,15 @@ export default function AIRouteManage() {
   const loadRoutes = useCallback(() => {
     setLoading(true)
     setError('')
-    // 管理端：AIRouteManageInterface 全量；用户端：UserAIRouteInterface 本人路由
-    post(isAdmin ? 'AIRouteManageInterface' : 'UserAIRouteInterface', { action: 'list' })
+    // 阶段BZ：长查询自动 retry（800ms / 1600ms 指数退避，最多 2 次）。
+    // 配合后端 ctx=300s 中间件，shard_00 133GB 首屏不再 5s 即超时被踢回。
+    retryGet(isAdmin ? 'AIRouteManageInterface' : 'UserAIRouteInterface',
+      { method: 'POST', body: { action: 'list' } },
+      { maxRetries: 2, baseMs: 800, factor: 2 })
       .then((d) => { setRoutes((d && d.data) || []) })
-      .catch((e) => setError(e.message))
+      .catch((e) => setError(e.message || t('common.retryFailed')))
       .finally(() => setLoading(false))
-  }, [isAdmin])
+  }, [isAdmin, t])
 
   useEffect(() => { loadRoutes() }, [loadRoutes])
 
@@ -145,7 +151,10 @@ export default function AIRouteManage() {
           key: { user_name: r.user_name, model_name: r.model_name, protocol_type: r.protocol_type || 0 },
         }))
       if (!items.length) return
-      post('AIRouteManageInterface', { action: 'batch_stats', batch_items: items })
+      // 阶段BZ：管理端 batch_stats 走 retryGet（同 post 语义）。
+      retryGet('AIRouteManageInterface',
+        { method: 'POST', body: { action: 'batch_stats', batch_items: items } },
+        { maxRetries: 2, baseMs: 1000, factor: 2 })
         .then((d) => setStats((d && d.data) || {}))
         .catch(() => setStats({}))
     } else {
@@ -154,7 +163,10 @@ export default function AIRouteManage() {
       routes.forEach((r) => {
         if (!r.model_name || seen.has(r.model_name)) return
         seen.add(r.model_name)
-        post('UserAIRouteInterface', { action: 'count_record_by_protocol', model_name: r.model_name, days })
+        // 阶段BZ：用户端每条也走 retryGet，避免 5s 超时风暴。
+        retryGet('UserAIRouteInterface',
+          { method: 'POST', body: { action: 'count_record_by_protocol', model_name: r.model_name, days } },
+          { maxRetries: 2, baseMs: 800, factor: 2 })
           .then((d) => {
             const s = (d && d.data) || {}
             setStats((prev) => ({ ...prev, [r.id]: { anthropic_count: s.anthropic || 0, openai_count: s.openai || 0 } }))
@@ -168,16 +180,27 @@ export default function AIRouteManage() {
   const onUserChange = async (userId) => {
     setForm((f) => ({ ...f, user_id: userId, user_model_id: '', protocol_type: '', endpoints: [] }))
     if (!userId) { setFormModels([]); setFormEndpoints([]); setUserRoutes([]); return }
-    try {
-      const [m, e, r] = await Promise.all([
-        post('AIRouteManageInterface', { action: 'list_models', user_id: parseInt(userId, 10) }),
-        post('AIRouteManageInterface', { action: 'list_endpoints', user_id: parseInt(userId, 10) }),
-        post('AIRouteManageInterface', { action: 'list', user_id: parseInt(userId, 10) }),
-      ])
-      setFormModels((m && m.data) || [])
-      setFormEndpoints((e && e.data) || [])
-      setUserRoutes((r && r.data) || [])
-    } catch (err) { setError(err.message) }
+    // 阶段BZ：改 Promise.all → Promise.allSettled，单条失败不影响其他；
+    // 并把 post → retryGet，三条都受超时/网络错误重试保护。
+    const [m, e, r] = await Promise.allSettled([
+      retryGet('AIRouteManageInterface',
+        { method: 'POST', body: { action: 'list_models', user_id: parseInt(userId, 10) } },
+        { maxRetries: 1, baseMs: 600 }),
+      retryGet('AIRouteManageInterface',
+        { method: 'POST', body: { action: 'list_endpoints', user_id: parseInt(userId, 10) } },
+        { maxRetries: 1, baseMs: 600 }),
+      retryGet('AIRouteManageInterface',
+        { method: 'POST', body: { action: 'list', user_id: parseInt(userId, 10) } },
+        { maxRetries: 1, baseMs: 600 }),
+    ])
+    setFormModels(m.status === 'fulfilled' ? ((m.value && m.value.data) || []) : [])
+    setFormEndpoints(e.status === 'fulfilled' ? ((e.value && e.value.data) || []) : [])
+    setUserRoutes(r.status === 'fulfilled' ? ((r.value && r.value.data) || []) : [])
+    const failed = [m, e, r].filter((x) => x.status === 'rejected')
+    if (failed.length) {
+      // 局部提示，不打断弹窗（用户可继续编辑其它字段）
+      setFormError(failed.map((f) => f.reason && f.reason.message).filter(Boolean).join('；'))
+    }
   }
 
   // 某模型下可选协议（已配满则只保留编辑中的协议）
@@ -453,7 +476,13 @@ export default function AIRouteManage() {
       key: 'stats', title: (
         <span>
           {t('aiRouteManage.summaryStats')}{' '}
-          <TimeRangeSelector span={days ?? 3} onChange={setDays} levels={levels} loading={levelsLoading} style={{ fontSize: 12 }} />
+          {/* 阶段BZ：levels 尚未到达时不再 disabled（用户看不出还能点击），
+              而是显示一个微缩骨架，提示「档位加载中」。 */}
+          {levelsLoading && !levels.length ? (
+            <span className="inline-skeleton" style={{ display: 'inline-block', width: 110, height: 22, verticalAlign: 'middle' }} />
+          ) : (
+            <TimeRangeSelector span={days ?? 3} onChange={setDays} levels={levels} loading={false} style={{ fontSize: 12 }} />
+          )}
         </span>
       ),
       render: (_, r) => {
@@ -511,11 +540,27 @@ export default function AIRouteManage() {
       </div>
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
-        <DataTable columns={columns} rows={pagedRoutes} loading={loading} empty={t('aiRouteManage.noRoutesConfig')} rowKey="id"
-          rowClass={(r) => 'row-protocol-' + protocolSlug(r.protocol_type)}
-          collapsible collapsedIds={collapsedIds} onToggleCollapse={toggleCollapse}
-          renderCollapsedRow={renderCollapsedRow}
-          sortStorageKey={`lsm:airoute:sort:${isAdmin ? 'manager' : 'user'}`} />
+        {/* 阶段BZ：首屏未加载完显示骨架屏；加载失败时显示 EmptyState + 重试按钮，
+            避免「请求超时，服务可能正在重启」无限 reload 死循环。 */}
+        {loading ? (
+          <Skeleton preset="table" rows={6} hint={t('aiRouteManage.loadingRoutes')} />
+        ) : routes.length === 0 && error ? (
+          <EmptyState
+            icon="⚠️"
+            title={t('aiRouteManage.loadFailedTitle')}
+            hint={t('aiRouteManage.loadFailedHint')}
+            warning={error}
+            onRetry={loadRoutes}
+            retryDisabled={loading}
+            retryLabel={t('aiRouteManage.reloadList')}
+          />
+        ) : (
+          <DataTable columns={columns} rows={pagedRoutes} loading={false} empty={t('aiRouteManage.noRoutesConfig')} rowKey="id"
+            rowClass={(r) => 'row-protocol-' + protocolSlug(r.protocol_type)}
+            collapsible collapsedIds={collapsedIds} onToggleCollapse={toggleCollapse}
+            renderCollapsedRow={renderCollapsedRow}
+            sortStorageKey={`lsm:airoute:sort:${isAdmin ? 'manager' : 'user'}`} />
+        )}
         <div className="pager">
           <span>{t('aiRouteManage.totalPages', { total: routes.length, page: safePage, pages: totalPages })}</span>
           <select value={pageSize} onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(1) }}>
