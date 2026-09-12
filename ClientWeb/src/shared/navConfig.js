@@ -73,6 +73,7 @@ export function findMenuEntry(role, route) {
 // ---- localStorage 记忆（容错：隐私模式/JSON 损坏时退化为默认值）----
 const LS_GROUP_KEY = (role) => `lsm.nav.collapsedGroups.${role}`
 const LS_SIDEBAR_KEY = 'lsm.nav.sidebarCollapsed'
+const LS_SHORTCUTS_KEY = 'lsm.layout.shortcutsEnabled'
 
 function safeGet(key) {
   try { return window.localStorage.getItem(key) } catch { return null }
@@ -103,4 +104,13 @@ export function loadSidebarCollapsed() {
 
 export function saveSidebarCollapsed(v) {
   safeSet(LS_SIDEBAR_KEY, v ? '1' : '0')
+}
+
+// 阶段CA：全局快捷键开关（用户可主动禁用）
+export function loadShortcutsEnabled() {
+  const v = safeGet(LS_SHORTCUTS_KEY)
+  return v === null ? true : v === '1'
+}
+export function saveShortcutsEnabled(v) {
+  safeSet(LS_SHORTCUTS_KEY, v ? '1' : '0')
 }
