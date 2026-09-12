@@ -9,7 +9,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "build:manager": "vite build --mode manager",
-    "build:user": "vite build --mode user"
+    "build:user": "vite build --mode user",
+    "check:i18n": "node scripts/check-i18n.js",
+    "check": "npm run lint && npm run check:i18n"
   },
   "dependencies": {
     "react": "^19.2.8",

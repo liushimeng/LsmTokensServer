@@ -190,7 +190,7 @@ export default function DstEndPointManage() {
       <PageHeader icon="🌐" title={t('dstEndPoint.title')}
         breadcrumb={[t('nav.userRoute'), t('nav.dstEndPointManage')]}
         info={[
-          <span key="total">{t('dstEndPoint.totalCount', { count: rows.length }) || `共 ${rows.length} 条`}</span>,
+          <span key="total">{t('dstEndPoint.totalCount', { count: endpoints.length }) || `共 ${endpoints.length} 条`}</span>,
         ]}
         actions={<>
           <button className="btn" onClick={loadData}>{t('common.refresh')}</button>

@@ -284,7 +284,7 @@ export default function ProtocolConvertAnalyzer() {
           <span key="total">{t('protocolConvert.totalCount', { count: total }) || `共 ${total} 条`}</span>,
         ]}
         actions={<>
-          <button className="btn" onClick={loadAll}>{t('common.refresh')}</button>
+          <button className="btn" onClick={() => loadRecords(1)}>{t('common.refresh')}</button>
           {isAdmin ? (
             <button className="btn btn-primary" onClick={toggle}>{enabled ? t('protocolConvert.disable') : t('protocolConvert.enable')}</button>
           ) : null}
@@ -347,7 +347,7 @@ export default function ProtocolConvertAnalyzer() {
                 </select>
                 <label>{t('protocolConvert.timeRange')}</label>
                 <TimeRangeSelector span={days === null ? 3 : Number(days)} onChange={(v) => setDays(String(v))} levels={levels} loading={levelsLoading} />
-                <span style={{ color: 'var(--muted)', fontSize: 12 }}>{t('protocolConvert.totalRecords', { count })}</span>
+                <span style={{ color: 'var(--muted)', fontSize: 12 }}>{t('protocolConvert.totalRecords', { count: total })}</span>
               </div>
             )}
             {tab === 'records' && (

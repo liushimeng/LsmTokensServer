@@ -291,10 +291,10 @@ export default function ChatAnalysisTotal({ route }) {
       <PageHeader icon="💬" title={t('chatAnalysisTotal.title')}
         breadcrumb={[t('nav.analysis'), t('nav.chatAnalysisTotal')]}
         info={[
-          <span key="total">{t('chatAnalysisTotal.totalCount', { count: stats?.total_count ?? 0 }) || `共 ${stats?.total_count ?? 0} 条`}</span>,
+          <span key="total">{t('chatAnalysisTotal.totalCount', { count: kpi ? kpi.total_calls : 0 }) || `共 ${kpi ? kpi.total_calls : 0} 条`}</span>,
           <span key="range">{t('chatAnalysisTotal.daysRange', { days }) || `近 ${days} 天`}</span>,
         ]}
-        actions={<button className="btn" onClick={refresh}>{t('common.refresh')}</button>}
+        actions={<button className="btn" onClick={() => runQuery()}>{t('common.refresh')}</button>}
       />
 
       <div className="toolbar">

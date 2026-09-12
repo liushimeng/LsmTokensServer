@@ -180,7 +180,7 @@ export default function ChatAnalysis({ route }) {
           <span key="total">{t('chatAnalysis.totalCount', { count: data?.total_count ?? 0 }) || `共 ${data?.total_count ?? 0} 条`}</span>,
           <span key="range">{t('chatAnalysis.daysRange', { days }) || `近 ${days} 天`}</span>,
         ]}
-        actions={<button className="btn" onClick={refresh}>{t('common.refresh')}</button>}
+        actions={<button className="btn" onClick={() => doQuery()}>{t('common.refresh')}</button>}
       />
 
       <ChatAnalysisToolbar
