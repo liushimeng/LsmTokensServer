@@ -172,6 +172,148 @@ export OPENAI_API_KEY=<your-proxy-api-key>
 
 ---
 
+## 📸 Screenshots
+
+> The screenshots below are captured from a live production instance. Passwords, API keys, and full phone numbers have been redacted (`135****7302`, `sk-xxxx****`). All pages were collected by `go-web-debug-tool` — a Chrome DevTools Protocol automation harness — without any manual interaction.
+
+### Manager Web (Super-admin view)
+
+| Login | User Management |
+|:------:|:--------:|
+| ![Manager Login](docs/screenshots/manager/M01-login.png) | ![User Management](docs/screenshots/manager/M03-user-manage-full.png) |
+
+| Route Management (top) | Route Management (all 23 routes) |
+|:--------:|:----------:|
+| ![Route Mgmt](docs/screenshots/manager/M04-route-manage.png) | ![Route Mgmt Full](docs/screenshots/manager/M04-route-manage-full.png) |
+
+| Model stats | Agent stats |
+|:--------:|:----------:|
+| ![Model Info](docs/screenshots/manager/M06-model-info.png) | ![Agent Info](docs/screenshots/manager/M07-agent-info.png) |
+
+| Model stats (trend + ranking) | Agent stats (trend + ranking) |
+|:--------:|:----------:|
+| ![Model Info Full](docs/screenshots/manager/M06-model-info-full.png) | ![Agent Info Full](docs/screenshots/manager/M07-agent-info-full.png) |
+
+| Spider Sources | Cleanup Report |
+|:--------:|:----------:|
+| ![Spider Sources](docs/screenshots/manager/M09-spider-data-source.png) | ![Cleanup Report](docs/screenshots/manager/M11-cleanup-report.png) |
+
+| Cleanup Report (trend + sub-table capacity) | Chat Details (row-expand) |
+|:--------:|:----------:|
+| ![Cleanup Full](docs/screenshots/manager/M11-cleanup-report-full.png) | ![Chat Dialog](docs/screenshots/manager/M16-chat-dialog.png) |
+
+### User Web (business-user view)
+
+| User Login (Model / User dual tabs) | User Home (21 model cards) |
+|:--------:|:----------:|
+| ![User Login](docs/screenshots/user/U01-login.png) | ![User Home](docs/screenshots/user/U02-home.png) |
+
+| Chat page (System Prompt + API config) |
+|:--------:|
+| ![User Chat](docs/screenshots/user/U03-chat-dialog.png) |
+
+---
+
+## 📖 Manager Web Walkthrough
+
+### Step 1 · Log in (super-admin or business user)
+
+```text
+1. Visit http://127.0.0.1:9101/ManagerLogin
+2. Enter username + password + captcha
+3. Click "Login"
+4. (First login) Change the default password — since v2.0.74 the first startup auto-generates one to stdout
+```
+
+![Manager Login](docs/screenshots/manager/M01-login.png)
+
+> **Security**: super-admin credentials live only in `LsmTokensServer.conf → security.managerUserName/managerPassword` and never touch the database. User passwords are stored as `bcrypt` hashes only. API responses blank the password field and mask phone numbers with `api.MaskPhone`. Full policy: [`docs/开发指南/SECURITY.md`](docs/开发指南/SECURITY.md).
+
+### Step 2 · User Management (CRUD + enable/disable)
+
+```text
+1. Sidebar → Users & Routes → User Management
+2. "+ Add User" to create a business user (name / password / phone / Anthropic / OpenAI toggles)
+3. Inline "Disable / Edit / Delete / View Models"
+4. "Refresh" to reload the list
+```
+
+![User Management](docs/screenshots/manager/M03-user-manage-full.png)
+
+### Step 3 · Configure AI Route (protocol / algorithm / upstreams)
+
+```text
+1. Sidebar → Route Management
+2. "+ Add Route": pick protocol (Anthropic / OpenAI), algorithm (Pinned / Stable / Economic), add upstreams
+3. "Edit Route" to reorder upstreams, set API key, status
+4. "Chat Analysis" jumps to per-route conversation drilldown
+```
+
+Four scheduling algorithms are supported:
+
+| Algorithm | Use case |
+|------|---------|
+| 📌 **Pinned** | Force one specific upstream |
+| 🛡️ **Stable** | Rotate after 3 consecutive failures |
+| 💰 **Economic** | Multi-package cost balancing (session-hash stickiness) |
+| 🧠 **Smart** (planned) | Multi-dimension scoring on success / latency / price |
+
+![Route Management](docs/screenshots/manager/M04-route-manage-full.png)
+
+### Step 4 · Monitoring & Analytics (Model · Agent · Cleanup)
+
+```text
+1. Sidebar → Models & Proxy → Model Info / Agent Info
+2. Top filters: user, model, time range
+3. Trend chart supports wheel / Shift+wheel / drag-to-brush / double-click reset
+4. Lower half shows "Token usage ranking" and "Call count ranking" with share bars
+```
+
+| Model Info | Agent Info |
+|:----------:|:----------:|
+| ![Model Info](docs/screenshots/manager/M06-model-info-full.png) | ![Agent Info](docs/screenshots/manager/M07-agent-info-full.png) |
+
+> 🧹 **Retention**: default 15-day conversation retention. The Cleanup Report page shows historical cleanup volumes, tokens recovered, and sub-table capacity monitoring.
+
+---
+
+## 🚀 User Web Walkthrough
+
+### Step 1 · Log in (two ways)
+
+```text
+1. Visit https://127.0.0.1:29001/
+2. Model Login tab: model name + API Key + captcha
+   User  Login tab: username + password + phone + captcha
+3. "Login" → redirect to Home
+```
+
+![User Login](docs/screenshots/user/U01-login.png)
+
+### Step 2 · Home: model cards
+
+```text
+1. Top bar shows current user, current model, total model count
+2. Each model card shows the masked API key (first 8 chars) + 6 quick links:
+   Chat Details / Summary Statistics / Session Analysis / Task Analysis / Chat / Route Management
+3. Click "Chat" to enter the conversation page
+```
+
+![User Home](docs/screenshots/user/U02-home.png)
+
+### Step 3 · Start a conversation
+
+```text
+1. Click "Chat" on any model card → ChatDialog page
+2. Top section shows Model / Protocol / API Key / Proxy URL (redacted)
+3. Edit System Prompt and User Message, click "Send"
+4. Stream the model response
+```
+
+![User Chat](docs/screenshots/user/U03-chat-dialog.png)
+
+---
+
 ## 📁 Project Layout
 
 ```

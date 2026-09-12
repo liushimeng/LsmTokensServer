@@ -179,6 +179,153 @@ export OPENAI_API_KEY=<你的代理 API Key>
 
 ---
 
+## 📸 核心功能截图
+
+> 以下截图均来自生产环境真实运行界面，已对密码、API Key、完整手机号等敏感信息进行脱敏处理（`135****7302`、`sk-xxxx****`）。  
+> 所有页面通过 `go-web-debug-tool` 自动采集，无需手动操作即可批量生成文档级截图（见 [`docs/AGENT_INDEX.md`](docs/开发指南/AGENT_INDEX.md)）。
+
+### 管理员 Web（超级管理员视图）
+
+| 登录页 | 用户管理 |
+|:------:|:--------:|
+| ![Manager Login](docs/screenshots/manager/M01-login.png) | ![User Management](docs/screenshots/manager/M03-user-manage-full.png) |
+
+| 智能路由管理（首页） | 智能路由管理（全量 23 条路由） |
+|:--------:|:----------:|
+| ![Route Mgmt](docs/screenshots/manager/M04-route-manage.png) | ![Route Mgmt Full](docs/screenshots/manager/M04-route-manage-full.png) |
+
+| 模型维度的统计 | Agent 维度的统计 |
+|:--------:|:----------:|
+| ![Model Info](docs/screenshots/manager/M06-model-info.png) | ![Agent Info](docs/screenshots/manager/M07-agent-info.png) |
+
+| 模型统计（趋势 + 排行） | Agent 统计（趋势 + 排行） |
+|:--------:|:----------:|
+| ![Model Info Full](docs/screenshots/manager/M06-model-info-full.png) | ![Agent Info Full](docs/screenshots/manager/M07-agent-info-full.png) |
+
+| 爬虫数据源 | 清理报告 |
+|:--------:|:----------:|
+| ![Spider Sources](docs/screenshots/manager/M09-spider-data-source.png) | ![Cleanup Report](docs/screenshots/manager/M11-cleanup-report.png) |
+
+| 清理报告（趋势 + 子表容量） | 对话详情（按行展开） |
+|:--------:|:----------:|
+| ![Cleanup Full](docs/screenshots/manager/M11-cleanup-report-full.png) | ![Chat Dialog](docs/screenshots/manager/M16-chat-dialog.png) |
+
+### 用户 Web（业务用户视图）
+
+| 用户登录（Model / User 双 Tab） | 用户首页（21 个模型卡片） |
+|:--------:|:----------:|
+| ![User Login](docs/screenshots/user/U01-login.png) | ![User Home](docs/screenshots/user/U02-home.png) |
+
+| 对话页（System Prompt + API 配置） |
+|:--------:|
+| ![User Chat](docs/screenshots/user/U03-chat-dialog.png) |
+
+---
+
+## 📖 管理员 Web 操作指南
+
+管理员 Web 提供**整套运维 / 运营 / 监控 / 调试**能力。本节列出最常用的 4 步核心流程：
+
+### Step 1 · 登录管理端（超级管理员 / 业务用户）
+
+```text
+1. 浏览器访问 http://127.0.0.1:9101/ManagerLogin
+2. 输入用户名 + 密码 + 图形验证码
+3. 点击「Login」
+4. 首登请立即修改默认密码（v2.0.74 起服务首次启动自动生成随机密码到 stdout）
+```
+
+![Manager Login](docs/screenshots/manager/M01-login.png)
+
+> **安全红线**：超级管理员凭证只在 `LsmTokensServer.conf` 的 `security.managerUserName/managerPassword` 段，绝不入库；
+> 用户密码只存 `bcrypt` 哈希；接口响应密码字段置空、手机号用 `api.MaskPhone` 脱敏。
+> 完整规范见 [`docs/开发指南/SECURITY.md`](docs/开发指南/SECURITY.md)。
+
+### Step 2 · 用户管理：增删改 + 启停
+
+```text
+1. 左侧导航 → Users & Routes → User Management
+2. 「+ Add User」创建新业务用户（用户名 / 密码 / 手机号 / Anthropic / OpenAI 启停开关）
+3. 行内可「Disable / Edit / Delete / View Models」
+4. 「Refresh」刷新列表
+```
+
+![User Management](docs/screenshots/manager/M03-user-manage-full.png)
+
+### Step 3 · 配置 AI 路由：协议 / 算法 / 源站
+
+```text
+1. 左侧导航 → Route Management
+2. 「+ Add Route」创建路由：选协议（Anthropic / OpenAI）、选算法（指定型/稳定型/经济型）、加源站
+3. 「Edit Route」调整源站顺序、API Key、状态
+4. 「Chat Analysis」跳转单条路由的对话明细
+```
+
+支持四种调度算法：
+
+| 算法 | 适合场景 |
+|------|---------|
+| 📌 **指定型** | 主备分明、强制走某源站 |
+| 🛡️ **稳定型** | 失败 3 次自动滚动切换 |
+| 💰 **经济型** | 多套餐均衡摊量（Session 哈希粘性） |
+| 🧠 **智能型**（规划中） | 历史成功率 / 延迟 / 价格多维评分 |
+
+![Route Management](docs/screenshots/manager/M04-route-manage-full.png)
+
+### Step 4 · 监控 / 分析：Model · Agent · 清理
+
+```text
+1. 左侧导航 → Models & Proxy → Model Info / Agent Info
+2. 顶部筛选：用户、模型、时间区间
+3. 趋势图支持滚轮 / Shift+滚轮 / 拖动刷选 / 双击重置
+4. 下半区展示「Token 用量排名」与「调用次数排名」+ 占比条
+```
+
+| Model Info | Agent Info |
+|:----------:|:----------:|
+| ![Model Info](docs/screenshots/manager/M06-model-info-full.png) | ![Agent Info](docs/screenshots/manager/M07-agent-info-full.png) |
+
+> 🧹 **数据保留策略**：默认保留 15 天对话数据。Cleanup Report 页面可查看历史清理量、Token 回收量、子表容量监控。
+
+---
+
+## 🚀 用户 Web 操作指南
+
+### Step 1 · 登录（两种方式）
+
+```text
+1. 浏览器访问 https://127.0.0.1:29001/
+2. Model Login Tab：模型名 + API Key + 验证码
+   User  Login Tab：用户名 + 密码 + 手机号 + 验证码
+3. 「Login」登录后跳转首页
+```
+
+![User Login](docs/screenshots/user/U01-login.png)
+
+### Step 2 · 首页：模型卡片
+
+```text
+1. 顶部展示当前登录账号 + 当前模型 + 模型总数
+2. 每个模型卡片展示 Key 前 8 位（脱敏）+ 6 个快捷入口
+   - Chat Details / Summary Statistics / Session Analysis / Task Analysis / Chat / Route Management
+3. 点击「Chat」进入对话页
+```
+
+![User Home](docs/screenshots/user/U02-home.png)
+
+### Step 3 · 发起对话
+
+```text
+1. 点击模型卡片的「Chat」按钮，跳转 ChatDialog 页
+2. 顶部展示 Model / Protocol / API Key / Proxy URL 配置（已脱敏）
+3. 编辑 System Prompt、User Message，点击「Send」
+4. 流式返回模型响应
+```
+
+![User Chat](docs/screenshots/user/U03-chat-dialog.png)
+
+---
+
 ## 📁 项目结构
 
 ```

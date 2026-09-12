@@ -171,6 +171,150 @@ export OPENAI_API_KEY=<プロキシ API キー>
 
 ---
 
+## 📸 機能スクリーンショット
+
+> 以下のスクリーンショットはすべて本番稼働中の実環境から取得しています。パスワード・API キー・完全な電話番号はマスク済み（`135****7302`、`sk-xxxx****`）。  
+> 全ページは `go-web-debug-tool`（Chrome DevTools Protocol 自動化ツール）で手動操作なしに自動収集。
+
+### 管理者 Web（スーパー管理者ビュー）
+
+| ログイン画面 | ユーザー管理 |
+|:------:|:--------:|
+| ![Manager Login](docs/screenshots/manager/M01-login.png) | ![User Management](docs/screenshots/manager/M03-user-manage-full.png) |
+
+| スマートルート管理（上部） | スマートルート管理（23 ルート全件） |
+|:--------:|:----------:|
+| ![Route Mgmt](docs/screenshots/manager/M04-route-manage.png) | ![Route Mgmt Full](docs/screenshots/manager/M04-route-manage-full.png) |
+
+| モデル統計 | Agent 統計 |
+|:--------:|:----------:|
+| ![Model Info](docs/screenshots/manager/M06-model-info.png) | ![Agent Info](docs/screenshots/manager/M07-agent-info.png) |
+
+| モデル統計（推移 + ランキング） | Agent 統計（推移 + ランキング） |
+|:--------:|:----------:|
+| ![Model Info Full](docs/screenshots/manager/M06-model-info-full.png) | ![Agent Info Full](docs/screenshots/manager/M07-agent-info-full.png) |
+
+| スパイダーデータソース | クリーンアップレポート |
+|:--------:|:----------:|
+| ![Spider Sources](docs/screenshots/manager/M09-spider-data-source.png) | ![Cleanup Report](docs/screenshots/manager/M11-cleanup-report.png) |
+
+| クリーンアップレポート（推移 + サブテーブル容量） | チャット詳細（行展開） |
+|:--------:|:----------:|
+| ![Cleanup Full](docs/screenshots/manager/M11-cleanup-report-full.png) | ![Chat Dialog](docs/screenshots/manager/M16-chat-dialog.png) |
+
+### ユーザー Web（業務ユーザー視点）
+
+| ユーザーログイン（Model / User 両タブ） | ユーザーホーム（21 モデルカード） |
+|:--------:|:----------:|
+| ![User Login](docs/screenshots/user/U01-login.png) | ![User Home](docs/screenshots/user/U02-home.png) |
+
+| チャット画面（System Prompt + API 設定） |
+|:--------:|
+| ![User Chat](docs/screenshots/user/U03-chat-dialog.png) |
+
+---
+
+## 📖 管理者 Web 利用ガイド
+
+### Step 1 · ログイン（スーパー管理者 / 業務ユーザー）
+
+```text
+1. ブラウザで http://127.0.0.1:9101/ManagerLogin にアクセス
+2. ユーザー名 + パスワード + 画像認証コードを入力
+3. 「Login」をクリック
+4. 初回ログイン後は必ずデフォルトパスワードを変更（v2.0.74 以降、初回起動時にランダムパスワードが stdout に出力）
+```
+
+![Manager Login](docs/screenshots/manager/M01-login.png)
+
+> **セキュリティ**：スーパー管理者の認証情報は `LsmTokensServer.conf → security.managerUserName/managerPassword` のみに保持し、データベースには保存しません。  
+> ユーザーパスワードは `bcrypt` ハッシュのみで保存。API レスポンスのパスワードは空にし、電話番号は `api.MaskPhone` でマスクします。
+
+### Step 2 · ユーザー管理（CRUD + 有効化 / 無効化）
+
+```text
+1. 左メニュー → Users & Routes → User Management
+2. 「+ Add User」で業務ユーザーを作成（名前 / パスワード / 電話 / Anthropic / OpenAI 有効化フラグ）
+3. 行内「Disable / Edit / Delete / View Models」
+4. 「Refresh」でリスト更新
+```
+
+![User Management](docs/screenshots/manager/M03-user-manage-full.png)
+
+### Step 3 · AI ルート設定（プロトコル / アルゴリズム / 上流）
+
+```text
+1. 左メニュー → Route Management
+2. 「+ Add Route」：プロトコル（Anthropic / OpenAI）→ アルゴリズム（指定型 / 安定型 / 経済型）→ 上流追加
+3. 「Edit Route」で上流の順序・API Key・ステータスを編集
+4. 「Chat Analysis」で該当ルートの会話詳細へ
+```
+
+対応するスケジューリングアルゴリズム：
+
+| 方式 | 適用场景 |
+|------|---------|
+| 📌 **指定型** | 主従が明確、特定の上流を強制使用 |
+| 🛡️ **安定型** | 連続 3 回失敗で先頭を末尾へローテーション |
+| 💰 **経済型** | 複数パッケージを均等化（セッションハッシュ粘着） |
+| 🧠 **スマート型**（計画中） | 成功率 / レイテンシ / 価格による多軸スコアリング |
+
+![Route Management](docs/screenshots/manager/M04-route-manage-full.png)
+
+### Step 4 · 監視 / 分析（Model · Agent · クリーンアップ）
+
+```text
+1. 左メニュー → Models & Proxy → Model Info / Agent Info
+2. 上部フィルタ：ユーザー、モデル、時間範囲
+3. 推移チャートはホイール / Shift+ホイール / ドラッグ brush / ダブルクリックリセット対応
+4. 下部に「トークン使用量ランキング」「呼び出し回数ランキング」と占有率バー
+```
+
+| Model Info | Agent Info |
+|:----------:|:----------:|
+| ![Model Info](docs/screenshots/manager/M06-model-info-full.png) | ![Agent Info](docs/screenshots/manager/M07-agent-info-full.png) |
+
+> 🧹 **データ保持方針**：デフォルトで 15 日間保持。Cleanup Report 画面で過去の削除量・回収トークン量・サブテーブル容量を監視できます。
+
+---
+
+## 🚀 ユーザー Web 利用ガイド
+
+### Step 1 · ログイン（2 通り）
+
+```text
+1. ブラウザで https://127.0.0.1:29001/ にアクセス
+2. Model Login タブ：モデル名 + API Key + 認証コード
+   User  Login タブ：ユーザー名 + パスワード + 電話 + 認証コード
+3. 「Login」クリックでホームへ遷移
+```
+
+![User Login](docs/screenshots/user/U01-login.png)
+
+### Step 2 · ホーム：モデルカード
+
+```text
+1. 上部に現在のユーザー / 現在のモデル / モデル総数を表示
+2. 各モデルカードにマスク済み API Key（先頭 8 文字）+ 6 つのショートカット
+   - Chat Details / Summary Statistics / Session Analysis / Task Analysis / Chat / Route Management
+3. 「Chat」をクリックして会話画面へ
+```
+
+![User Home](docs/screenshots/user/U02-home.png)
+
+### Step 3 · 対話を開始
+
+```text
+1. モデルカードの「Chat」をクリック → ChatDialog ページへ
+2. 上部に Model / Protocol / API Key / Proxy URL（マスク済み）が表示
+3. System Prompt と User Message を編集し「Send」をクリック
+4. モデル応答をストリーミングで受信
+```
+
+![User Chat](docs/screenshots/user/U03-chat-dialog.png)
+
+---
+
 ## 📁 プロジェクト構成
 
 ```
