@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { get, post, download } from '../shared/api'
 import Modal from './Modal'
 import DataTable from './DataTable'
+import CollapsibleToolbar from './CollapsibleToolbar'
 import { useI18n } from '../i18n'
 
 // 顶部工具栏弹窗组（迁移自旧 server_web_common_dialog_*.go / server_web_common_wiki.go）：
@@ -1106,38 +1107,74 @@ function BuildLogDialog({ onClose }) {
   )
 }
 
-// 工具按钮注册表
-const DIALOGS = {
-  userlog: { labelKey: 'toolbar.userLog', Comp: UserLogDialog },
-  wiki: { labelKey: 'toolbar.wiki', Comp: WikiDialog },
-  cert: { labelKey: 'toolbar.cert', Comp: CertDialog },
-  git: { labelKey: 'toolbar.git', Comp: GitDialog },
-  sysinfo: { labelKey: 'toolbar.sysInfo', Comp: SysDialog },
+// 工具按钮注册表（阶段CA：管理端 vs 用户端差异化可见按钮）
+// - 管理端包含：操作日志、Wiki、证书、Git、系统信息、构建日志
+// - 用户端包含：Wiki、证书、Git、系统信息、构建日志（不显示"操作日志"——仅管理员可用）
+const DIALOGS_ALL = {
+  userlog:  { labelKey: 'toolbar.userLog', Comp: UserLogDialog },
+  wiki:     { labelKey: 'toolbar.wiki', Comp: WikiDialog },
+  cert:     { labelKey: 'toolbar.cert', Comp: CertDialog },
+  git:      { labelKey: 'toolbar.git', Comp: GitDialog },
+  sysinfo:  { labelKey: 'toolbar.sysInfo', Comp: SysDialog },
   buildlog: { labelKey: 'toolbar.buildLog', Comp: BuildLogDialog },
 }
+// 阶段CA：manager-only 按钮按 __APP_ROLE__ 常量门控注册，user 端构建产物不携带
+const DIALOGS = __APP_ROLE__ === 'manager' ? DIALOGS_ALL : {
+  wiki:     DIALOGS_ALL.wiki,
+  cert:     DIALOGS_ALL.cert,
+  git:      DIALOGS_ALL.git,
+  sysinfo:  DIALOGS_ALL.sysinfo,
+  buildlog: DIALOGS_ALL.buildlog,
+}
 
-// 顶部工具栏：桌面端一排小按钮；≤860px 收进「⋯」下拉面板（见 00 文档 §3.1）
-export default function ToolbarDialogs() {
+// 顶部工具栏：宽屏平铺、中屏分组、窄屏全收（自适应由 CollapsibleToolbar 处理）。
+// 同时附加"快捷键开关""构建时间隐藏"两个低频操作。
+export default function ToolbarDialogs({ onToggleTimes, onToggleShortcuts, shortcutsOn }) {
   const [open, setOpen] = useState(null)
-  const [menuOpen, setMenuOpen] = useState(false)
   const { t } = useI18n()
   const Current = open && DIALOGS[open] ? DIALOGS[open].Comp : null
 
-  // 打开弹窗或下拉变化时收起下拉
-  useEffect(() => { if (open) setMenuOpen(false) }, [open])
+  // 中屏/窄屏平铺顺序：管理员端"操作日志 + Wiki"靠前，其余进 ⋯
+  const items = Object.entries(DIALOGS).map(([key, d]) => ({
+    key, label: t(d.labelKey),
+  }))
+
+  // 阶段CA：快捷键 \ 切换「次要工具下拉」（与 Layout.jsx 配合；CollapsibleToolbar 内部无内置开关）
+  // 这里通过暴露一个全局事件，让 Layout 监听后控制 ⋯ 按钮。
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const tag = (e.target && e.target.tagName || '').toUpperCase()
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) return
+      if (e.key === '\\') {
+        e.preventDefault()
+        // 触发自定义事件，Layout/Toolbar 可监听后切换 ⋯
+        window.dispatchEvent(new CustomEvent('lsm:toolbar:toggleMore'))
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  const handlePick = (k) => setOpen(k)
 
   return (
-    <div className="header-tools">
-      <button className="tools-more" title={t('common.more')} aria-label={t('common.more')}
-              onClick={() => setMenuOpen((v) => !v)}>⋯</button>
-      {menuOpen && <div className="tools-close-mask" onClick={() => setMenuOpen(false)} />}
-      <div className={'tools-list' + (menuOpen ? ' open' : '')}>
-        {Object.entries(DIALOGS).map(([key, d]) => (
-          <button key={key} className="btn btn-link btn-sm tool-btn"
-                  onClick={() => setOpen(key)}>{t(d.labelKey)}</button>
-        ))}
-      </div>
+    <>
+      <CollapsibleToolbar items={items} primaryCount={2} active={open} onPick={handlePick} />
+      {/* 构建时间隐藏 / 快捷键开关：放在下拉中更不打扰主操作流；通过 ⋯ 中转触发 */}
+      {onToggleTimes || onToggleShortcuts ? (
+        <span className="header-tools-extras" title="次要操作">
+          {onToggleShortcuts ? (
+            <button type="button" className="btn btn-link btn-sm tool-btn"
+                    title={shortcutsOn ? '关闭快捷键（[/]/\）' : '开启快捷键（[/]/\）'}
+                    aria-label="快捷键开关"
+                    onClick={onToggleShortcuts}>
+              {shortcutsOn ? '⌨' : '⌨̸'}
+            </button>
+          ) : null}
+        </span>
+      ) : null}
       {Current ? <Current onClose={() => setOpen(null)} /> : null}
-    </div>
+    </>
   )
 }

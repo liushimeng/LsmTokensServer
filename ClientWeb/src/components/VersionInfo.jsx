@@ -2,6 +2,7 @@
 // 前端版本与编译时间为构建期常量（vite define 注入 __APP_VERSION__/__APP_BUILD_TIME__，
 // 与后端 config.APP_VERSION 同源），后端版本与编译时间挂载时经 /AppVersionInterface 拉取一次。
 // 接口失败时优雅降级：仅展示前端构建期信息，不阻塞页面。
+// 阶段CA（侧边菜单折叠展开方案 §2.5）：中屏时 `timesHidden=true` 收起构建时间。
 import { useEffect, useState } from 'react'
 import { get } from '../shared/api'
 import { useI18n } from '../i18n'
@@ -13,7 +14,7 @@ function compactTime(s) {
   return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`
 }
 
-export default function VersionInfo() {
+export default function VersionInfo({ timesHidden, onToggleTimes }) {
   const { t } = useI18n()
   const [backend, setBackend] = useState(null)
 
@@ -29,6 +30,7 @@ export default function VersionInfo() {
   const version = (backend && backend.version) || __APP_VERSION__
   const beTime = compactTime(backend && backend.backend_build_time)
   const feTime = compactTime(__APP_BUILD_TIME__)
+  const showTimes = !timesHidden
 
   const title = backend
     ? [
@@ -42,10 +44,21 @@ export default function VersionInfo() {
   return (
     <span className="app-version" title={title}>
       <span className="app-version-num">{version}</span>
-      <span className="app-version-times">
-        {beTime ? ` · ${t('common.version.backend')} ${beTime}` : ''}
-        {feTime ? ` · ${t('common.version.frontend')} ${feTime}` : ''}
-      </span>
+      {showTimes && (
+        <span className="app-version-times">
+          {beTime ? ` · ${t('common.version.backend')} ${beTime}` : ''}
+          {feTime ? ` · ${t('common.version.frontend')} ${feTime}` : ''}
+        </span>
+      )}
+      {onToggleTimes ? (
+        <button
+          type="button"
+          className="app-version-toggle"
+          title={showTimes ? '收起构建时间' : '展开构建时间'}
+          aria-label={showTimes ? '收起构建时间' : '展开构建时间'}
+          onClick={onToggleTimes}
+        >{showTimes ? '−' : '+'}</button>
+      ) : null}
     </span>
   )
 }
