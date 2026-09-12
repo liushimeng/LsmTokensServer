@@ -162,6 +162,7 @@
   "aiRouteManage.targetList": "ターゲットリスト",
   "aiRouteManage.targetModel": "ターゲットモデル",
   "aiRouteManage.title": "スマートルート管理",
+  "aiRouteManage.totalCount": "合計 {count} 件のルート",
   "aiRouteManage.totalPages": "合計 {total} 件 · {page} / {pages} ページ ·",
   "aiRouteManage.totalEndpoints": "計 {count} 件のエンドポイント",
   "aiRouteManage.transferError": "転送エラー",

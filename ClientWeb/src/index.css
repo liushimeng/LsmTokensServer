@@ -115,6 +115,11 @@ a { color: var(--primary); text-decoration: none; }
 /* 操作列按钮组：inline-flex 换行，按钮整体不断散 */
 .op-btns { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .op-btns .btn { margin: 0; }
+/* 操作按钮内文字禁止逐字折行：任何列宽下保持横向显示 */
+.op-btns .btn { white-space: nowrap; }
+/* 纵向变体：展开行操作列按钮竖向堆叠、文字横排（AIRouteManage 智能路由管理等宽表场景） */
+.op-btns.op-btns-col { flex-direction: column; align-items: stretch; }
+.op-btns.op-btns-col .btn { width: 100%; text-align: center; }
 .data-table th { background: #fafbfc; color: var(--muted); font-weight: 600; position: sticky; top: 0; }
 .data-table tr { transition: background .15s; }
 .data-table tr:hover td { background: #f6f8fa; }
@@ -257,6 +262,7 @@ a { color: var(--primary); text-decoration: none; }
 .collapsed-endpoints { flex: 1 1 200px; min-width: 0; overflow: hidden; position: relative; }
 .collapsed-hint { color: var(--muted); font-size: 12px; flex-shrink: 0; }
 .collapsed-actions { display: inline-flex; gap: 4px; flex-shrink: 0; }
+.collapsed-actions .btn { white-space: nowrap; }
 .collapsed-stat { font-size: 12px; color: #475569; white-space: nowrap; }
 .collapsed-stat .a { color: #6f42c1; font-weight: 600; }
 .collapsed-stat .o { color: #28a745; font-weight: 600; }
@@ -827,6 +833,8 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
 
   /* 爬虫数据源：操作列 4 按钮 2×2；爬取弹窗 textarea 压低、日志框自适应（10 文档） */
   .data-table.card-mode td .op-btns { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+  /* 纵向变体在卡片模式转单列，按钮文字保持横向 */
+  .data-table.card-mode td .op-btns.op-btns-col { grid-template-columns: 1fr; }
   .crawl-prompt { min-height: 0 !important; height: 110px; }
   .modal-body:has(.crawl-log) { display: flex; flex-direction: column; }
   .crawl-log { max-height: none; flex: 1; min-height: 160px; }

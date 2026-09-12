@@ -162,6 +162,7 @@
   "aiRouteManage.targetList": "Target Endpoint List",
   "aiRouteManage.targetModel": "Target Model",
   "aiRouteManage.title": "Smart Route Management",
+  "aiRouteManage.totalCount": "{count} routes in total",
   "aiRouteManage.totalPages": "Total {total} · Page {page} / {pages} ·",
   "aiRouteManage.totalEndpoints": "Total {count} endpoints",
   "aiRouteManage.transferError": "Transfer Error",

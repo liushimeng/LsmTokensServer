@@ -504,9 +504,9 @@ export default function AIRouteManage() {
     { key: 'last_success', title: t('aiRouteManage.lastSuccessRecord'), render: (_, r) => renderLastRecord(r, 'success') },
     { key: 'last_failure', title: t('aiRouteManage.lastFailureRecord'), render: (_, r) => renderLastRecord(r, 'failure') },
     {
-      key: 'actions', title: t('aiRouteManage.operation'),
+      key: 'actions', title: t('aiRouteManage.operation'), width: 92,
       render: (_, r) => (
-        <span className="op-btns">
+        <span className="op-btns op-btns-col">
           <button className="btn btn-sm btn-primary" onClick={() => openEdit(r)}>{t('aiRouteManage.editRoute')}</button>
           <a className="btn btn-sm btn-success" href={`#/ChatAnalysis?user_name=${encodeURIComponent(r.user_name || '')}&model_name=${encodeURIComponent(r.model_name || '')}`}>{t('aiRouteManage.dialogAnalysis')}</a>
           {isAdmin ? <button className="btn btn-sm btn-danger" onClick={() => deleteItem(r)}>{t('aiRouteManage.deleteRoute')}</button> : null}
