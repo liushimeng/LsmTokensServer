@@ -9,6 +9,7 @@ import { useUserModelOptions, useMyModelNames } from '../../shared/userModelOpti
 import DataTable from '../../components/DataTable'
 import HourlyTrendPanel from '../../components/HourlyTrendPanel'
 import useStatsPageFilters from '../../shared/useStatsPageFilters'
+import PageHeader from '../../components/PageHeader'
 import AgentInfoToolbar from './AgentInfoToolbar'
 import { useI18n } from '../../i18n'
 
@@ -102,7 +103,14 @@ export default function AgentInfo(props) {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('agentInfo.title2')}</h2>
+      <PageHeader icon="🧠" title={t('agentInfo.title2')}
+        breadcrumb={[t('nav.modelProxy'), t('nav.agentInfo')]}
+        info={[
+          <span key="range">{t('agentInfo.daysRange', { days }) || `近 ${days} 天`}</span>,
+          <span key="scope">{(isAdmin ? t('agentInfo.adminView') : t('agentInfo.userView')) || ''}</span>,
+        ]}
+        actions={<button className="btn btn-primary" disabled={loading} onClick={() => loadStats(days)}>{t('common.refresh')}</button>}
+      />
       <AgentInfoToolbar
         isAdmin={isAdmin}
         userName={userName} setUserName={setUserName}

@@ -3,6 +3,7 @@ import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import { useUserModelOptions } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
+import PageHeader from '../components/PageHeader'
 import { pickRouteQuery } from '../shared/format'
 import { useI18n } from '../i18n'
 import { useConfirm } from '../components/ConfirmModal'
@@ -341,7 +342,12 @@ export default function ChatDialog({ route }) {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('chatDialog.title')}</h2>
+      <PageHeader icon="💬" title={t('chatDialog.title')}
+        breadcrumb={[t('nav.analysis'), t('nav.chatDialog')]}
+        info={[
+          <span key="model">{t('chatDialog.currentModel')}：{modelName || '-'}</span>,
+        ]}
+      />
 
       <div className="toolbar">
         {isAdmin ? <>

@@ -3,6 +3,7 @@ import { post, openSse } from '../shared/api'
 import { fmtTime } from '../shared/format'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import PageHeader from '../components/PageHeader'
 import { useI18n } from '../i18n'
 import { useConfirm } from '../components/ConfirmModal'
 
@@ -169,14 +170,17 @@ export default function SpiderDataSource() {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('spider.dataSourceManagement')}</h2>
-      <div className="toolbar">
-        <button className="btn btn-primary" onClick={() => setEditing({ ...EMPTY_FORM })}>+ {t('spider.addDataSource')}</button>
-        <button className="btn" onClick={load}>{t('common.refresh')}</button>
-        <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-          {t('spider.crawlThroughOpenClaw')}
-        </span>
-      </div>
+      <PageHeader icon="🕷" title={t('spider.dataSourceManagement')}
+        breadcrumb={[t('nav.spider'), t('nav.spiderDataSource')]}
+        info={[
+          <span key="total">{t('spider.totalCount', { count: (rows || []).length }) || `共 ${(rows || []).length} 条`}</span>,
+          <span key="hint" style={{ color: 'var(--muted)', fontSize: 12 }}>{t('spider.crawlThroughOpenClaw')}</span>,
+        ]}
+        actions={<>
+          <button className="btn" onClick={load}>{t('common.refresh')}</button>
+          <button className="btn btn-primary" onClick={() => setEditing({ ...EMPTY_FORM })}>+ {t('spider.addDataSource')}</button>
+        </>}
+      />
       {err ? <div className="alert alert-error">{err}</div> : null}
       {msg ? <div className="alert alert-ok">{msg}</div> : null}
       <DataTable columns={columns} rows={rows || []} loading={!rows} empty={t('spider.noData')} rowKey="id"

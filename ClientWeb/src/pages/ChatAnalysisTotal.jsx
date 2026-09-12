@@ -4,6 +4,7 @@ import { isAdminRole } from '../shared/auth'
 import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import TimeRangeSelector from '../components/TimeRangeSelector'
+import PageHeader from '../components/PageHeader'
 import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
 import { nearestSpan } from '../shared/timeSpan'
 import { fmtNum, fmtMs, pickRouteQuery } from '../shared/format'
@@ -287,7 +288,14 @@ export default function ChatAnalysisTotal({ route }) {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('chatAnalysisTotal.title')}</h2>
+      <PageHeader icon="💬" title={t('chatAnalysisTotal.title')}
+        breadcrumb={[t('nav.analysis'), t('nav.chatAnalysisTotal')]}
+        info={[
+          <span key="total">{t('chatAnalysisTotal.totalCount', { count: stats?.total_count ?? 0 }) || `共 ${stats?.total_count ?? 0} 条`}</span>,
+          <span key="range">{t('chatAnalysisTotal.daysRange', { days }) || `近 ${days} 天`}</span>,
+        ]}
+        actions={<button className="btn" onClick={refresh}>{t('common.refresh')}</button>}
+      />
 
       <div className="toolbar">
         {isAdmin ? <label>{t('chatAnalysisTotal.userNameLabel')}

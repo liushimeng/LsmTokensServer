@@ -3,6 +3,7 @@ import { get, post } from '../shared/api'
 import { fmtTime } from '../shared/format'
 import DataTable from '../components/DataTable'
 import TimeRangeSelector from '../components/TimeRangeSelector'
+import PageHeader from '../components/PageHeader'
 import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
 import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
@@ -273,7 +274,22 @@ export default function ProtocolConvertAnalyzer() {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('nav.protocolConvertAnalyzer')}</h2>
+      <PageHeader icon="🔄" title={t('nav.protocolConvertAnalyzer')}
+        breadcrumb={[t('nav.modelProxy'), t('nav.protocolConvertAnalyzer')]}
+        info={[
+          <span key="status" className="tag" style={{
+            background: enabled ? '#f0fdf4' : '#fef2f2',
+            color: enabled ? '#15803d' : '#b91c1c',
+          }}>{enabled ? t('protocolConvert.enabled') : t('protocolConvert.disabled')}</span>,
+          <span key="total">{t('protocolConvert.totalCount', { count: total }) || `共 ${total} 条`}</span>,
+        ]}
+        actions={<>
+          <button className="btn" onClick={loadAll}>{t('common.refresh')}</button>
+          {isAdmin ? (
+            <button className="btn btn-primary" onClick={toggle}>{enabled ? t('protocolConvert.disable') : t('protocolConvert.enable')}</button>
+          ) : null}
+        </>}
+      />
 
       {/* 全局开关 + 状态徽标 */}
       <div className="card">

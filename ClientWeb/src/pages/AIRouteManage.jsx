@@ -12,6 +12,7 @@ import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
 import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
 import { useConfirm } from '../components/ConfirmModal'
+import PageHeader from '../components/PageHeader'
 
 // 折叠/分页 localStorage 工具（带容错）
 const safeGet = (k) => { try { return window.localStorage.getItem(k) } catch { return null } }
@@ -524,20 +525,26 @@ export default function AIRouteManage() {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('aiRouteManage.title')}</h2>
-      <div className="toolbar">
-        <button className="btn" onClick={loadRoutes}>{t('aiRouteManage.refresh')}</button>
-        {isAdmin ? <button className="btn btn-primary" onClick={openAdd}>+ {t('aiRouteManage.addRoute')}</button> : null}
-        {!isAdmin ? <span style={{ color: '#888', fontSize: 13 }}>{t('aiRouteManage.userMode')}</span> : null}
-        {selected.size > 0 ? (
-          <>
-            <span>{t('aiRouteManage.selected', { count: selected.size })}</span>
-            {isAdmin ? <button className="btn btn-sm" onClick={batchUpdateAlgo}>{t('aiRouteManage.batchEditAlgo')}</button> : null}
-            {isAdmin ? <button className="btn btn-sm btn-danger" onClick={batchDelete}>{t('aiRouteManage.batchDelete')}</button> : null}
-            <button className="btn btn-sm" onClick={() => setSelected(new Set())}>{t('aiRouteManage.cancelSelection')}</button>
-          </>
-        ) : null}
-      </div>
+      <PageHeader icon="🧭" title={t('aiRouteManage.title')}
+        breadcrumb={[t('nav.userRoute'), t('nav.aiRouteManage')]}
+        info={[
+          <span key="total">{t('aiRouteManage.totalCount', { count: routes.length }) || `共 ${routes.length} 条路由`}</span>,
+          selected.size > 0 ? <span key="selected">{t('aiRouteManage.selected', { count: selected.size })}</span> : null,
+        ]}
+        actions={<>
+          <button className="btn" onClick={loadRoutes}>{t('aiRouteManage.refresh')}</button>
+          {isAdmin ? <button className="btn btn-primary" onClick={openAdd}>+ {t('aiRouteManage.addRoute')}</button> : null}
+        </>}
+      />
+      {!isAdmin ? <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>{t('aiRouteManage.userMode')}</div> : null}
+      {selected.size > 0 ? (
+        <div className="toolbar">
+          <span>{t('aiRouteManage.selected', { count: selected.size })}</span>
+          {isAdmin ? <button className="btn btn-sm" onClick={batchUpdateAlgo}>{t('aiRouteManage.batchEditAlgo')}</button> : null}
+          {isAdmin ? <button className="btn btn-sm btn-danger" onClick={batchDelete}>{t('aiRouteManage.batchDelete')}</button> : null}
+          <button className="btn btn-sm" onClick={() => setSelected(new Set())}>{t('aiRouteManage.cancelSelection')}</button>
+        </div>
+      ) : null}
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
         {/* 阶段BZ：首屏未加载完显示骨架屏；加载失败时显示 EmptyState + 重试按钮，

@@ -3,6 +3,7 @@ import { post } from '../shared/api'
 import { clearUserModelOptionsCache } from '../shared/userModelOptions'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import PageHeader from '../components/PageHeader'
 import { useI18n } from '../i18n'
 import { copyToClipboard } from '../shared/clipboard'
 import { useConfirm } from '../components/ConfirmModal'
@@ -172,11 +173,16 @@ export default function UserManage() {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('userManage.title')}</h2>
-      <div className="toolbar">
-        <button className="btn" onClick={loadUsers}>{t('common.refresh')}</button>
-        <button className="btn btn-primary" onClick={() => setUserForm({ ...emptyUserForm })}>+ {t('userManage.addUser')}</button>
-      </div>
+      <PageHeader icon="👥" title={t('userManage.title')}
+        breadcrumb={[t('nav.userRoute'), t('nav.userManage')]}
+        info={[
+          <span key="total">{t('userManage.totalCount', { count: users.length }) || `共 ${users.length} 位用户`}</span>,
+        ]}
+        actions={<>
+          <button className="btn" onClick={loadUsers}>{t('common.refresh')}</button>
+          <button className="btn btn-primary" onClick={() => setUserForm({ ...emptyUserForm })}>+ {t('userManage.addUser')}</button>
+        </>}
+      />
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
         <DataTable columns={columns} rows={users} loading={loading} empty={t('userManage.noUsers')} rowKey="id"

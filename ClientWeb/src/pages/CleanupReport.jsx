@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { post } from '../shared/api'
 import DataTable from '../components/DataTable'
 import TimeRangeSelector from '../components/TimeRangeSelector'
+import PageHeader from '../components/PageHeader'
 import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
 import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
@@ -142,13 +143,20 @@ export default function CleanupReport() {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('cleanup.title')}</h2>
+      <PageHeader icon="🕷" title={t('cleanup.title')}
+        breadcrumb={[t('nav.spider'), t('nav.cleanupReport')]}
+        info={[
+          <span key="total">{t('cleanup.totalCount', { count: total }) || `共 ${total} 条`}</span>,
+          <span key="range">{t('cleanup.timeRange')}：{days ?? 30}{t('cleanup.days')}</span>,
+        ]}
+        actions={<button className="btn btn-primary" disabled={loading} onClick={() => { setPage(1); loadData(1, days); loadState(); loadTables() }}>
+          {loading ? t('cleanup.refreshing') : t('common.refresh')}
+        </button>}
+      />
       <div className="toolbar">
         <span>{t('cleanup.timeRange')}</span>
         <TimeRangeSelector span={days ?? 30} onChange={(v) => { setDays(v); setPage(1) }} levels={levels} loading={levelsLoading} />
-        <button className="btn btn-primary" disabled={loading} onClick={() => { setPage(1); loadData(1, days); loadState(); loadTables() }}>
-          {loading ? t('cleanup.refreshing') : t('common.refresh')}
-        </button>
+        <span style={{ color: 'var(--muted)', fontSize: 12 }}>{t('common.refresh')}: {t('cleanup.refreshHint')}</span>
         {state ? (
           <span>
             <span className={`status-dot ${state.running ? 'status-on' : state.enabled === false ? 'status-off' : ''}`} />

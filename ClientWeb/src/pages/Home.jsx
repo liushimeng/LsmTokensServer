@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { get, post } from '../shared/api'
 import { useI18n } from '../i18n'
+import PageHeader from '../components/PageHeader'
 
 // 首页：登录用户信息 + 我的模型列表卡片（对齐旧版用户端首页）
 // 每个模型卡片展示 API Key 前 8 位打码，并提供 6 个快捷跳转
@@ -52,9 +53,21 @@ export default function Home() {
     return () => { aliveRef.current = false }
   }, [])
 
+  // 阶段CC：PageHeader info 区（账号 + 模型数）
+  const infoChips = [
+    info ? <span key="user">{t('common.user')}：{info.user_name}</span> : null,
+    info && info.model_name ? <span key="model">{t('home.currentModel')}：{info.model_name}</span> : null,
+    <span key="models">{t('home.recentModels')}：{models.length}</span>,
+  ].filter(Boolean)
+
   return (
     <div className="page">
-      <h2 className="page-title">{t('nav.home')}</h2>
+      <PageHeader
+        icon="🏠"
+        title={t('nav.home')}
+        breadcrumb={[t('nav.overview'), t('nav.home')]}
+        info={infoChips}
+      />
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card-grid kpi-grid">
         <div className="card">

@@ -6,6 +6,7 @@ import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } fro
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import TimeRangeSelector from '../components/TimeRangeSelector'
+import PageHeader from '../components/PageHeader'
 import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
 import { nearestSpan } from '../shared/timeSpan'
 import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/format'
@@ -100,7 +101,14 @@ export default function ChatAnalysisSession({ route }) {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('chatAnalysisSession.title')}</h2>
+      <PageHeader icon="💬" title={t('chatAnalysisSession.title')}
+        breadcrumb={[t('nav.analysis'), t('nav.chatAnalysisSession')]}
+        info={[
+          <span key="total">{t('chatAnalysisSession.totalCount', { count: data?.total_count ?? 0 }) || `共 ${data?.total_count ?? 0} 条`}</span>,
+          <span key="range">{t('chatAnalysisSession.daysRange', { days }) || `近 ${days} 天`}</span>,
+        ]}
+        actions={<button className="btn" onClick={refresh}>{t('common.refresh')}</button>}
+      />
 
       <div className="toolbar">
         {isAdmin ? <label>{t('userManage.username')}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { get, post } from '../shared/api'
 import DataTable from '../components/DataTable'
+import PageHeader from '../components/PageHeader'
 import { useI18n } from '../i18n'
 import { useConfirm } from '../components/ConfirmModal'
 
@@ -173,7 +174,13 @@ export default function SpiderDailyInfo(props) {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('spider.dailyInfo')}</h2>
+      <PageHeader icon="🕷" title={t('spider.dailyInfo')}
+        breadcrumb={[t('nav.spider'), t('nav.spiderDailyInfo')]}
+        info={[
+          <span key="total">{t('spider.totalCount', { count: total }) || `共 ${total} 条`}</span>,
+        ]}
+        actions={<button className="btn" onClick={load}>{t('common.refresh')}</button>}
+      />
       <div className="toolbar">
         <span>{t('spider.platform')}</span>
         <select value={platform} onChange={(e) => { setPlatform(e.target.value); setPage(1) }}>

@@ -7,6 +7,7 @@ import { useUserModelOptions, useMyModelNames } from '../../shared/userModelOpti
 import DataTable from '../../components/DataTable'
 import { fmtTime, fmtNum, fmtMs } from '../../shared/format'
 import { useI18n } from '../../i18n'
+import PageHeader from '../../components/PageHeader'
 import { protocolBadgeClass, protocolBadgeText, protocolBadgeTitle } from './constants'
 import useChatAnalysisFilters from './useChatAnalysisFilters'
 import useChatAnalysisData from './useChatAnalysisData'
@@ -173,7 +174,14 @@ export default function ChatAnalysis({ route }) {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('chatAnalysis.title')}</h2>
+      <PageHeader icon="💬" title={t('chatAnalysis.title')}
+        breadcrumb={[t('nav.analysis'), t('nav.chatAnalysis')]}
+        info={[
+          <span key="total">{t('chatAnalysis.totalCount', { count: data?.total_count ?? 0 }) || `共 ${data?.total_count ?? 0} 条`}</span>,
+          <span key="range">{t('chatAnalysis.daysRange', { days }) || `近 ${days} 天`}</span>,
+        ]}
+        actions={<button className="btn" onClick={refresh}>{t('common.refresh')}</button>}
+      />
 
       <ChatAnalysisToolbar
         isAdmin={isAdmin}

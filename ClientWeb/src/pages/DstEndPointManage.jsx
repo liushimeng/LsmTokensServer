@@ -3,6 +3,7 @@ import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
+import PageHeader from '../components/PageHeader'
 import { useI18n } from '../i18n'
 import { useConfirm } from '../components/ConfirmModal'
 
@@ -186,21 +187,27 @@ export default function DstEndPointManage() {
 
   return (
     <div className="page">
-      <h2 className="page-title">{t('dstEndPoint.title')}</h2>
-      <div className="toolbar">
-        <button className="btn" onClick={loadData}>{t('common.refresh')}</button>
-        {isAdmin ? <button className="btn btn-primary" onClick={() => { const uid = users[0]?.id || 0; setForm({ ...emptyForm, user_id: uid }); loadNameOptions(uid) }}>+ {t('dstEndPoint.addEndPoint')}</button>
-          : <span style={{ color: '#888', fontSize: 13 }}>{t('dstEndPoint.userMode')}</span>}
-        {selected.size > 0 ? (
-          <>
-            <span>{t('dstEndPoint.selectedCountMax', { count: selected.size })}</span>
-            <button className="btn btn-sm" onClick={() => runBatch('batch_enable')}>{t('dstEndPoint.batchEnable')}</button>
-            <button className="btn btn-sm" onClick={() => runBatch('batch_disable')}>{t('dstEndPoint.batchDisable')}</button>
-            <button className="btn btn-sm btn-danger" onClick={() => runBatch('batch_delete')}>{t('dstEndPoint.batchDelete')}</button>
-            <button className="btn btn-sm" onClick={() => setSelected(new Set())}>{t('dstEndPoint.cancelSelection')}</button>
-          </>
-        ) : null}
-      </div>
+      <PageHeader icon="🌐" title={t('dstEndPoint.title')}
+        breadcrumb={[t('nav.userRoute'), t('nav.dstEndPointManage')]}
+        info={[
+          <span key="total">{t('dstEndPoint.totalCount', { count: rows.length }) || `共 ${rows.length} 条`}</span>,
+        ]}
+        actions={<>
+          <button className="btn" onClick={loadData}>{t('common.refresh')}</button>
+          {isAdmin ? <button className="btn btn-primary" onClick={() => { const uid = users[0]?.id || 0; setForm({ ...emptyForm, user_id: uid }); loadNameOptions(uid) }}>+ {t('dstEndPoint.addEndPoint')}</button>
+            : null}
+        </>}
+      />
+      {!isAdmin ? <div style={{ color: '#888', fontSize: 13, marginBottom: 12 }}>{t('dstEndPoint.userMode')}</div> : null}
+      {selected.size > 0 ? (
+        <div className="toolbar">
+          <span>{t('dstEndPoint.selectedCountMax', { count: selected.size })}</span>
+          <button className="btn btn-sm" onClick={() => runBatch('batch_enable')}>{t('dstEndPoint.batchEnable')}</button>
+          <button className="btn btn-sm" onClick={() => runBatch('batch_disable')}>{t('dstEndPoint.batchDisable')}</button>
+          <button className="btn btn-sm btn-danger" onClick={() => runBatch('batch_delete')}>{t('dstEndPoint.batchDelete')}</button>
+          <button className="btn btn-sm" onClick={() => setSelected(new Set())}>{t('dstEndPoint.cancelSelection')}</button>
+        </div>
+      ) : null}
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
         <DataTable columns={columns} rows={endpoints} loading={loading} empty={t('dstEndPoint.noData')} rowKey="id"
