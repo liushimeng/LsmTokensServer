@@ -1,6 +1,6 @@
 # CLAUDE.md - LsmTokensServer 工程约束与代码规范（Claude Code 上下文）
 
-> 供 Claude Code / Claude Agent 工具加载使用（当前版本 v2.0.77）。
+> 供 Claude Code / Claude Agent 工具加载使用（当前版本 v2.0.78）。
 > 通用 AI Agent 入口与 SubAgent 规则见 [`AGENTS.md`](AGENTS.md)；完整源码索引见 [`docs/开发指南/AGENT_INDEX.md`](docs/开发指南/AGENT_INDEX.md)。
 
 ## 1. 工程定位

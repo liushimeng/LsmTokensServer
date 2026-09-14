@@ -234,7 +234,9 @@ func TestEconomicOnEndpointFailureShouldRemove(t *testing.T) {
 	}
 }
 
-func TestEconomicOnRequestSuccess(t *testing.T) {
+// TestEconomicOnEndpointSuccess v2.0.78：成功只清零「成功源站自身」的失败计数，
+// 其它源站的计数不受影响（对齐稳定型语义，故障源站可与正常流量交错累计到阈值）。
+func TestEconomicOnEndpointSuccess(t *testing.T) {
 	ResetEconomicRouteState(760)
 	defer ResetEconomicRouteState(760)
 
@@ -254,14 +256,23 @@ func TestEconomicOnRequestSuccess(t *testing.T) {
 		t.Errorf("expected failure counts 2/1, got %d/%d", c1, c2)
 	}
 
-	// 成功应清零所有计数
-	sel.OnRequestSuccess(760)
+	// 源站 2 成功：只清零源站 2 的计数，源站 1 的计数必须保留
+	sel.OnEndpointSuccess(760, 2)
 	state.mu.Lock()
 	c1 = state.endpointFailureCount[1]
 	c2 = state.endpointFailureCount[2]
 	state.mu.Unlock()
-	if c1 != 0 || c2 != 0 {
-		t.Errorf("expected failure counts 0/0 after success, got %d/%d", c1, c2)
+	if c1 != 2 || c2 != 0 {
+		t.Errorf("expected failure counts 2/0 after endpoint-2 success, got %d/%d", c1, c2)
+	}
+
+	// 源站 1 成功：清零自身计数
+	sel.OnEndpointSuccess(760, 1)
+	state.mu.Lock()
+	c1 = state.endpointFailureCount[1]
+	state.mu.Unlock()
+	if c1 != 0 {
+		t.Errorf("expected failure count 0 after endpoint-1 success, got %d", c1)
 	}
 }
 

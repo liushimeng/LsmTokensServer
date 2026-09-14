@@ -319,33 +319,36 @@ func forwardWithRetry(
 	}
 
 	// 经济型算法：OnEndpointFailure 返回 shouldCooldown 时，
-	// 记录需要冷却摘除的 endpoint ID；循环结束后统一调 economicSelector.CooldownEndpoint。
+	// 把该源站加入待冷却集合；循环结束后统一调 economicSelector.CooldownEndpoint。
 	// v2.0.75 起冷却为纯内存状态（默认 10 分钟后自动回归 livePool 恢复负载均衡），
 	// 不再调 modelsdb.RemoveEndpointFromAIRoute 持久化删除源站——
 	// 源站的最终去留由管理员在 Web 端决定，避免偶发 429/503 的源站被永久剔除、
 	// 路由池逐渐缩水到单源站导致 Session 级负载均衡失效。
-	var economicCooldownID uint64
-	economicShouldCooldown := false
+	// v2.0.78 对齐稳定型「连续 3 次失败自动切换到下一个」语义：
+	//   1) 达到冷却阈值不再中断当前请求的重试循环——稳定型滚动列表后仍会继续
+	//      尝试下一个源站，经济型同样继续遍历切换（triedEndpoints 已保证不会
+	//      重复选中已失败源站），当前请求尽量无感成功；
+	//   2) 待冷却对象由单值改为集合：同一请求内多个源站先后达阈值时全部冷却。
+	var economicCooldownIDs map[uint64]bool
 
-	// reportFailure 统一处理一次失败的副作用：调用对应算法的失败回调，
-	// 并在需要时把 economicCooldownID 标记上。返回 true 表示应终止当前 retry 循环。
-	reportFailure := func(endpointID uint64) bool {
+	// noteFailure 统一处理一次失败的副作用：调用对应算法的失败回调。
+	noteFailure := func(endpointID uint64) {
 		if isStable {
 			stableSelector.OnRequestFailure(cachedRoute.ID, cachedRoute)
 		} else if isEconomic {
 			if shouldCooldown, cooledID := economicSelector.OnEndpointFailure(cachedRoute.ID, endpointID); shouldCooldown {
-				economicShouldCooldown = true
-				economicCooldownID = cooledID
-				return true
+				if economicCooldownIDs == nil {
+					economicCooldownIDs = make(map[uint64]bool)
+				}
+				economicCooldownIDs[cooledID] = true
 			}
 		}
-		return false
 	}
 
 	// 循环结束后的收尾：经济型若标记了冷却摘除，在锁外执行内存级冷却。
 	defer func() {
-		if economicShouldCooldown {
-			economicSelector.CooldownEndpoint(cachedRoute.ID, economicCooldownID)
+		for id := range economicCooldownIDs {
+			economicSelector.CooldownEndpoint(cachedRoute.ID, id)
 		}
 	}()
 
@@ -411,9 +414,7 @@ func forwardWithRetry(
 			err := fmt.Errorf("dst endpoint (id=%d) not found in cache", selectedID)
 			logger.Printf("[PROXY] Dst endpoint not found in cache: id=%d", selectedID)
 			lastErr = err
-			if reportFailure(selectedID) {
-				break
-			}
+			noteFailure(selectedID)
 			continue
 		}
 
@@ -421,9 +422,7 @@ func forwardWithRetry(
 		if dstEndpoint.Status == 0 {
 			logger.Printf("[PROXY] Dst endpoint is disabled: id=%d", selectedID)
 			lastErr = fmt.Errorf("endpoint %d is disabled", selectedID)
-			if reportFailure(selectedID) {
-				break
-			}
+			noteFailure(selectedID)
 			continue
 		}
 
@@ -437,9 +436,7 @@ func forwardWithRetry(
 		if err != nil {
 			logger.Printf("[PROXY] Invalid dst URL: %s, err=%v", dstEndpoint.URLAddress, err)
 			lastErr = err
-			if reportFailure(selectedID) {
-				break
-			}
+			noteFailure(selectedID)
 			continue
 		}
 
@@ -448,9 +445,7 @@ func forwardWithRetry(
 		if err != nil {
 			logger.Printf("[PROXY] Failed to create proxy request: %v", err)
 			lastErr = err
-			if reportFailure(selectedID) {
-				break
-			}
+			noteFailure(selectedID)
 			continue
 		}
 
@@ -462,9 +457,7 @@ func forwardWithRetry(
 			if err != nil {
 				logger.Printf("[PROXY] Request protocol conversion failed for endpointID=%d: %v", selectedID, err)
 				lastErr = err
-				if reportFailure(selectedID) {
-					break
-				}
+				noteFailure(selectedID)
 				continue
 			}
 			newBodyBytes = convertedBody
@@ -484,9 +477,7 @@ func forwardWithRetry(
 		if err != nil {
 			logger.Printf("[PROXY] Forward failed for endpointID=%d: %v", selectedID, err)
 			lastErr = err
-			if reportFailure(selectedID) {
-				break
-			}
+			noteFailure(selectedID)
 			continue
 		}
 
@@ -495,9 +486,7 @@ func forwardWithRetry(
 			logger.Printf("[PROXY] Failover error %d from endpointID=%d, will retry next", resp.StatusCode, selectedID)
 			resp.Body.Close()
 			lastErr = fmt.Errorf("endpoint %d returned status %d", selectedID, resp.StatusCode)
-			if reportFailure(selectedID) {
-				break
-			}
+			noteFailure(selectedID)
 			continue
 		}
 
@@ -505,7 +494,9 @@ func forwardWithRetry(
 		if isStable {
 			stableSelector.OnRequestSuccess(cachedRoute.ID)
 		} else if isEconomic {
-			economicSelector.OnRequestSuccess(cachedRoute.ID)
+			// v2.0.78：只复位「成功源站自身」的失败计数（对齐稳定型语义），
+			// 其它源站的计数不受影响，故障源站可独立累计到阈值触发冷却切换
+			economicSelector.OnEndpointSuccess(cachedRoute.ID, selectedID)
 		}
 		return &proxyForwardResult{
 			Response:                 resp,

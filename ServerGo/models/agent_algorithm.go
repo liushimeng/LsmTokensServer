@@ -34,7 +34,12 @@ import (
 //	metadata.user_id 内的 session_id，把不同会话分配到路由配置的各个目标源站。
 //	新 session 从实时源站列表（livePool）随机取一个、分配后弹出；livePool 空时
 //	按路由配置 DstEndPointIDs 重新洗牌填充。支持 Anthropic 和 OpenAI 协议。
-//	Web 增/删源站或连续 3 次失败自动移除时同步 livePool、session 队列与失败计数。
+//	Web 增/删源站时同步 livePool、session 队列与失败计数。
+//	v2.0.78 对齐稳定型故障切换语义：某源站连续 3 次 API 调用失败
+//	（IsFailoverError：402/429/500/502/503/504 或网络错误）后自动冷却摘除
+//	（内存级，10 分钟到期自动回归 livePool）并切换到下一个源站；请求内通过
+//	经济型遍历（livePool / session 重分配 / KB 随机 / 无 session 兜底）透明重试
+//	其余源站。成功只复位成功源站自身的失败计数，故障源站可独立累计到阈值。
 //	无 session_id 时退化为返回 DstEndPointIDs[0]，不消费 livePool。
 //
 // 智能型 (4): 开发中。计划根据历史成功率、延迟、价格等多维度综合评分动态选择最优源站。
@@ -130,7 +135,7 @@ func GetAlgorithmDescription(t int) string {
 	case AlgorithmStrategyType_Stable:
 		return "遇到服务端错误（402/429/500/502/503/504）或连接超时，自动切换到下一个源站。目标源站列表做滚动处理，连续 3 次 API 接口出错后切换到下一个模型。"
 	case AlgorithmStrategyType_Economic:
-		return "Session 级别负载均衡（实时源站列表消费）：根据 Anthropic/OpenAI 请求中的 session_id 分配会话到源站，新 session 从实时源站列表中随机取一个并弹出；列表空时按路由配置重新洗牌填充。Web 增/删源站或连续 3 次失败自动移除时同步更新实时列表与 session 队列。支持 Anthropic 和 OpenAI 协议。"
+		return "Session 级别负载均衡（实时源站列表消费）：根据 Anthropic/OpenAI 请求中的 session_id 把会话粘性分配到源站，新 session 从实时列表确定性哈希取用。某源站连续 3 次 API 调用失败（402/429/500/502/503/504 或网络错误）后自动冷却摘除并切换到下一个源站，期间请求内透明重试遍历其余源站；冷却 10 分钟到期后自动回归参与负载均衡。支持 Anthropic 和 OpenAI 协议。"
 	case AlgorithmStrategyType_Intelligent:
 		return "根据历史成功率、延迟、价格等多维度评分动态选择最优源站。（开发中，当前使用指定型逻辑）"
 	default:

@@ -67,6 +67,16 @@ import (
 //     按协议分别实现（agent_algorithm_openai_session_recognition.go /
 //     agent_algorithm_anthropic_session_recognition.go），供所有算法复用。
 //
+// v2.0.78 对齐稳定型「连续 3 次失败自动切换」语义：
+//   - OnEndpointSuccess(routeID, endpointID) 替代 OnRequestSuccess(routeID)：
+//     成功只清零「成功源站自身」的失败计数，其它源站的计数不受影响。
+//     旧实现清零全部计数，导致单一故障源站与正常流量交错时计数永远到不了
+//     阈值，冷却摘除形同虚设（稳定型语义即"复位成功源站自身的计数"）。
+//   - 失败指标对齐：OnEndpointFailure 记录 RecordFailure(Economic)。
+//   - 全冷却探测重置：resetCooldownsIfFullyCooledLocked 在路由全部启用源站
+//     都处于冷却期时清空冷却表，立即恢复一轮遍历重试，避免整路由
+//     10 分钟 fail-fast 掩盖真实错误（故障探测周期缩短为约 3 个请求）。
+//
 // 内存模型：
 //   - 经济型的所有状态存储在内存中，重启后重新初始化
 //   - 源站移除操作同步更新 database.DB 和内存缓存
@@ -91,6 +101,8 @@ const (
 	// 冷却期间该源站被从 livePool 摘除（不参与新 session 分配），
 	// 到期后自动回归 livePool 恢复参与负载均衡；
 	// 路由配置（DstEndPointIDList）不受影响，源站的最终去留仍由管理员在 Web 端决定。
+	// v2.0.78：若路由全部启用源站都进入冷却期，由 resetCooldownsIfFullyCooledLocked
+	// 探测重置清空冷却表，立即恢复一轮遍历重试（避免整路由 fail-fast 一个冷却周期）。
 	EconomicEndpointCooldownDuration = 10 * time.Minute
 )
 
@@ -237,17 +249,26 @@ type EconomicAlgorithmSelector struct{}
 
 // Select 经济型算法的默认 Select（不含 sessionID），退化为第一个可用源站（不消费 livePool）
 // 设计要点：兜底路径不应污染实时列表状态，调用方应优先通过 SelectForSession 传 sessionID。
+// v2.0.78：单次持锁完成 recover + 全冷却探测重置 + 遍历，替代原先逐端点反复加锁的 IsEndpointCooling。
 func (s *EconomicAlgorithmSelector) Select(route *CachedAIRoute) (uint64, bool) {
 	if route == nil || len(route.DstEndPointIDs) == 0 {
 		return 0, false
 	}
-	// v2.0.75：兜底路径跳过冷却中的源站（连续失败被摘除的源站不再承接无 session 请求）
+	state := getEconomicState(route.ID)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	// 先回收冷却期已结束的源站，再做全冷却探测重置（v2.0.78）
+	recoverCooldownEndpointsLocked(state, route)
+	resetCooldownsIfFullyCooledLocked(state, route)
+
+	// 兜底路径跳过冷却中的源站（连续失败被摘除的源站不再承接无 session 请求）
 	for i, id := range route.DstEndPointIDs {
 		status := 1
 		if i < len(route.DstEndPointIDStatuses) {
 			status = route.DstEndPointIDStatuses[i]
 		}
-		if status == 1 && !s.IsEndpointCooling(route.ID, id) {
+		if status == 1 && !isEndpointCoolingLocked(state, id) {
 			return id, true
 		}
 	}
@@ -272,8 +293,10 @@ func (s *EconomicAlgorithmSelector) SelectForSession(route *CachedAIRoute, sessi
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
-	// 先回收冷却期已结束的源站（v2.0.75：冷却自动恢复，保持池满载参与负载均衡）
+	// 先回收冷却期已结束的源站（v2.0.75：冷却自动恢复，保持池满载参与负载均衡），
+	// 再做全冷却探测重置（v2.0.78：全部启用源站冷却时清空冷却表立即恢复遍历）
 	recoverCooldownEndpointsLocked(state, route)
+	resetCooldownsIfFullyCooledLocked(state, route)
 
 	// 命中已有映射
 	if entry, ok := state.sessionIndex[sessionID]; ok {
@@ -451,28 +474,29 @@ func (s *EconomicAlgorithmSelector) InvalidateSessionMapping(routeID uint64, ses
 	}
 }
 
-// OnRequestSuccess 请求成功：清零该路由的连续失败计数
-func (s *EconomicAlgorithmSelector) OnRequestSuccess(routeID uint64) {
+// OnEndpointSuccess 请求成功：只清零「成功源站自身」的连续失败计数（v2.0.78）。
+// 与稳定型语义对齐（稳定型的路由级计数实质就是"当前生效源站自身"的连续失败数）：
+// 其它源站的失败计数不受影响——单一故障源站即使与正常流量交错，
+// 也能独立累计到阈值并触发冷却切换，这正是「连续 3 次 API 调用失败，
+// 自动切换到下一个」的核心。旧实现 OnRequestSuccess(routeID) 清零全部计数，
+// 导致故障源站计数总被健康源站的成功复位，冷却摘除在生产流量下基本不生效。
+func (s *EconomicAlgorithmSelector) OnEndpointSuccess(routeID uint64, endpointID uint64) {
 	state := getEconomicState(routeID)
 	state.mu.Lock()
-	for k := range state.endpointFailureCount {
-		state.endpointFailureCount[k] = 0
-	}
+	delete(state.endpointFailureCount, endpointID)
 	state.mu.Unlock()
 }
 
-// OnRequestFailure 请求失败：记录日志（不触发源站移除，源站移除由 OnEndpointFailure 处理）
-func (s *EconomicAlgorithmSelector) OnRequestFailure(routeID uint64, route *CachedAIRoute) {
-	// 经济型算法的失败处理通过 OnEndpointFailure 按源站粒度跟踪
-	// 此方法保留用于兼容 forwardWithRetry 中的通用调用
-}
-
 // OnEndpointFailure 指定源站请求失败：递增该源站的连续失败计数
-// 达到阈值时返回 (shouldCooldown=true, removedID)，由调用方在循环外调
+// 达到阈值时返回 (shouldCooldown=true, removedID)，由调用方在请求结束后调
 // CooldownEndpoint 完成「内存级冷却摘除」（v2.0.75 起不再写库删除源站，
 // 冷却到期后源站自动回归 livePool 恢复负载均衡，路由配置保持完整）。
+// v2.0.78：与稳定型 OnRequestFailure 对齐记录 RecordFailure 指标；
+// 达阈值后调用方不再中断重试循环，而是继续切换到下一个源站（经济型遍历语义）。
 // 不在算法层直接调 database.DB 函数，避免算法层与 database.DB 层互斥锁交叉持有。
 func (s *EconomicAlgorithmSelector) OnEndpointFailure(routeID uint64, endpointID uint64) (shouldCooldown bool, removedID uint64) {
+	RecordFailure(AlgorithmStrategyType_Economic)
+
 	state := getEconomicState(routeID)
 	state.mu.Lock()
 	state.endpointFailureCount[endpointID]++
@@ -576,6 +600,36 @@ func recoverCooldownEndpointsLocked(state *economicRouteState, route *CachedAIRo
 		state.livePool = append(state.livePool, endpointID)
 		logger.Printf("[ECONOMIC] Route %d: endpoint %d cooldown expired, back to live pool", route.ID, endpointID)
 	}
+}
+
+// resetCooldownsIfFullyCooledLocked 全冷却「探测重置」（v2.0.78，调用方需持有 state.mu）。
+// 判定「路由的全部启用源站都处于冷却期」时清空冷却表，让下一轮选择立即恢复
+// 遍历真实重试——避免整路由在最长的 EconomicEndpointCooldownDuration 内 fail-fast
+// （客户端只能拿到 "failed to select endpoint" 而非真实源站错误）。
+// 只要有任一启用源站未在冷却期，则不做任何事（部分冷却不重置，冷却语义保持）。
+// 效果：全路由故障时的恢复探测周期从「等一个冷却周期」缩短为「约 3 个失败请求」，
+// 与稳定型滚动机制（列表永远有源站可选、每轮真实重试）行为对齐。
+// 返回 true 表示已执行重置（供测试断言与日志观测）。
+func resetCooldownsIfFullyCooledLocked(state *economicRouteState, route *CachedAIRoute) bool {
+	if len(state.cooldownEndpoints) == 0 || route == nil {
+		return false
+	}
+	for i, id := range route.DstEndPointIDs {
+		status := 1
+		if i < len(route.DstEndPointIDStatuses) {
+			status = route.DstEndPointIDStatuses[i]
+		}
+		if status != 1 {
+			continue // 禁用源站不参与判定
+		}
+		if !isEndpointCoolingLocked(state, id) {
+			return false // 还有启用源站未冷却：正常返回，不重置
+		}
+	}
+	n := len(state.cooldownEndpoints)
+	state.cooldownEndpoints = make(map[uint64]time.Time)
+	logger.Printf("[ECONOMIC] Route %d: all enabled endpoints cooling, reset %d cooldown entries to probe recovery", route.ID, n)
+	return true
 }
 
 // IsEndpointCooling 判断指定源站当前是否处于冷却期（供测试与观测使用）。
@@ -1160,17 +1214,18 @@ func (s *EconomicAlgorithmSelector) SelectForKBRequest(route *CachedAIRoute) (ui
 	state := getEconomicState(route.ID)
 	state.mu.Lock()
 	recoverCooldownEndpointsLocked(state, route)
-	state.mu.Unlock()
+	resetCooldownsIfFullyCooledLocked(state, route)
 	available := make([]uint64, 0, len(route.DstEndPointIDs))
 	for i, id := range route.DstEndPointIDs {
 		status := 1
 		if i < len(route.DstEndPointIDStatuses) {
 			status = route.DstEndPointIDStatuses[i]
 		}
-		if status == 1 && !s.IsEndpointCooling(route.ID, id) {
+		if status == 1 && !isEndpointCoolingLocked(state, id) {
 			available = append(available, id)
 		}
 	}
+	state.mu.Unlock()
 	if len(available) == 0 {
 		return 0, false
 	}
