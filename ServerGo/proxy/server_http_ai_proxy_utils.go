@@ -418,10 +418,15 @@ func forwardWithRetry(
 			continue
 		}
 
-		// 检查源站是否被禁用
-		if dstEndpoint.Status == 0 {
-			logger.Printf("[PROXY] Dst endpoint is disabled: id=%d", selectedID)
-			lastErr = fmt.Errorf("endpoint %d is disabled", selectedID)
+		// 检查源站是否被禁用（用户启停 + 工作时间状态）
+		// Status=0 → 用户手动禁用；WorkStatus=0 → 当前非工作时间（自动禁用）
+		if dstEndpoint.Status == 0 || dstEndpoint.WorkStatus == 0 {
+			reason := "disabled by user"
+			if dstEndpoint.Status != 0 && dstEndpoint.WorkStatus == 0 {
+				reason = "outside working hours"
+			}
+			logger.Printf("[PROXY] Dst endpoint is unavailable (%s): id=%d", reason, selectedID)
+			lastErr = fmt.Errorf("endpoint %d is %s", selectedID, reason)
 			noteFailure(selectedID)
 			continue
 		}

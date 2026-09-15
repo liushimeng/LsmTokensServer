@@ -6,6 +6,7 @@ import (
 	"github.com/lishimeng/LsmTokensServer/logger"
 	"strings"
 	"sync"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -52,6 +53,16 @@ func ValidateDstEndPointInput(platformName, modelName, urlAddress, apiKey string
 	return nil
 }
 
+// ValidateWorkPeriodsJSON 校验工作时间段 JSON 字符串的合法性。
+// 空字符串视为默认全天（返回 nil）。
+func ValidateWorkPeriodsJSON(workPeriodsJSON string) error {
+	if strings.TrimSpace(workPeriodsJSON) == "" {
+		return nil // 空值由 Add/Update 层补默认值
+	}
+	_, err := ParseWorkPeriods(workPeriodsJSON)
+	return err
+}
+
 // AddDstEndPoint 添加源站接入点
 func AddDstEndPoint(item *TAgentDstEndPoint) error {
 	agentDstEndPointMutex.Lock()
@@ -65,6 +76,7 @@ func AddDstEndPoint(item *TAgentDstEndPoint) error {
 	item.ModelName = strings.TrimSpace(item.ModelName)
 	item.URLAddress = strings.TrimSpace(item.URLAddress)
 	item.APIKey = normalizeAPIKey(item.APIKey)
+	item.WorkPeriods = strings.TrimSpace(item.WorkPeriods)
 
 	if err := ValidateDstEndPointInput(item.PlatformName, item.ModelName, item.URLAddress, item.APIKey); err != nil {
 		return err
@@ -72,6 +84,21 @@ func AddDstEndPoint(item *TAgentDstEndPoint) error {
 
 	if item.Status == 0 {
 		item.Status = 1 // 默认启用
+	}
+
+	// 工作时间段：空值补默认全天；校验合法性
+	if item.WorkPeriods == "" {
+		item.WorkPeriods = DefaultWorkPeriodsJSON
+	}
+	if err := ValidateWorkPeriodsJSON(item.WorkPeriods); err != nil {
+		return fmt.Errorf("工作时间段非法: %w", err)
+	}
+
+	// 计算初始 WorkStatus：全天 → 1，非全天按当前时间
+	shouldEnable, _ := ShouldBeEnabledByWorkPeriods(item.WorkPeriods, time.Now())
+	item.WorkStatus = 0
+	if shouldEnable {
+		item.WorkStatus = 1
 	}
 
 	// 创建记录
@@ -112,22 +139,40 @@ func UpdateDstEndPoint(item *TAgentDstEndPoint) error {
 	item.ModelName = strings.TrimSpace(item.ModelName)
 	item.URLAddress = strings.TrimSpace(item.URLAddress)
 	item.APIKey = normalizeAPIKey(item.APIKey)
+	item.WorkPeriods = strings.TrimSpace(item.WorkPeriods)
 
 	if err := ValidateDstEndPointInput(item.PlatformName, item.ModelName, item.URLAddress, item.APIKey); err != nil {
 		return err
 	}
 
+	// 工作时间段：空值保留原值（不修改）；非空则校验并计算 WorkStatus
+	updateMap := map[string]interface{}{
+		"platform_name": item.PlatformName,
+		"model_name":    item.ModelName,
+		"protocol_type": item.ProtocolType,
+		"url_address":   item.URLAddress,
+		"api_key":       item.APIKey,
+		"status":        item.Status,
+	}
+
+	if item.WorkPeriods != "" {
+		if err := ValidateWorkPeriodsJSON(item.WorkPeriods); err != nil {
+			return fmt.Errorf("工作时间段非法: %w", err)
+		}
+		shouldEnable, _ := ShouldBeEnabledByWorkPeriods(item.WorkPeriods, time.Now())
+		workStatus := 0
+		if shouldEnable {
+			workStatus = 1
+		}
+		updateMap["work_periods"] = item.WorkPeriods
+		updateMap["work_status"] = workStatus
+		item.WorkStatus = workStatus
+	}
+
 	// 更新记录
 	result := database.DB.Table(AgentDstEndPointTableName).
 		Where("id = ? AND deleted_at IS NULL", item.ID).
-		Updates(map[string]interface{}{
-			"platform_name": item.PlatformName,
-			"model_name":    item.ModelName,
-			"protocol_type": item.ProtocolType,
-			"url_address":   item.URLAddress,
-			"api_key":       item.APIKey,
-			"status":        item.Status,
-		})
+		Updates(updateMap)
 	if result.Error != nil {
 		return fmt.Errorf("failed to update dst endpoint: %w", result.Error)
 	}

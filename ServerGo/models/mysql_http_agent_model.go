@@ -63,6 +63,17 @@ type TAgentDstEndPoint struct {
 	// 显式选认证方式，避免试错降级的隐式行为。
 	AuthType int `json:"auth_type" gorm:"default:0;index;comment:认证头:0=协议默认,1=x-api-key,2=Authorization Bearer"`
 	Status   int `json:"status" gorm:"index;comment:状态:1=启用,0=禁用"`
+
+	// WorkPeriods 工作时间段 JSON 数组，格式 [{"start":"HH:MM:SS","end":"HH:MM:SS"}]。
+	// 默认 [{"start":"00:00:00","end":"24:00:00"}] 表示全天工作。
+	// 支持多段，精确到秒；24:00:00 表示当天结束（合法）。
+	// 示例：[{"start":"09:00:00","end":"18:00:00"},{"start":"23:00:00","end":"24:00:00"}]
+	WorkPeriods string `json:"work_periods" gorm:"column:work_periods;size:512;default:'[{\"start\":\"00:00:00\",\"end\":\"24:00:00\"}]';comment:工作时间段JSON，精确到秒"`
+
+	// WorkStatus 工作时间驱动的可用状态：1=当前在工作时间内（可用），0=当前在非工作时间（禁用）。
+	// 后台 endpoint_work_scheduler 每分钟刷新；代理热路径 / 经济型算法据此判断可用性。
+	// 全天工作（默认）时恒为 1，仅当 status=1（用户启用）且 work_status=1 时源站才真正可用。
+	WorkStatus int `json:"work_status" gorm:"column:work_status;default:1;index;comment:工作时间状态:1=在工作时间,0=非工作时间"`
 }
 
 // TAgentHttpAIRoute 智能路由表

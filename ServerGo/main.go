@@ -339,6 +339,9 @@ func main() {
 		modelsdb.InitStatsCache()
 		logger.Printf("[INIT] Stats cache initialized")
 
+		// 源站工作时间后台调度器：每分钟同步 work_status（非工作时间自动禁用）
+		modelsdb.StartEndpointWorkScheduler(appCtx, 1*time.Minute)
+
 		// v2.0.74 阶段AL：探测数据库是否有业务用户，若有则禁用超级管理员并回写 conf。
 		// 触发条件：TAgentHttpUserInfo 非软删除记录数 ≥ 1；
 		// 单向操作：禁用后不会因为用户清空而自动恢复，需要运维手动编辑 conf。

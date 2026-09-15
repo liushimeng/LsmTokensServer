@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
@@ -11,12 +11,90 @@ import { useConfirm } from '../components/ConfirmModal'
 // action: list / add / update / toggle_status / delete / batch_enable / batch_disable / batch_delete / test / list_platforms / list_models
 // 用户端（29001）同名接口仅支持 list / test（只读 + 连通性测试），增删改按钮不展示。
 
+const emptyPeriod = () => ({ start: '09:00:00', end: '18:00:00' })
+// 新增源站默认全天工作（0-24）
+const allDayPeriod = () => ({ start: '00:00:00', end: '24:00:00' })
+
 const emptyForm = {
   id: 0, user_id: 0, platform_name: '', model_name: '',
   protocol_type: 1, auth_type: 0, url_address: '', api_key: '',
+  work_periods: '', // 后端返回 JSON 字符串；编辑态下由 periods 数组驱动
 }
 
-// 按协议+认证方式拼出保存时实际发出的 Request Header（纯前端预览）
+// ========== 工作时间段工具函数 ==========
+
+// 解析 work_periods JSON → [{start, end}]（失败返回全天默认）
+function parsePeriods(jsonStr) {
+  if (!jsonStr) return [allDayPeriod()]
+  try {
+    const arr = JSON.parse(jsonStr)
+    if (Array.isArray(arr) && arr.length > 0) {
+      return arr.map((p) => ({
+        start: (p.start || '').toString(),
+        end: (p.end || '').toString(),
+      }))
+    }
+  } catch { /* 解析失败兜底 */ }
+  return [allDayPeriod()]
+}
+
+// [{start, end}] → JSON 字符串
+function formatPeriods(periods) {
+  return JSON.stringify(periods.map((p) => ({ start: p.start.trim(), end: p.end.trim() })))
+}
+
+// 判断是否全天 00:00:00-24:00:00
+function isAllDay(periods) {
+  if (periods.length !== 1) return false
+  return periods[0].start.trim() === '00:00:00' && periods[0].end.trim() === '24:00:00'
+}
+
+// 校验单段时间格式 HH:MM:SS（允许 24:00:00）
+function validateTimeStr(s) {
+  const m = /^(\d{1,2}):(\d{1,2}):(\d{1,2})$/.exec(s.trim())
+  if (!m) return false
+  const h = parseInt(m[1], 10), mi = parseInt(m[2], 10), se = parseInt(m[3], 10)
+  if (mi > 59 || se > 59) return false
+  if (h === 24) return mi === 0 && se === 0
+  return h >= 0 && h <= 23
+}
+
+// 时间字符串转秒数（用于排序/比较）
+function toSeconds(s) {
+  const m = /^(\d{1,2}):(\d{1,2}):(\d{1,2})$/.exec(s.trim())
+  if (!m) return -1
+  return parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10)
+}
+
+// 校验时间段列表：格式、start < end、不重叠
+function validatePeriods(periods) {
+  for (const p of periods) {
+    if (!validateTimeStr(p.start)) return { ok: false, key: 'dstEndPoint.workPeriodsFormatError', which: 'start' }
+    if (!validateTimeStr(p.end)) return { ok: false, key: 'dstEndPoint.workPeriodsFormatError', which: 'end' }
+    if (toSeconds(p.start) >= toSeconds(p.end)) return { ok: false, key: 'dstEndPoint.workPeriodsOrderError' }
+  }
+  // 检查重叠（按开始时间排序后相邻比较）
+  const sorted = [...periods].sort((a, b) => toSeconds(a.start) - toSeconds(b.start))
+  for (let i = 1; i < sorted.length; i++) {
+    if (toSeconds(sorted[i].start) < toSeconds(sorted[i - 1].end)) {
+      return { ok: false, key: 'dstEndPoint.workPeriodsOverlapError' }
+    }
+  }
+  return { ok: true }
+}
+
+// 友好展示：全天 → "全天"；多段 → 首段 + "..." 悬停显示全部
+function formatPeriodsDisplay(periods, t) {
+  if (isAllDay(periods)) {
+    return { short: t('dstEndPoint.workPeriodsAllDay'), full: '00:00:00 - 24:00:00', isAllDay: true }
+  }
+  const fullList = periods.map((p) => `${p.start} - ${p.end}`).join('\n')
+  const first = `${periods[0].start} - ${periods[0].end}`
+  const short = periods.length > 1 ? `${first} ...` : first
+  return { short, full: fullList, isAllDay: false }
+}
+
+// ========== 按协议+认证方式拼出保存时实际发出的 Request Header（纯前端预览） ==========
 function headerPreview(protocolType, authType, apiKey, isEdit, t) {
   const proto = parseInt(protocolType, 10) || 1
   const auth = parseInt(authType, 10) || 0
@@ -44,6 +122,8 @@ export default function DstEndPointManage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [form, setForm] = useState(null)
+  const [periods, setPeriods] = useState([emptyPeriod()]) // 弹窗内时间段编辑态
+  const [periodsError, setPeriodsError] = useState('')
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
   const [selected, setSelected] = useState(new Set())
@@ -84,9 +164,36 @@ export default function DstEndPointManage() {
     return u ? u.user_name : t('dstEndPoint.userName', { id: uid })
   }
 
+  // 打开弹窗时解析 work_periods（新增默认全天 0-24，编辑回显已有配置）
+  const openForm = (ep = null) => {
+    setPeriodsError('')
+    setFormError('')
+    if (ep) {
+      setForm({ ...emptyForm, ...ep, api_key: '' })
+      setPeriods(parsePeriods(ep.work_periods))
+    } else {
+      setForm({ ...emptyForm })
+      setPeriods([allDayPeriod()])
+    }
+  }
+
+  const closeForm = () => {
+    setForm(null)
+    setPeriodsError('')
+    setFormError('')
+  }
+
   const save = async () => {
     setSaving(true)
     setFormError('')
+    setPeriodsError('')
+    // 校验时间段
+    const v = validatePeriods(periods)
+    if (!v.ok) {
+      setPeriodsError(t(v.key))
+      setSaving(false)
+      return
+    }
     const body = {
       action: form.id ? 'update' : 'add',
       id: form.id || 0,
@@ -96,11 +203,12 @@ export default function DstEndPointManage() {
       protocol_type: parseInt(form.protocol_type, 10) || 1,
       auth_type: parseInt(form.auth_type, 10) || 0,
       url_address: form.url_address,
+      work_periods: formatPeriods(periods),
     }
     if (!form.id || form.api_key) body.api_key = form.api_key
     try {
       await post('DstEndPointManageInterface', body, { timeout: 60000 })
-      setForm(null)
+      closeForm()
       loadData()
     } catch (e) {
       // 保存失败且带连通性详情（data 为对象）时弹测试结果窗，否则表单内联报错
@@ -156,6 +264,29 @@ export default function DstEndPointManage() {
     setSelected(next)
   }
 
+  // 列表工作时间列：显示友好文本，悬停显示全部
+  const workPeriodsColumn = useMemo(() => ({
+    key: 'work_periods',
+    title: t('dstEndPoint.workPeriods'),
+    sortable: false,
+    width: 200,
+    render: (_, ep) => {
+      const p = parsePeriods(ep.work_periods)
+      const display = formatPeriodsDisplay(p, t)
+      const tagClass = ep.work_status == 1 ? 'status-dot status-on' : 'status-dot status-off' // eslint-disable-line eqeqeq
+      const tagText = ep.work_status == 1 ? t('dstEndPoint.workStatusInTime') : t('dstEndPoint.workStatusOffTime') // eslint-disable-line eqeqeq
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <span className={tagClass} title={tagText} />
+          <span title={display.full} style={{ whiteSpace: 'nowrap', cursor: 'default' }}>
+            {display.short}
+          </span>
+          {display.isAllDay ? <span className="badge badge-green" style={{ fontSize: 11, padding: '1px 5px' }}>24h</span> : null}
+        </span>
+      )
+    },
+  }), [t])
+
   const columns = [
     ...(isAdmin ? [{
       key: 'checkbox', title: (
@@ -169,21 +300,37 @@ export default function DstEndPointManage() {
     ...(isAdmin ? [{ key: 'user_id', title: t('dstEndPoint.userLabel'), sortable: true, sortValue: (r) => userName(r.user_id), render: (v) => userName(v) }] : []),
     { key: 'platform_name', title: t('dstEndPoint.platformLabel'), sortable: true },
     { key: 'model_name', title: t('dstEndPoint.modelLabel'), sortable: true },
-    { key: 'protocol_type', title: t('dstEndPoint.protocolLabel'), sortable: true, render: (v) => (v == 1 ? t('dstEndPoint.anthropic') : t('dstEndPoint.openai')) },
+    { key: 'protocol_type', title: t('dstEndPoint.protocolLabel'), sortable: true, render: (v) => (v == 1 ? t('dstEndPoint.anthropic') : t('dstEndPoint.openai')) }, // eslint-disable-line eqeqeq
     { key: 'url_address', title: t('dstEndPoint.urlLabel'), sortable: true, render: (v) => <span style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>{v}</span> },
-    { key: 'status', title: t('dstEndPoint.statusLabel'), sortable: true, render: (v) => <span><span className={`status-dot ${v == 1 ? 'status-on' : 'status-off'}`} />{v == 1 ? t('dstEndPoint.enableAction') : t('dstEndPoint.disableAction')}</span> },
+    workPeriodsColumn,
+    { key: 'status', title: t('dstEndPoint.statusLabel'), sortable: true, render: (v) => <span><span className={`status-dot ${v == 1 ? 'status-on' : 'status-off'}`} />{v == 1 ? t('dstEndPoint.enableAction') : t('dstEndPoint.disableAction')}</span> }, // eslint-disable-line eqeqeq
     {
       key: 'actions', title: t('common.action'),
       render: (_, ep) => (
         <span>
           {isAdmin ? <button className="btn btn-sm" onClick={() => toggleStatus(ep)}>{ep.status == 1 ? t('dstEndPoint.disableAction') : t('dstEndPoint.enableAction')}</button> : null}{' '}
-          {isAdmin ? <button className="btn btn-sm btn-primary" onClick={() => { setForm({ ...emptyForm, ...ep, api_key: '' }); loadNameOptions(ep.user_id) }}>{t('common.edit')}</button> : null}{' '}
+          {isAdmin ? <button className="btn btn-sm btn-primary" onClick={() => openForm(ep)}>{t('common.edit')}</button> : null}{' '}
           <button className="btn btn-sm" onClick={() => testItem(ep)}>{t('dstEndPoint.testConnection')}</button>
           {isAdmin ? <>{' '}<button className="btn btn-sm btn-danger" onClick={() => deleteItem(ep)}>{t('common.delete')}</button></> : null}
         </span>
       ),
     },
   ]
+
+  // 时间段编辑辅助
+  const updatePeriod = (idx, field, value) => {
+    setPeriods((prev) => prev.map((p, i) => (i === idx ? { ...p, [field]: value } : p)))
+  }
+  const addPeriod = () => {
+    setPeriods((prev) => [...prev, emptyPeriod()])
+  }
+  const removePeriod = (idx) => {
+    setPeriods((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)))
+  }
+  const setAllDay = () => {
+    setPeriods([allDayPeriod()])
+    setPeriodsError('')
+  }
 
   return (
     <div className="page">
@@ -194,7 +341,7 @@ export default function DstEndPointManage() {
         ]}
         actions={<>
           <button className="btn" onClick={loadData}>{t('common.refresh')}</button>
-          {isAdmin ? <button className="btn btn-primary" onClick={() => { const uid = users[0]?.id || 0; setForm({ ...emptyForm, user_id: uid }); loadNameOptions(uid) }}>+ {t('dstEndPoint.addEndPoint')}</button>
+          {isAdmin ? <button className="btn btn-primary" onClick={() => { const uid = users[0]?.id || 0; openForm(); setForm((f) => f ? { ...f, user_id: uid } : f); loadNameOptions(uid) }}>+ {t('dstEndPoint.addEndPoint')}</button>
             : null}
         </>}
       />
@@ -211,20 +358,18 @@ export default function DstEndPointManage() {
       {error ? <div className="alert alert-error">{error}</div> : null}
       <div className="card">
         <DataTable columns={columns} rows={endpoints} loading={loading} empty={t('dstEndPoint.noData')} rowKey="id"
-          rowClass={(ep) => (ep.status == 1 ? 'row-enabled' : 'row-disabled')} />
+          rowClass={(ep) => (ep.status == 1 ? 'row-enabled' : 'row-disabled')} /> {/* eslint-disable-line eqeqeq */}
       </div>
 
       {form ? (
         <Modal
           title={form.id ? t('dstEndPoint.editEndPoint') : t('dstEndPoint.addEndPoint')}
-          onClose={() => setForm(null)}
+          onClose={closeForm}
           closeOnOverlayClick={false}
-          footer={
-            <>
-              <button className="btn" onClick={() => setForm(null)}>{t('common.cancel')}</button>
-              <button className="btn btn-primary" disabled={saving} onClick={save}>{t('common.save')}</button>
-            </>
-          }
+          footer={<>
+            <button className="btn" onClick={closeForm}>{t('common.cancel')}</button>
+            <button className="btn btn-primary" disabled={saving} onClick={save}>{t('common.save')}</button>
+          </>}
         >
           {formError ? <div className="alert alert-error">{formError}</div> : null}
           <label className="field"><span>{t('dstEndPoint.userLabel')}</span>
@@ -265,6 +410,42 @@ export default function DstEndPointManage() {
               placeholder={form.id ? t('dstEndPoint.apiKeyKeepUnchanged') : t('dstEndPoint.apiKeyPlaceholder')}
               onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
           </label>
+
+          {/* ===== 工作时间段配置 ===== */}
+          <div className="field"><span>{t('dstEndPoint.workPeriods')}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: '#888' }}>{t('dstEndPoint.workPeriodsHint')}</span>
+                <button type="button" className="btn btn-sm" onClick={setAllDay}>{t('dstEndPoint.workPeriodsAllDay')}</button>
+              </div>
+              {periods.map((p, idx) => (
+                <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, color: '#666', minWidth: 36 }}>{idx + 1}.</span>
+                  <input
+                    style={{ width: 130 }}
+                    placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
+                    value={p.start}
+                    onChange={(e) => updatePeriod(idx, 'start', e.target.value)}
+                  />
+                  <span>→</span>
+                  <input
+                    style={{ width: 130 }}
+                    placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
+                    value={p.end}
+                    onChange={(e) => updatePeriod(idx, 'end', e.target.value)}
+                  />
+                  <button type="button" className="btn btn-sm btn-danger" onClick={() => removePeriod(idx)} disabled={periods.length <= 1}>
+                    {t('dstEndPoint.workPeriodsRemove')}
+                  </button>
+                </div>
+              ))}
+              <div>
+                <button type="button" className="btn btn-sm" onClick={addPeriod}>+ {t('dstEndPoint.workPeriodsAdd')}</button>
+              </div>
+              {periodsError ? <div style={{ color: '#e55', fontSize: 12 }}>{periodsError}</div> : null}
+            </div>
+          </div>
+
           <div className="field"><span>{t('dstEndPoint.headerPreview')}</span>
             <pre style={{ fontSize: 12, background: '#1e1e1e', color: '#d4d4d4', padding: 10, borderRadius: 4, whiteSpace: 'pre-wrap', margin: 0 }}>
               {headerPreview(form.protocol_type, form.auth_type, form.api_key, !!form.id, t)}

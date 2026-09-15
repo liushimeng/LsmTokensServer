@@ -751,11 +751,12 @@ func SyncEconomicRouteEndpoints(routeID uint64, newEndpointIDs []uint64) {
 		routeID, len(added), len(removed), reassigned, len(state.livePool))
 }
 
-// isEndpointEnabled 检查源站是否启用（路由内状态 + 源站本体状态）
+// isEndpointEnabled 检查源站是否启用（路由内状态 + 源站本体状态 + 工作时间状态）
 // 用于 SyncEconomicRouteEndpoints 和 SelectForSession 过滤禁用源站
 // 返回 true 当且仅当：
 //   - 路由内状态 DstEndPointIDStatuses 为 1（启用）或状态列表缺失（默认启用）
-//   - 源站本体 TAgentDstEndPoint.Status 为 1（启用）
+//   - 源站本体 TAgentDstEndPoint.Status 为 1（用户启用）
+//   - 源站 TAgentDstEndPoint.WorkStatus 为 1（当前在工作时间内）
 func isEndpointEnabled(cachedRoute *CachedAIRoute, endpointID uint64) bool {
 	// 检查路由内状态（DstEndPointIDStatuses）
 	if cachedRoute != nil {
@@ -770,10 +771,13 @@ func isEndpointEnabled(cachedRoute *CachedAIRoute, endpointID uint64) bool {
 			}
 		}
 	}
-	// 检查源站本体状态（TAgentDstEndPoint.Status）
+	// 检查源站本体状态（TAgentDstEndPoint.Status + WorkStatus）
 	if ep, ok := GetCachedDstEndPointByID(endpointID); ok {
 		if ep.Status == 0 {
-			return false // 源站本体状态为禁用
+			return false // 用户手动禁用
+		}
+		if ep.WorkStatus == 0 {
+			return false // 当前非工作时间（自动禁用）
 		}
 	}
 	return true
