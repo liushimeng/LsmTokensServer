@@ -86,6 +86,12 @@ func AddDstEndPoint(item *TAgentDstEndPoint) error {
 		item.Status = 1 // 默认启用
 	}
 
+	// 工作时间开关：默认启用（0 值经 API 显式传入表示禁用，但旧调用方未传时补默认 1）
+	// 注意：gorm default:1 会把零值 0 替换为默认值，因此 Create 用 Select 显式列写入真实值
+	if item.WorkEnabled != 0 && item.WorkEnabled != 1 {
+		item.WorkEnabled = 1
+	}
+
 	// 工作时间段：空值补默认全天；校验合法性
 	if item.WorkPeriods == "" {
 		item.WorkPeriods = DefaultWorkPeriodsJSON
@@ -94,15 +100,24 @@ func AddDstEndPoint(item *TAgentDstEndPoint) error {
 		return fmt.Errorf("工作时间段非法: %w", err)
 	}
 
-	// 计算初始 WorkStatus：全天 → 1，非全天按当前时间
-	shouldEnable, _ := ShouldBeEnabledByWorkPeriods(item.WorkPeriods, time.Now())
-	item.WorkStatus = 0
-	if shouldEnable {
+	// 计算初始 WorkStatus：
+	//   WorkEnabled=0（禁用）→ 恒为 1（全天可用）
+	//   WorkEnabled=1（启用）→ 全天时段恒为 1，非全天按当前时间计算
+	if item.WorkEnabled == 0 {
 		item.WorkStatus = 1
+	} else {
+		shouldEnable, _ := ShouldBeEnabledByWorkPeriods(item.WorkPeriods, time.Now())
+		item.WorkStatus = 0
+		if shouldEnable {
+			item.WorkStatus = 1
+		}
 	}
 
-	// 创建记录
-	err := database.DB.Table(AgentDstEndPointTableName).Create(item).Error
+	// 创建记录（Select 显式列出含默认值列，保证 WorkEnabled=0 / Status=0 等零值不被 gorm default 覆盖）
+	err := database.DB.Table(AgentDstEndPointTableName).
+		Select("UserID", "PlatformName", "ModelName", "ProtocolType", "URLAddress", "APIKey", "AuthType",
+			"Status", "WorkEnabled", "WorkPeriods", "WorkStatus").
+		Create(item).Error
 	if err != nil {
 		return fmt.Errorf("failed to create dst endpoint: %w", err)
 	}
@@ -145,7 +160,11 @@ func UpdateDstEndPoint(item *TAgentDstEndPoint) error {
 		return err
 	}
 
-	// 工作时间段：空值保留原值（不修改）；非空则校验并计算 WorkStatus
+	// 工作时间开关：0=禁用（全天可用）1=启用（按时间段），非法值兜底 1
+	// API 层负责把"未提供"解析为原值，因此此处 WorkEnabled 始终是最终值、直接写入
+	if item.WorkEnabled != 0 && item.WorkEnabled != 1 {
+		item.WorkEnabled = 1
+	}
 	updateMap := map[string]interface{}{
 		"platform_name": item.PlatformName,
 		"model_name":    item.ModelName,
@@ -153,20 +172,32 @@ func UpdateDstEndPoint(item *TAgentDstEndPoint) error {
 		"url_address":   item.URLAddress,
 		"api_key":       item.APIKey,
 		"status":        item.Status,
+		"work_enabled":  item.WorkEnabled,
 	}
 
 	if item.WorkPeriods != "" {
 		if err := ValidateWorkPeriodsJSON(item.WorkPeriods); err != nil {
 			return fmt.Errorf("工作时间段非法: %w", err)
 		}
+		updateMap["work_periods"] = item.WorkPeriods
+	}
+
+	// WorkStatus 重算：
+	//   WorkEnabled=0（禁用）→ 恒为 1（全天可用），立即生效（不等 scheduler 下一轮）
+	//   WorkEnabled=1 且提供了时间段 → 按当前时间计算
+	//   WorkEnabled=1 且未提供时间段 → 保留原值（scheduler 下一轮按 DB 时间段校正）
+	switch {
+	case item.WorkEnabled == 0:
+		item.WorkStatus = 1
+		updateMap["work_status"] = 1
+	case item.WorkPeriods != "":
 		shouldEnable, _ := ShouldBeEnabledByWorkPeriods(item.WorkPeriods, time.Now())
 		workStatus := 0
 		if shouldEnable {
 			workStatus = 1
 		}
-		updateMap["work_periods"] = item.WorkPeriods
-		updateMap["work_status"] = workStatus
 		item.WorkStatus = workStatus
+		updateMap["work_status"] = workStatus
 	}
 
 	// 更新记录

@@ -64,6 +64,11 @@ type TAgentDstEndPoint struct {
 	AuthType int `json:"auth_type" gorm:"default:0;index;comment:认证头:0=协议默认,1=x-api-key,2=Authorization Bearer"`
 	Status   int `json:"status" gorm:"index;comment:状态:1=启用,0=禁用"`
 
+	// WorkEnabled 工作时间功能开关：1=启用（按 WorkPeriods 时间段控制可用性），
+	// 0=禁用（工作时间功能不生效，0-24 全天可用，WorkStatus 恒为 1）。
+	// 禁用时不删除 WorkPeriods 配置，便于重新启用时恢复原时间段。
+	WorkEnabled int `json:"work_enabled" gorm:"column:work_enabled;default:1;index;comment:工作时间开关:1=启用时间段控制,0=禁用(全天可用)"`
+
 	// WorkPeriods 工作时间段 JSON 数组，格式 [{"start":"HH:MM:SS","end":"HH:MM:SS"}]。
 	// 默认 [{"start":"00:00:00","end":"24:00:00"}] 表示全天工作。
 	// 支持多段，精确到秒；24:00:00 表示当天结束（合法）。
@@ -72,7 +77,7 @@ type TAgentDstEndPoint struct {
 
 	// WorkStatus 工作时间驱动的可用状态：1=当前在工作时间内（可用），0=当前在非工作时间（禁用）。
 	// 后台 endpoint_work_scheduler 每分钟刷新；代理热路径 / 经济型算法据此判断可用性。
-	// 全天工作（默认）时恒为 1，仅当 status=1（用户启用）且 work_status=1 时源站才真正可用。
+	// WorkEnabled=0（禁用）时恒为 1；仅当 status=1（用户启用）且 work_status=1 时源站才真正可用。
 	WorkStatus int `json:"work_status" gorm:"column:work_status;default:1;index;comment:工作时间状态:1=在工作时间,0=非工作时间"`
 }
 

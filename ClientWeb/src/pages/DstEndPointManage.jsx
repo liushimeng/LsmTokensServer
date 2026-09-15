@@ -19,6 +19,7 @@ const emptyForm = {
   id: 0, user_id: 0, platform_name: '', model_name: '',
   protocol_type: 1, auth_type: 0, url_address: '', api_key: '',
   work_periods: '', // 后端返回 JSON 字符串；编辑态下由 periods 数组驱动
+  work_enabled: 1,  // 工作时间控制开关：1=启用（按时间段），0=禁用（全天可用）
 }
 
 // ========== 工作时间段工具函数 ==========
@@ -187,12 +188,15 @@ export default function DstEndPointManage() {
     setSaving(true)
     setFormError('')
     setPeriodsError('')
-    // 校验时间段
-    const v = validatePeriods(periods)
-    if (!v.ok) {
-      setPeriodsError(t(v.key))
-      setSaving(false)
-      return
+    const workEnabled = parseInt(form.work_enabled, 10) === 0 ? 0 : 1
+    // 校验时间段（仅启用工作时间控制时校验；禁用=全天可用，时段仅保留配置）
+    if (workEnabled === 1) {
+      const v = validatePeriods(periods)
+      if (!v.ok) {
+        setPeriodsError(t(v.key))
+        setSaving(false)
+        return
+      }
     }
     const body = {
       action: form.id ? 'update' : 'add',
@@ -203,6 +207,7 @@ export default function DstEndPointManage() {
       protocol_type: parseInt(form.protocol_type, 10) || 1,
       auth_type: parseInt(form.auth_type, 10) || 0,
       url_address: form.url_address,
+      work_enabled: workEnabled,
       work_periods: formatPeriods(periods),
     }
     if (!form.id || form.api_key) body.api_key = form.api_key
@@ -265,18 +270,32 @@ export default function DstEndPointManage() {
   }
 
   // 列表工作时间列：截断显示友好文本，悬停通过 data-tooltip 显示完整时间段 + 状态
+  // work_enabled=0（禁用工作时间控制）→ 显示"全天可用"+ 已停用徽标，状态点恒绿
   const workPeriodsColumn = useMemo(() => ({
     key: 'work_periods',
     title: t('dstEndPoint.workPeriods'),
     sortable: false,
     className: 'cell-nowrap',
     render: (_, ep) => {
+      const workEnabled = ep.work_enabled != 0 // eslint-disable-line eqeqeq
       const p = parsePeriods(ep.work_periods)
       const display = formatPeriodsDisplay(p, t)
-      // 完整悬停信息：所有时间段逐行 + 当前工作时间状态
+      // 完整悬停信息：控制开关状态 + 所有时间段逐行 + 当前工作时间状态
       const statusLine = ep.work_status == 1 ? t('dstEndPoint.workStatusInTime') : t('dstEndPoint.workStatusOffTime') // eslint-disable-line eqeqeq
-      const fullTooltip = display.full + '\n[' + statusLine + ']'
-      const tagClass = ep.work_status == 1 ? 'status-dot status-on' : 'status-dot status-off' // eslint-disable-line eqeqeq
+      const enableLine = workEnabled ? t('dstEndPoint.workEnabledOn') : t('dstEndPoint.workEnabledOff')
+      const fullTooltip = (workEnabled ? '' : '[' + t('dstEndPoint.workDisabledTip') + ']\n') + display.full + '\n[' + statusLine + ']'
+      const inTime = workEnabled ? ep.work_status == 1 : true // eslint-disable-line eqeqeq
+      const tagClass = inTime ? 'status-dot status-on' : 'status-dot status-off'
+      if (!workEnabled) {
+        // 禁用工作时间控制：全天可用 + "已停用"徽标，配置时段仅在悬停中展示
+        return (
+          <span data-tooltip={fullTooltip} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle' }}>
+            <span className={tagClass} style={{ flexShrink: 0 }} />
+            <span className="truncate" style={{ maxWidth: 150 }}>{display.isAllDay ? display.short : t('dstEndPoint.workPeriodsAllDay')}</span>
+            <span className="badge" style={{ fontSize: 11, padding: '1px 5px', flexShrink: 0 }} data-tooltip={enableLine}>{t('dstEndPoint.workDisabledTag')}</span>
+          </span>
+        )
+      }
       return (
         <span
           data-tooltip={fullTooltip}
@@ -416,38 +435,62 @@ export default function DstEndPointManage() {
               onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
           </label>
 
-          {/* ===== 工作时间段配置 ===== */}
-          <div className="field"><span>{t('dstEndPoint.workPeriods')}</span>
+          {/* ===== 工作时间控制（启用/禁用 + 时间段配置） ===== */}
+          <div className="field"><span>{t('dstEndPoint.workEnabled')}</span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+              {/* 启用/禁用开关：禁用 = 工作时间功能不生效，0-24 全天可用 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, color: '#888' }}>{t('dstEndPoint.workPeriodsHint')}</span>
-                <button type="button" className="btn btn-sm" onClick={setAllDay}>{t('dstEndPoint.workPeriodsAllDay')}</button>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, margin: 0, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={parseInt(form.work_enabled, 10) !== 0}
+                    onChange={(e) => setForm({ ...form, work_enabled: e.target.checked ? 1 : 0 })}
+                  />
+                  {parseInt(form.work_enabled, 10) !== 0 ? t('dstEndPoint.workEnabledOn') : t('dstEndPoint.workEnabledOff')}
+                </label>
               </div>
-              {periods.map((p, idx) => (
-                <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12, color: '#666', minWidth: 36 }}>{idx + 1}.</span>
-                  <input
-                    style={{ width: 130 }}
-                    placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
-                    value={p.start}
-                    onChange={(e) => updatePeriod(idx, 'start', e.target.value)}
-                  />
-                  <span>→</span>
-                  <input
-                    style={{ width: 130 }}
-                    placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
-                    value={p.end}
-                    onChange={(e) => updatePeriod(idx, 'end', e.target.value)}
-                  />
-                  <button type="button" className="btn btn-sm btn-danger" onClick={() => removePeriod(idx)} disabled={periods.length <= 1}>
-                    {t('dstEndPoint.workPeriodsRemove')}
-                  </button>
+              {/* 禁用提示：时间段配置保留但置灰，便于重新启用时恢复 */}
+              {parseInt(form.work_enabled, 10) === 0 ? (
+                <div className="alert" style={{ fontSize: 12, padding: '6px 10px', margin: 0, background: '#f8f9fa', color: '#666', border: '1px dashed #ddd' }}>
+                  {t('dstEndPoint.workDisabledTip')}
                 </div>
-              ))}
-              <div>
-                <button type="button" className="btn btn-sm" onClick={addPeriod}>+ {t('dstEndPoint.workPeriodsAdd')}</button>
+              ) : null}
+              {/* 时间段编辑区：禁用时整体置灰只读 */}
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 6,
+                opacity: parseInt(form.work_enabled, 10) === 0 ? 0.5 : 1,
+                pointerEvents: parseInt(form.work_enabled, 10) === 0 ? 'none' : 'auto',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, color: '#888' }}>{t('dstEndPoint.workPeriodsHint')}</span>
+                  <button type="button" className="btn btn-sm" onClick={setAllDay}>{t('dstEndPoint.workPeriodsAllDay')}</button>
+                </div>
+                {periods.map((p, idx) => (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, color: '#666', minWidth: 36 }}>{idx + 1}.</span>
+                    <input
+                      style={{ width: 130 }}
+                      placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
+                      value={p.start}
+                      onChange={(e) => updatePeriod(idx, 'start', e.target.value)}
+                    />
+                    <span>→</span>
+                    <input
+                      style={{ width: 130 }}
+                      placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
+                      value={p.end}
+                      onChange={(e) => updatePeriod(idx, 'end', e.target.value)}
+                    />
+                    <button type="button" className="btn btn-sm btn-danger" onClick={() => removePeriod(idx)} disabled={periods.length <= 1}>
+                      {t('dstEndPoint.workPeriodsRemove')}
+                    </button>
+                  </div>
+                ))}
+                <div>
+                  <button type="button" className="btn btn-sm" onClick={addPeriod}>+ {t('dstEndPoint.workPeriodsAdd')}</button>
+                </div>
+                {periodsError ? <div style={{ color: '#e55', fontSize: 12 }}>{periodsError}</div> : null}
               </div>
-              {periodsError ? <div style={{ color: '#e55', fontSize: 12 }}>{periodsError}</div> : null}
             </div>
           </div>
 

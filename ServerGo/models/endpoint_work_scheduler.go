@@ -86,6 +86,7 @@ func endpointWorkSchedulerLoop() {
 
 // syncAllEndpointWorkStatus 遍历所有缓存源站，同步 WorkStatus。
 // 规则：
+//   - WorkEnabled=0（工作时间功能禁用）：WorkStatus 恒为 1（0-24 全天可用），不参与时间段计算。
 //   - 全天工作：WorkStatus 恒为 1。
 //   - 非全天：当前时间在任一工作时间段内 → WorkStatus=1，否则 0。
 func syncAllEndpointWorkStatus() {
@@ -97,6 +98,14 @@ func syncAllEndpointWorkStatus() {
 	var changed int
 	for _, ep := range endpoints {
 		if ep == nil {
+			continue
+		}
+		// 工作时间功能禁用：全天可用，确保 WorkStatus=1（兜底修复历史异常值）
+		if ep.WorkEnabled == 0 {
+			if ep.WorkStatus != 1 {
+				updateEndpointWorkStatus(ep.ID, 1)
+				changed++
+			}
 			continue
 		}
 		shouldEnable, allDay := ShouldBeEnabledByWorkPeriods(ep.WorkPeriods, now)

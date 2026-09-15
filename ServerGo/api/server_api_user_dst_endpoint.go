@@ -93,6 +93,7 @@ func handleUserDstEndPointList(w http.ResponseWriter, claims *UserTokenClaims) {
 			"protocol_type": ep.ProtocolType,
 			"url_address":   ep.URLAddress,
 			"status":        ep.Status,
+			"work_enabled":  ep.WorkEnabled,
 			"work_periods":  ep.WorkPeriods,
 			"work_status":   ep.WorkStatus,
 		})

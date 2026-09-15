@@ -30,6 +30,9 @@ func dstEndPointManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		AuthType     int      `json:"auth_type"`
 		Status       int      `json:"status"`
 		WorkPeriods  string   `json:"work_periods"`
+		// WorkEnabled 工作时间开关（1=启用时间段控制，0=禁用=全天可用）。
+		// 指针类型区分"未提供"（保留原值）与"明确禁用"（0），前端表单始终显式传值。
+		WorkEnabled *int `json:"work_enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		json.NewEncoder(w).Encode(userManageResp{Success: false, Message: "请求解析失败: " + err.Error()})
@@ -72,6 +75,7 @@ func dstEndPointManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 				"url_address":   ep.URLAddress,
 				"auth_type":     ep.AuthType,
 				"status":        ep.Status,
+				"work_enabled":  ep.WorkEnabled,
 				"work_periods":  ep.WorkPeriods,
 				"work_status":   ep.WorkStatus,
 			})
@@ -101,6 +105,12 @@ func dstEndPointManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			APIKey:       strings.TrimSpace(req.APIKey),
 			AuthType:     req.AuthType,
 			WorkPeriods:  strings.TrimSpace(req.WorkPeriods),
+		}
+		// 工作时间开关：未提供（nil）→ 默认启用；显式 0/1 → 按传入值
+		if req.WorkEnabled != nil {
+			item.WorkEnabled = *req.WorkEnabled
+		} else {
+			item.WorkEnabled = 1
 		}
 		// 保存前进行 API 连通性测试；失败时返回完整的请求/响应信息（含 header + body），
 		// 方便用户在前端弹窗中排查配置错误（URL / API Key / 模型名 / 协议类型等）
@@ -138,6 +148,18 @@ func dstEndPointManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// 工作时间段：未提供 → 保留原值；工作时间开关：未提供 → 保留原值（兼容旧客户端）
+		workPeriods := strings.TrimSpace(req.WorkPeriods)
+		if workPeriods == "" {
+			workPeriods = oldItem.WorkPeriods
+		}
+		workEnabled := oldItem.WorkEnabled
+		if req.WorkEnabled != nil {
+			workEnabled = *req.WorkEnabled
+		}
+		if workEnabled != 0 && workEnabled != 1 {
+			workEnabled = 1
+		}
 		item := &modelsdb.TAgentDstEndPoint{
 			ID:           req.ID,
 			UserID:       req.UserID,
@@ -148,7 +170,8 @@ func dstEndPointManageInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			APIKey:       apiKey,
 			AuthType:     req.AuthType,
 			Status:       oldItem.Status, // 保留原状态，编辑时不修改启用/禁用状态
-			WorkPeriods:  strings.TrimSpace(req.WorkPeriods),
+			WorkEnabled:  workEnabled,
+			WorkPeriods:  workPeriods,
 		}
 		if err := modelsdb.UpdateDstEndPoint(item); err != nil {
 			json.NewEncoder(w).Encode(userManageResp{Success: false, Message: err.Error()})
