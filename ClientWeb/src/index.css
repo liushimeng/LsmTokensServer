@@ -196,6 +196,55 @@ a { color: var(--primary); text-decoration: none; }
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .status-on { background: var(--ok); } .status-off { background: #9ca3af; }
 
+/* ===== 通用悬停提示（支持多行完整信息） ===== */
+/* 用法：任意元素添加 data-tooltip="提示文字"，悬停显示多行 tooltip；
+   data-tooltip-pos 可选 top（默认）/ bottom / left / right */
+[data-tooltip] { position: relative; cursor: help; }
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 200;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  padding: 7px 10px;
+  min-width: 80px;
+  max-width: 360px;
+  background: rgba(15, 23, 42, 0.96);
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.55;
+  font-weight: 400;
+  white-space: pre-line;          /* 保留 \n 换行 */
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.25);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .15s ease, visibility .15s ease;
+}
+[data-tooltip]::before {
+  content: '';
+  position: absolute;
+  z-index: 200;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(15, 23, 42, 0.96);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .15s ease, visibility .15s ease;
+}
+[data-tooltip]:hover::after,
+[data-tooltip]:hover::before { opacity: 1; visibility: visible; }
+/* 下方定位（空间不够时自动用 data-tooltip-pos="bottom"） */
+[data-tooltip][data-tooltip-pos="bottom"]::after { bottom: auto; top: calc(100% + 8px); }
+[data-tooltip][data-tooltip-pos="bottom"]::before { bottom: auto; top: calc(100% + 2px); border-top-color: transparent; border-bottom-color: rgba(15, 23, 42, 0.96); }
+/* 内容截断省略 + 悬停完整展示的场景（如表格列宽受限） */
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* 登录页 */
 .login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #1e293b, #0f172a); }
 .login-card { background: var(--panel); border-radius: 12px; padding: 36px; width: 380px; box-shadow: 0 20px 50px rgba(0,0,0,.3); }
@@ -274,6 +323,11 @@ a { color: var(--primary); text-decoration: none; }
 .algo-badge.algo-1 { background: #dbeafe; color: #1e40af; }
 .algo-badge.algo-2 { background: #ede9fe; color: #6f42c1; }
 .algo-badge.algo-3 { background: #fed7aa; color: #c2410c; }
+/* 通用徽标（工作时间 24h 标签等） */
+.badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 1.4; white-space: nowrap; background: #e5e7eb; color: #374151; }
+.badge-green { background: #d1fae5; color: #065f46; }
+.badge-red { background: #fee2e2; color: #991b1b; }
+.badge-blue { background: #dbeafe; color: #1e40af; }
 /* 窄屏分级隐藏次要折叠字段，保证单行布局稳定 */
 @media (max-width: 1280px) {
   .collapsed-last.failure { display: none; }

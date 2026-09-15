@@ -264,24 +264,29 @@ export default function DstEndPointManage() {
     setSelected(next)
   }
 
-  // 列表工作时间列：显示友好文本，悬停显示全部
+  // 列表工作时间列：截断显示友好文本，悬停通过 data-tooltip 显示完整时间段 + 状态
   const workPeriodsColumn = useMemo(() => ({
     key: 'work_periods',
     title: t('dstEndPoint.workPeriods'),
     sortable: false,
-    width: 200,
+    className: 'cell-nowrap',
     render: (_, ep) => {
       const p = parsePeriods(ep.work_periods)
       const display = formatPeriodsDisplay(p, t)
+      // 完整悬停信息：所有时间段逐行 + 当前工作时间状态
+      const statusLine = ep.work_status == 1 ? t('dstEndPoint.workStatusInTime') : t('dstEndPoint.workStatusOffTime') // eslint-disable-line eqeqeq
+      const fullTooltip = display.full + '\n[' + statusLine + ']'
       const tagClass = ep.work_status == 1 ? 'status-dot status-on' : 'status-dot status-off' // eslint-disable-line eqeqeq
-      const tagText = ep.work_status == 1 ? t('dstEndPoint.workStatusInTime') : t('dstEndPoint.workStatusOffTime') // eslint-disable-line eqeqeq
       return (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span className={tagClass} title={tagText} />
-          <span title={display.full} style={{ whiteSpace: 'nowrap', cursor: 'default' }}>
+        <span
+          data-tooltip={fullTooltip}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle' }}
+        >
+          <span className={tagClass} style={{ flexShrink: 0 }} />
+          <span className="truncate" style={{ maxWidth: 150 }}>
             {display.short}
           </span>
-          {display.isAllDay ? <span className="badge badge-green" style={{ fontSize: 11, padding: '1px 5px' }}>24h</span> : null}
+          {display.isAllDay ? <span className="badge badge-green" style={{ fontSize: 11, padding: '1px 5px', flexShrink: 0 }}>24h</span> : null}
         </span>
       )
     },
