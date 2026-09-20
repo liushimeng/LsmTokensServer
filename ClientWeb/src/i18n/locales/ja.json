@@ -1181,6 +1181,8 @@
   "dstEndPoint.urlLabel": "URL",
   "dstEndPoint.statusLabel": "ステータス",
   "dstEndPoint.userMode": "ユーザーモード：読み取り専用リスト + 接続テスト",
+  "dstEndPoint.sortHint": "カスタム列ソートが適用されています。更新・送信後もこの並び順が保持されます",
+  "dstEndPoint.resetDefaultSort": "デフォルトの並び順に戻す",
   "dstEndPoint.selectedCountMax": "{count} 件選択中（一度に最大 500 件）",
   "dstEndPoint.cancelSelection": "選択解除",
   "dstEndPoint.platformNamePlaceholder": "例: Anthropic, OpenAI",

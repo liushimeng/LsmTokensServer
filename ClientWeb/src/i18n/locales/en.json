@@ -1247,6 +1247,8 @@
   "dstEndPoint.urlLabel": "URL",
   "dstEndPoint.statusLabel": "Status",
   "dstEndPoint.userMode": "User mode: read-only list + connectivity test",
+  "dstEndPoint.sortHint": "Custom column sort is active — refreshing or submitting modal will preserve this order",
+  "dstEndPoint.resetDefaultSort": "Reset default sort",
   "dstEndPoint.selectedCountMax": "{count} selected (max 500 per batch)",
   "dstEndPoint.cancelSelection": "Clear selection",
   "dstEndPoint.platformNamePlaceholder": "e.g. Anthropic, OpenAI",

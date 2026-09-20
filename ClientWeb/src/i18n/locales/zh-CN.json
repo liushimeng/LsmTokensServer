@@ -822,6 +822,8 @@
   "dstEndPoint.selectAll": "全选",
   "dstEndPoint.selectEndpoints": "请先选择要操作的源站",
   "dstEndPoint.selectedCountMax": "已选择 {count} 条（单次最多 500 条）",
+  "dstEndPoint.sortHint": "当前表格已应用自定义列排序，刷新页面/弹窗提交后顺序会沿用此排序",
+  "dstEndPoint.resetDefaultSort": "恢复默认排序",
   "dstEndPoint.statusLabel": "状态",
   "dstEndPoint.testConnection": "测试连接",
   "dstEndPoint.testFailed": "测试失败",

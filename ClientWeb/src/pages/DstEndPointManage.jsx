@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { post } from '../shared/api'
 import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
@@ -131,6 +131,8 @@ export default function DstEndPointManage() {
   const [testResult, setTestResult] = useState(null) // {success,message,data}
   const [platformOptions, setPlatformOptions] = useState([]) // list_platforms 去重平台名（可编辑弹窗 datalist）
   const [modelOptions, setModelOptions] = useState([])       // list_models 去重模型名
+  // 阶段CK：表格当前列排序状态；用于显示「恢复默认排序」按钮，确保弹窗提交/刷新后顺序不变
+  const [tableSort, setTableSort] = useState(null)
 
   // 弹窗打开 / 切换所属用户时刷新平台名与模型名候选（仅管理端，供 datalist 下拉选择）
   const loadNameOptions = useCallback((userId) => {
@@ -142,6 +144,10 @@ export default function DstEndPointManage() {
       .catch(() => setModelOptions([]))
   }, [])
 
+  // 阶段CK：用 ref 缓存当前 endpoints，避免 loadData 因 endpoints 变化导致 effect 循环
+  const endpointsRef = useRef([])
+  useEffect(() => { endpointsRef.current = endpoints }, [endpoints])
+
   const loadData = useCallback(() => {
     setLoading(true)
     setError('')
@@ -152,7 +158,21 @@ export default function DstEndPointManage() {
     ])
       .then(([u, e]) => {
         setUsers((u && u.data) || [])
-        setEndpoints((e && e.data) || [])
+        // 阶段CK：保存当前行 id 集合，确保重新加载后保持既有记录的相对顺序：
+        // 服务端按 id ASC 已是稳定顺序，但若用户曾点击列排序，DataTable 会按用户列排序展示；
+        // 此处仅做"稳定去抖"——若服务端返回顺序与当前顺序完全一致（除新增/删除），则保留当前顺序，
+        // 这样视觉上原数据位置不变，新增数据按服务端顺序追加到末尾。
+        const prev = endpointsRef.current
+        const prevIds = prev.map((ep) => ep.id)
+        const next = (e && e.data) || []
+        if (prevIds.length > 0) {
+          const prevSet = new Set(prevIds)
+          const kept = prevIds.filter((id) => next.some((x) => x.id === id)).map((id) => next.find((x) => x.id === id))
+          const added = next.filter((x) => !prevSet.has(x.id))
+          setEndpoints([...kept, ...added])
+        } else {
+          setEndpoints(next)
+        }
       })
       .catch((e2) => setError(e2.message))
       .finally(() => setLoading(false))
@@ -269,6 +289,22 @@ export default function DstEndPointManage() {
     setSelected(next)
   }
 
+  // 阶段CK：恢复默认排序——清空持久化的列排序状态并强制 DataTable 重挂载（key 变化）回到服务端默认顺序
+  const [tableResetNonce, setTableResetNonce] = useState(0)
+  const resetTableSort = () => {
+    try {
+      const role = (typeof __APP_ROLE__ !== 'undefined' && __APP_ROLE__) || 'common'
+      window.localStorage.removeItem(`lsm:datatable:sort:${role}:${window.location.pathname}`)
+    } catch { /* 忽略 */ }
+    setTableSort(null)
+    setTableResetNonce((n) => n + 1)
+  }
+  // 阶段CK：DataTable 排序变化感知；同步到 tableSort 用于显示按钮
+  const onTableSortChange = (sort) => {
+    setTableSort(sort)
+  }
+  const hasUserSort = tableSort && tableSort.key && tableSort.dir
+
   // 列表工作时间列：截断显示友好文本，悬停通过 data-tooltip 显示完整时间段 + 状态
   // work_enabled=0（禁用工作时间控制）→ 显示"全天可用"+ 已停用徽标，状态点恒绿
   const workPeriodsColumn = useMemo(() => ({
@@ -380,9 +416,16 @@ export default function DstEndPointManage() {
         </div>
       ) : null}
       {error ? <div className="alert alert-error">{error}</div> : null}
+      {hasUserSort ? (
+        <div className="toolbar" style={{ marginBottom: 8 }}>
+          <span>{t('dstEndPoint.sortHint')}</span>
+          <button className="btn btn-sm" onClick={resetTableSort}>{t('dstEndPoint.resetDefaultSort')}</button>
+        </div>
+      ) : null}
       <div className="card">
-        <DataTable columns={columns} rows={endpoints} loading={loading} empty={t('dstEndPoint.noData')} rowKey="id"
-          rowClass={(ep) => (ep.status == 1 ? 'row-enabled' : 'row-disabled')} /> {/* eslint-disable-line eqeqeq */}
+        <DataTable key={`dst-endpoint-${tableResetNonce}`} columns={columns} rows={endpoints} loading={loading} empty={t('dstEndPoint.noData')} rowKey="id"
+          rowClass={(ep) => (ep.status == 1 ? 'row-enabled' : 'row-disabled')}
+          onSortChange={onTableSortChange} /> {/* eslint-disable-line eqeqeq */}
       </div>
 
       {form ? (

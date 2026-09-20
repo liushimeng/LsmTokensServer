@@ -8,8 +8,20 @@
 // renderCollapsedRow(row, onToggle)：折叠时自定义跨行摘要（优先级最高）。
 // collapsedHiddenColumns: [key1, key2]：折叠时隐藏指定列，其余列正常显示但单行紧凑（与 renderCollapsedRow 二选一）。
 // sortStorageKey: 传入后排序状态持久化到 localStorage（{key, dir}），刷新后恢复；key 失效或列不可排序时自动忽略。
-import { useEffect, useMemo, useState } from 'react'
+// enableSortPersist（默认 true）：未传 sortStorageKey 时，按路径+角色自动生成 localStorage key，
+//   让"刷新后保持用户当前列排序"对所有页面默认生效（提交/刷新后顺序不会跳）。
+// onSortChange(sort|null)：排序变化时回调，父组件可用此暴露"恢复默认排序"按钮。
+//   v2.0.79 阶段CK：弹出式窗口提交后表格顺序稳定性全面优化新增。
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
+
+// 根据当前路径+角色生成稳定的 sortStorageKey（避免不同页面相互覆盖）
+function defaultSortStorageKey() {
+  if (typeof window === 'undefined') return ''
+  const role = (typeof __APP_ROLE__ !== 'undefined' && __APP_ROLE__) || 'common'
+  const p = window.location && window.location.pathname ? window.location.pathname : 'global'
+  return `lsm:datatable:sort:${role}:${p}`
+}
 
 // 数值优先数值比较，其余中文 localeCompare；null/undefined 恒排末尾
 function compare(a, b) {
@@ -24,13 +36,22 @@ function compare(a, b) {
 }
 
 export default function DataTable({ columns, rows, loading, empty, rowKey, cardMode = true, rowClass,
-  collapsible, collapsedIds, onToggleCollapse, renderCollapsedRow, collapsedHiddenColumns = [], sortStorageKey }) {
+  collapsible, collapsedIds, onToggleCollapse, renderCollapsedRow, collapsedHiddenColumns = [], sortStorageKey,
+  enableSortPersist = true, onSortChange }) {
   const { t } = useI18n()
-  // 排序状态：{key, dir: 1|-1}；sortStorageKey 存在时从 localStorage 恢复并持久化
+  // 排序状态：{key, dir: 1|-1}；
+  // 1) sortStorageKey 显式传入时按其持久化；
+  // 2) enableSortPersist（默认 true）且未显式传入 sortStorageKey 时，按路径+角色自动生成 localStorage key 持久化。
+  const effectiveStorageKey = useMemo(() => {
+    if (sortStorageKey) return sortStorageKey
+    if (enableSortPersist) return defaultSortStorageKey()
+    return ''
+  }, [sortStorageKey, enableSortPersist])
+  // 排序状态：{key, dir: 1|-1}；effectiveStorageKey 存在时从 localStorage 恢复并持久化
   const [sort, setSort] = useState(() => {
-    if (!sortStorageKey) return null
+    if (!effectiveStorageKey) return null
     try {
-      const raw = window.localStorage.getItem(sortStorageKey)
+      const raw = window.localStorage.getItem(effectiveStorageKey)
       if (!raw) return null
       const s = JSON.parse(raw)
       // 校验：列仍存在且可排序、方向合法，否则丢弃记忆
@@ -40,12 +61,20 @@ export default function DataTable({ columns, rows, loading, empty, rowKey, cardM
     } catch { return null }
   })
   useEffect(() => {
-    if (!sortStorageKey) return
+    if (!effectiveStorageKey) return
     try {
-      if (sort) window.localStorage.setItem(sortStorageKey, JSON.stringify(sort))
-      else window.localStorage.removeItem(sortStorageKey)
+      if (sort) window.localStorage.setItem(effectiveStorageKey, JSON.stringify(sort))
+      else window.localStorage.removeItem(effectiveStorageKey)
     } catch { /* 忽略 */ }
-  }, [sort, sortStorageKey])
+  }, [sort, effectiveStorageKey])
+  // 排序变化回调（用于父组件显示"恢复默认排序"按钮等）
+  const lastReportedSort = useRef(null)
+  useEffect(() => {
+    if (typeof onSortChange !== 'function') return
+    if (lastReportedSort.current === sort) return
+    lastReportedSort.current = sort
+    onSortChange(sort)
+  }, [sort, onSortChange])
 
   if (!empty) empty = t('datatable.noData')
 
