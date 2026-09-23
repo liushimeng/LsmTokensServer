@@ -1,5 +1,12 @@
 // 详情头部组件：协议流向 + KPI 卡片 + 请求信息行
+// v2.0.7x 阶段CN：KPI 网格新增第 5 张「IP 地址」卡（数据源交易表字段
+//   TAgentHttpTransactionDataItem.RequestRemoteAddr / JSON request_remote_addr，
+//   列表接口白名单 selectTransactionColumns() 已包含该列，后端零改动），
+//   与「耗时 / 输入 Tokens / 输出 Tokens / 请求·响应大小」同行展示：
+//   主值 = host（等宽字体，IPv6 过长自动折行不截断），副行 = 端口，
+//   title 悬浮展示落库原始值（形如 10.0.0.5:54321 / [2408:8207::1]:443）便于排查与复制。
 import { fmtTime, fmtNum, fmtBytes, fmtMs } from '../../shared/format'
+import { fmtRemoteAddr } from '../../shared/remoteAddr'
 import { protocolName, protocolBadgeClass, protocolBadgeText, protocolBadgeTitle, ALGO_TYPE_CONVERTER } from './constants'
 import { useI18n } from '../../i18n'
 
@@ -10,6 +17,7 @@ export default function DetailHeader({ row }) {
   const algoType = row.dst_endpoint_algorithm_type
   const isConvert = algoType === ALGO_TYPE_CONVERTER
   const statusOk = String(row.response_status).startsWith('2')
+  const remoteAddr = fmtRemoteAddr(row.request_remote_addr)
 
   return (
     <header className="detail-head">
@@ -48,6 +56,16 @@ export default function DetailHeader({ row }) {
         <div className="detail-head-card">
           <span className="dhc-label">📦 {t('chatAnalysis.reqRespSize')}</span>
           <span className="dhc-value">{fmtBytes(row.request_content_length)} / {fmtBytes(row.response_content_length)}</span>
+        </div>
+        {/* 阶段CN：客户端 IP 地址（request_remote_addr），与上面 4 项同一行栅格 */}
+        <div className="detail-head-card">
+          <span className="dhc-label">🌐 {t('chatAnalysis.clientIp')}</span>
+          <span className="dhc-value dhc-value-mono dhc-value-wrap" title={row.request_remote_addr || remoteAddr.display}>
+            {remoteAddr.host || remoteAddr.display}
+          </span>
+          {remoteAddr.port ? (
+            <span className="dhc-sub dhc-sub-mono">{t('chatAnalysis.clientPort', { port: remoteAddr.port })}</span>
+          ) : null}
         </div>
       </div>
 

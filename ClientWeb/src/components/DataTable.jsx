@@ -7,12 +7,17 @@
 // collapsible: true 启用折叠行；collapsedIds: Set 折叠的 rowKey 集合；onToggleCollapse(rowKey)：切换回调。
 // renderCollapsedRow(row, onToggle)：折叠时自定义跨行摘要（优先级最高）。
 // collapsedHiddenColumns: [key1, key2]：折叠时隐藏指定列，其余列正常显示但单行紧凑（与 renderCollapsedRow 二选一）。
+// v2.0.7x 阶段CN 新增「展开行」语义（与上面「折叠行」语义并存、互不干扰）：
+//   expandedIds: Set 展开的 rowKey 集合；renderExpandedRow(row, onToggle)：展开时在数据行**下方**追加一行渲染的内容。
+//   区别 —— 折叠语义：collapsedIds 命中后用摘要行**替换**整行（原行内容消失，AIRouteManage 用法）；
+//          展开语义：expandedIds 命中后**原数据行照常保留**，详情追加在下一整行（ChatAnalysis 对话详情用法）。
+//   未传 expandedIds 时行渲染与历史行为完全一致（零回归）。
 // sortStorageKey: 传入后排序状态持久化到 localStorage（{key, dir}），刷新后恢复；key 失效或列不可排序时自动忽略。
 // enableSortPersist（默认 true）：未传 sortStorageKey 时，按路径+角色自动生成 localStorage key，
 //   让"刷新后保持用户当前列排序"对所有页面默认生效（提交/刷新后顺序不会跳）。
 // onSortChange(sort|null)：排序变化时回调，父组件可用此暴露"恢复默认排序"按钮。
 //   v2.0.79 阶段CK：弹出式窗口提交后表格顺序稳定性全面优化新增。
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
 
 // 根据当前路径+角色生成稳定的 sortStorageKey（避免不同页面相互覆盖）
@@ -37,7 +42,7 @@ function compare(a, b) {
 
 export default function DataTable({ columns, rows, loading, empty, rowKey, cardMode = true, rowClass,
   collapsible, collapsedIds, onToggleCollapse, renderCollapsedRow, collapsedHiddenColumns = [], sortStorageKey,
-  enableSortPersist = true, onSortChange }) {
+  enableSortPersist = true, onSortChange, expandedIds, renderExpandedRow }) {
   const { t } = useI18n()
   // 排序状态：{key, dir: 1|-1}；
   // 1) sortStorageKey 显式传入时按其持久化；
@@ -115,14 +120,18 @@ export default function DataTable({ columns, rows, loading, empty, rowKey, cardM
         <tbody>
           {sorted.map((r, i) => {
             const k = keyOf(r, i)
-            const collapsed = collapsible && collapsedIds && collapsedIds.has(k)
-            const cls = [rowClass ? rowClass(r) : '', collapsed ? 'row-collapsed' : ''].filter(Boolean).join(' ') || undefined
+            const toggle = () => onToggleCollapse && onToggleCollapse(k)
+            // 展开语义（阶段CN）：传了 expandedIds 即启用，数据行保留 + 下方追加详情整行
+            const expandMode = !!expandedIds
+            const expanded = collapsible && expandMode && expandedIds.has(k)
+            // 折叠语义（历史行为，未启用展开语义时生效）：摘要行替换整行
+            const collapsed = collapsible && !expandMode && collapsedIds && collapsedIds.has(k)
             if (collapsed && renderCollapsedRow) {
               // 自定义折叠摘要行（跨所有列）
               return (
-                <tr key={k} className={cls}>
+                <tr key={k} className={[rowClass ? rowClass(r) : '', 'row-collapsed'].filter(Boolean).join(' ') || undefined}>
                   <td colSpan={columns.length + 1} className="cell-collapsed-row">
-                    {renderCollapsedRow(r, () => onToggleCollapse && onToggleCollapse(k))}
+                    {renderCollapsedRow(r, toggle)}
                   </td>
                 </tr>
               )
@@ -133,14 +142,18 @@ export default function DataTable({ columns, rows, loading, empty, rowKey, cardM
               rowClass ? rowClass(r) : '',
               collapsed ? 'row-collapsed' : '',
               compactMode ? 'row-collapsed-compact' : '',
+              expanded ? 'row-expanded' : '',
             ].filter(Boolean).join(' ') || undefined
-            return (
+            // 行首指示：展开态/完整行 ▼（点击收起），折叠态/未展开 ▶（点击展开）
+            const open = expandMode ? expanded : !collapsed
+            const toggleTitle = open ? t('common.collapse') : t('common.expand')
+            const mainRow = (
               <tr key={k} className={rowCls}>
                 {collapsible ? (
                   <td className="cell-collapse-toggle">
-                    <button type="button" className="collapse-btn" onClick={() => onToggleCollapse && onToggleCollapse(k)}
-                      title={collapsed ? t('common.expand') : t('common.collapse')} aria-label={collapsed ? t('common.expand') : t('common.collapse')}>
-                      {collapsed ? '▶' : '▼'}
+                    <button type="button" className="collapse-btn" onClick={toggle}
+                      title={toggleTitle} aria-label={toggleTitle}>
+                      {open ? '▼' : '▶'}
                     </button>
                   </td>
                 ) : null}
@@ -158,6 +171,18 @@ export default function DataTable({ columns, rows, loading, empty, rowKey, cardM
                   )
                 })}
               </tr>
+            )
+            if (!expanded || !renderExpandedRow) return mainRow
+            // 数据行下方追加详情整行（跨所有列），原数据行不消失
+            return (
+              <Fragment key={k}>
+                {mainRow}
+                <tr className="row-expanded-detail">
+                  <td colSpan={columns.length + 1} className="cell-expanded-row">
+                    {renderExpandedRow(r, toggle)}
+                  </td>
+                </tr>
+              </Fragment>
             )
           })}
         </tbody>

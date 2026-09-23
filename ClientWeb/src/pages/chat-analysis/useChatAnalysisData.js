@@ -1,6 +1,6 @@
 // 对话分析数据查询 + 详情加载 Hook
 // 封装列表查询、详情按需加载、缓存、批量删除
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { post } from '../../shared/api'
 import { useI18n } from '../../i18n'
 import { useConfirm } from '../../components/ConfirmModal'
@@ -21,8 +21,25 @@ export default function useChatAnalysisData(isAdmin, userName, modelName, days, 
   // 详情状态（支持多条同时展开）
   const [expandedIds, setExpandedIds] = useState(new Set())
   const [detailStates, setDetailStates] = useState({}) // { [rowId]: { tab, view, value, loading, cache } }
-  const [copyOk, setCopyOk] = useState(false)
+  // 复制反馈按行隔离（阶段CN 修复 B3）：原 copyOk 为全局布尔，任一行复制会让所有展开面板同时亮
+  const [copyOkId, setCopyOkId] = useState(null)
+  const copyTimerRef = useRef(null)
   const [deleting, setDeleting] = useState(false)
+
+  // markCopied 标记某行「已复制」，1.5s 后自动消失（重复点击时覆盖计时，避免提前熄灭）
+  const markCopied = useCallback((rowId) => {
+    setCopyOkId(rowId)
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+    copyTimerRef.current = setTimeout(() => {
+      copyTimerRef.current = null
+      setCopyOkId(null)
+    }, 1500)
+  }, [])
+
+  // 卸载清理定时器（避免对已卸载组件 setState）
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current)
+  }, [])
 
   // 查询列表
   const doQuery = async (p, modelOverride) => {
@@ -45,6 +62,11 @@ export default function useChatAnalysisData(isAdmin, userName, modelName, days, 
       setRows(data.records || [])
       setTotal(data.totalCount || 0)
       setTotalPages(data.totalPages || 0)
+      // 阶段CN：换页/刷新/改条件后行集合已变，收起全部详情并释放字段缓存
+      // （detailStates 缓存的是 request_body/response_body 等 MB 级大字段，
+      //   旧实现按 rowId 无界累积，长时间翻很多页会持续吃内存）
+      setExpandedIds(new Set())
+      setDetailStates({})
     } catch (e) {
       setError(e.message || t('chatAnalysis.queryFailed'))
     } finally { setLoading(false) }
@@ -159,7 +181,7 @@ export default function useChatAnalysisData(isAdmin, userName, modelName, days, 
     selected, toggleAll, toggleOne,
     // 展开详情
     expandedIds, toggleExpand,
-    detailStates, loadDetail, setDetailView, setCopyOk, copyOk,
+    detailStates, loadDetail, setDetailView, markCopied, copyOkId,
     // 批量删除
     batchDelete, deleting,
   }

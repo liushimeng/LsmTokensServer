@@ -301,6 +301,15 @@ a { color: var(--primary); text-decoration: none; }
 .collapse-btn { background: none; border: 1px solid transparent; border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; color: var(--muted); line-height: 1; }
 .collapse-btn:hover { background: #f0f3f7; border-color: var(--border); color: var(--text); }
 .cell-collapsed-row { padding: 0 !important; }
+
+/* ===== v2.0.7x 阶段CN：展开行（数据行保留 + 详情在其下方整行展开，/ChatAnalysis 对话详情） ===== */
+.cell-expanded-row { padding: 0 !important; background: #f6f8fb; }
+.cell-expanded-row .inline-detail-row { margin: 6px 8px; }
+/* 展开中的来源数据行高亮，让「哪条记录开着详情」一眼可辨 */
+.data-table tr.row-expanded > td { background: #eef4ff; }
+.data-table tr.row-expanded .collapse-btn { color: var(--primary); }
+/* 详情行与上一条数据行之间留一条分隔线，视觉上归属同一记录 */
+.data-table tr.row-expanded-detail > td { border-bottom: 2px solid var(--primary); }
 .collapsed-summary { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12.5px; cursor: pointer; background: #fafbfc; transition: background .15s; flex-wrap: nowrap; min-height: 36px; }
 .collapsed-summary:hover { background: #f1f5f9; }
 .collapsed-summary > * { flex-shrink: 0; }
@@ -395,12 +404,18 @@ a { color: var(--primary); text-decoration: none; }
 .detail-protocol-flow .pf-label { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 4px; }
 .detail-protocol-flow .pf-arrow { color: var(--muted); font-size: 14px; }
 
-/* Header：指标网格 */
+/* Header：指标网格
+   阶段CN：5 张卡（耗时 / 输入 Tokens / 输出 Tokens / 请求·响应大小 / IP 地址）。
+   ≥1000px 固定 5 列 → 保证「同一行显示」；中屏按可用宽度自动换行；≤600px 走下方 2 列媒体查询。 */
 .detail-head-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+@media (min-width: 1000px) { .detail-head-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 .detail-head-card { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: #fff; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
 .detail-head-card .dhc-label { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
 .detail-head-card .dhc-value { font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .detail-head-card .dhc-sub { font-size: 11px; color: var(--muted); }
+/* IP 卡：等宽字体 + 过长（IPv6 最多 45 字符）允许折行完整展示，不被 ellipsis 截断 */
+.detail-head-card .dhc-value-mono, .detail-head-card .dhc-sub-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.detail-head-card .dhc-value-wrap { white-space: normal; overflow: visible; text-overflow: clip; word-break: break-all; line-height: 1.4; }
 
 /* Header：请求信息行 */
 .detail-head-request { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
@@ -884,6 +899,12 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
   .inline-detail-title { padding: 8px 12px; }
   .inline-detail-title-text { font-size: 13px; }
   .inline-detail-row .detail-body { max-height: 40vh; min-height: 120px; }
+  /* 展开行（阶段CN）：卡片模式下详情独立成卡，去掉列名伪元素与单元格内边距 */
+  .data-table.card-mode td.cell-expanded-row { display: block; padding: 0; border-bottom: none; }
+  .data-table.card-mode td.cell-expanded-row::before { content: none; }
+  .cell-expanded-row .inline-detail-row { margin: 4px 0; }
+  .cell-expanded-row .inline-detail-row.inline-detail-fullscreen,
+  .cell-expanded-row .inline-detail-row.inline-detail-native-fullscreen { margin: 0; }
 
   /* 爬虫数据源：操作列 4 按钮 2×2；爬取弹窗 textarea 压低、日志框自适应（10 文档） */
   .data-table.card-mode td .op-btns { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
@@ -958,18 +979,77 @@ a, button, summary { -webkit-tap-highlight-color: transparent; }
 mark.sm-mark { background: #fde68a; color: inherit; border-radius: 2px; padding: 0 1px; }
 mark.sm-mark.sm-mark-active { background: #f59e0b; color: #1f2937; outline: 1px solid #b45309; }
 
-/* 全屏覆盖层：面板占满视口，内容区自滚动 */
-.inline-detail-fullscreen {
+/* ===== 对话详情全屏（阶段CN 重构：真全屏 + 降级最大化双态） =====
+   native   —— Element Fullscreen API：面板进入 top layer，铺满整块屏幕（浏览器地址栏/标签栏隐藏），
+               由 .inline-detail-native-fullscreen 驱动；同时用 :fullscreen 作 UA 兜底。
+   fallback —— 浏览器不支持元素全屏（iOS Safari）或 requestFullscreen 被 reject（非用户手势、
+               iframe 缺 allow="fullscreen"）：退回页面内 fixed 最大化，由 .inline-detail-fullscreen 驱动。 */
+
+/* 降级态：fixed 铺满视口（原有行为） */
+.inline-detail-row.inline-detail-fullscreen {
   position: fixed;
   inset: 0;
   z-index: 1000;
+}
+
+/* 两态共用的布局骨架：纵向 flex + 满屏尺寸 + 去边框圆角（类选择器，保证一定生效） */
+.inline-detail-row.inline-detail-fullscreen,
+.inline-detail-row.inline-detail-native-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh; /* 移动端动态视口（不支持 dvh 的浏览器沿用上一行 100vh） */
+  max-height: none;
   margin: 0;
+  border: none;
   border-radius: 0;
-  border-width: 0;
+  background: var(--panel);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   animation: none;
 }
-.inline-detail-fullscreen .detail-body { flex: 1; max-height: none; min-height: 0; overflow: auto; }
-.inline-detail-fullscreen .log-box { max-height: none; }
-.inline-detail-fullscreen .detail-foot { flex-shrink: 0; }
+
+/* UA 兜底：即便状态类与 document.fullscreenElement 短暂不同步，:fullscreen 也能撑满。
+   单独成组书写 —— 与上面类选择器混写会因个别 UA 不识别前缀伪类而整条规则被丢弃。 */
+.inline-detail-row:fullscreen,
+.inline-detail-row:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: var(--panel);
+}
+
+/* 内容区自滚动：头部工具栏 / KPI / Tab 固定，正文占满剩余高度 */
+.inline-detail-row.inline-detail-fullscreen .detail-body,
+.inline-detail-row.inline-detail-native-fullscreen .detail-body {
+  flex: 1;
+  max-height: none;
+  min-height: 0;
+  overflow: auto;
+}
+.inline-detail-row.inline-detail-fullscreen .log-box,
+.inline-detail-row.inline-detail-native-fullscreen .log-box { max-height: none; }
+.inline-detail-row.inline-detail-fullscreen .detail-foot,
+.inline-detail-row.inline-detail-native-fullscreen .detail-foot { flex-shrink: 0; }
+.inline-detail-row.inline-detail-fullscreen .inline-detail-title,
+.inline-detail-row.inline-detail-native-fullscreen .inline-detail-title { flex-shrink: 0; }
+/* 全屏下标题/Tab/页脚不参与整页滚动；头部信息区限高 45%，
+   避免「Agent 工具定义」长列表换行展开时把正文挤没（超出部分头部内部滚动） */
+.inline-detail-row.inline-detail-fullscreen .detail-head,
+.inline-detail-row.inline-detail-native-fullscreen .detail-head {
+  flex-shrink: 0;
+  max-height: 45vh;
+  overflow: auto;
+}
+.inline-detail-row.inline-detail-fullscreen .detail-tabs,
+.inline-detail-row.inline-detail-native-fullscreen .detail-tabs,
+.inline-detail-row.inline-detail-fullscreen .detail-views,
+.inline-detail-row.inline-detail-native-fullscreen .detail-views,
+.inline-detail-row.inline-detail-fullscreen .detail-search-bar,
+.inline-detail-row.inline-detail-native-fullscreen .detail-search-bar { flex-shrink: 0; }
+
+/* 展开详情时的根节点聚焦不显示焦点环（focus 仅为键盘可用） */
+.inline-detail-row:focus { outline: none; }

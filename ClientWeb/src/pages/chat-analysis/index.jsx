@@ -1,5 +1,10 @@
 // 对话分析页面主组件
 // 模块化重构：筛选工具栏 + 数据表格 + 内联详情展开（替代 Modal 弹窗）
+// v2.0.7x 阶段CN：改用 DataTable 新增的「展开行」语义（expandedIds + renderExpandedRow），
+//   点击「详情」后**原数据行保留**、「对话详情」模块展开在该行下方整行；
+//   旧写法把 expandedIds 传给 collapsedIds，会让详情**替换**整行 —— 行尾「详情」按钮与
+//   行首 ▶/▼ 一起消失，只剩面板内的「✕ 收起」，收起入口与展开入口不对称（Bug B1）。
+//   管理端(9101) 与 用户端(29001) 共用本组件，一次修改两端同时生效。
 import { useEffect, useRef, useState } from 'react'
 import { post, get } from '../../shared/api'
 import { isAdminRole } from '../../shared/auth'
@@ -48,7 +53,7 @@ export default function ChatAnalysis({ route }) {
     doQuery, setError, setOkMsg,
     selected, toggleAll, toggleOne,
     expandedIds, toggleExpand,
-    detailStates, loadDetail, setDetailView, setCopyOk, copyOk,
+    detailStates, loadDetail, setDetailView, markCopied, copyOkId,
     batchDelete, deleting,
   } = data
 
@@ -101,7 +106,7 @@ export default function ChatAnalysis({ route }) {
     doQuery(1)
   }
 
-  // 切换展开详情
+  // 切换展开详情（行尾「详情」按钮 / 行首 ▶▼ / 面板内「✕ 收起」三入口同一状态）
   const handleToggleExpand = (rowId) => {
     toggleExpand(rowId)
   }
@@ -116,11 +121,9 @@ export default function ChatAnalysis({ route }) {
     setDetailView(rowId, view)
   }
 
-  // 复制
-  const handleCopy = () => {
-    setCopyOk(true)
-    setTimeout(() => setCopyOk(false), 1500)
-  }
+  // 复制反馈按行隔离（阶段CN 修复 B3）：原先 copyOk 为全局布尔，
+  // 任一行点复制会让**所有**已展开面板同时亮起「已复制 ✓」。
+  const handleCopy = (rowId) => markCopied(rowId)
 
   // 表格列定义
   const columns = [
@@ -217,9 +220,9 @@ export default function ChatAnalysis({ route }) {
         rowKey="id"
         empty={t('chatAnalysis.empty')}
         collapsible
-        collapsedIds={expandedIds}
+        expandedIds={expandedIds}
         onToggleCollapse={handleToggleExpand}
-        renderCollapsedRow={(row) => {
+        renderExpandedRow={(row) => {
           const state = detailStates[row.id]
           if (!state) return null
           return (
@@ -228,8 +231,8 @@ export default function ChatAnalysis({ route }) {
               detailState={state}
               onTabChange={(field) => handleTabChange(row, field)}
               onViewChange={(view) => handleViewChange(row.id, view)}
-              onCopy={handleCopy}
-              copyOk={copyOk}
+              onCopy={() => handleCopy(row.id)}
+              copyOk={copyOkId === row.id}
               onClose={() => handleToggleExpand(row.id)}
             />
           )
