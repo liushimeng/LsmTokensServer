@@ -366,6 +366,52 @@ a { color: var(--primary); text-decoration: none; }
 /* 折叠行：hover 保持折叠摘要色，不被 tr:hover 覆盖 */
 .data-table tr.row-collapsed td { padding: 0; }
 
+/* ===== 通用可编辑顺序列表（阶段CO）===== */
+/* 弹窗内「每行一条 + 行内操作按钮」的列表统一视觉语言：
+   AIRouteManage 目标源站列表（有序，可置顶/上移/下移/置底）、
+   DstEndPointManage 工作时间段列表（无序，仅删除）共用同一套行布局。 */
+/* 列表容器：限高内滚 —— 十几条以上不再撑破弹窗，置顶操作在滚动区内即可完成 */
+.sortable-list {
+  display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px; min-height: 40px; max-height: 46vh; overflow-y: auto; background: #fafafa;
+}
+/* 列表上方提示：优先级语义 + 条数（顺序即优先级的显式说明） */
+.sortable-list-hint {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-bottom: 6px; font-size: 12px; color: var(--muted); line-height: 1.5;
+}
+.sortable-list-hint b { color: var(--text); font-weight: 600; }
+/* 单行：左信息区（可截断） + 右操作区（不被压缩）；窄屏整体换行而非压扁按钮 */
+.sortable-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 6px 8px; border: 1px solid #e0e0e0; border-radius: 6px;
+  font-size: 13px; background: #fff;
+}
+/* 首位（主源站）行：左侧蓝条 + 描边，置顶后的效果一眼可辨 */
+.sortable-row.sortable-row-primary { border-color: #cfe3fb; box-shadow: inset 3px 0 0 var(--primary); }
+/* 禁用行：淡灰，与 ep-chip-off 一致 */
+.sortable-row.sortable-row-off { background: #fbfbfb; color: #999; }
+.sortable-row-main { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 240px; min-width: 0; }
+.sortable-row-index { min-width: 36px; flex-shrink: 0; text-align: right; color: var(--muted); font-size: 12px; }
+.sortable-row-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sortable-row-actions {
+  display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  flex-shrink: 0; margin-left: auto;
+}
+/* 顺序按钮簇（置顶 ↑ ↓ 置底）视觉成组，与「移除」之间用竖分隔线区隔防误触 */
+.order-btn-group {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 4px; border: 1px solid #e8e8e8; border-radius: 6px; background: #fafbfc;
+}
+.order-btn { white-space: nowrap; }
+.order-divider { width: 1px; align-self: stretch; background: var(--border); margin: 0 2px; }
+/* 主源站（列表首位 = 最高优先级）标记 */
+.primary-tag {
+  flex-shrink: 0; display: inline-block; padding: 1px 6px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; background: #e8f3ff; color: var(--primary); border: 1px solid #cfe3fb;
+}
+
 /* ===== 折叠行紧凑模式（隐藏指定列，其余列单行显示） ===== */
 .data-table tr.row-collapsed-compact td {
   padding-top: 6px;

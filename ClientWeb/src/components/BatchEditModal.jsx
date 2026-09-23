@@ -108,7 +108,8 @@ export default function BatchEditModal({ open, onClose, routes, onSuccess }) {
   return (
     <Modal
       title={t('aiRouteManage.batchEditRoute')}
-      width={760}
+      // 阶段CO：与「添加/编辑路由」弹窗（960）宽度对齐 —— 两者同页同入口，长源站名 chip 也不再挤压换行。
+      width={960}
       onClose={handleClose}
       closeOnOverlayClick={false}
       footer={

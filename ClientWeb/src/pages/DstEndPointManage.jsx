@@ -508,25 +508,32 @@ export default function DstEndPointManage() {
                   <span style={{ fontSize: 12, color: '#888' }}>{t('dstEndPoint.workPeriodsHint')}</span>
                   <button type="button" className="btn btn-sm" onClick={setAllDay}>{t('dstEndPoint.workPeriodsAllDay')}</button>
                 </div>
+                {/* 阶段CO：行布局复用通用 .sortable-* 类，与智能路由「目标源站列表」同一视觉语言
+                    （同一序号缩进、同一操作簇右对齐基线）。此处顺序不承载业务语义（时间段按 start 校验
+                    重叠、按编辑序序列化），故有意不提供置顶/上移/下移/置底按钮。 */}
                 {periods.map((p, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 12, color: '#666', minWidth: 36 }}>{idx + 1}.</span>
-                    <input
-                      style={{ width: 130 }}
-                      placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
-                      value={p.start}
-                      onChange={(e) => updatePeriod(idx, 'start', e.target.value)}
-                    />
-                    <span>→</span>
-                    <input
-                      style={{ width: 130 }}
-                      placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
-                      value={p.end}
-                      onChange={(e) => updatePeriod(idx, 'end', e.target.value)}
-                    />
-                    <button type="button" className="btn btn-sm btn-danger" onClick={() => removePeriod(idx)} disabled={periods.length <= 1}>
-                      {t('dstEndPoint.workPeriodsRemove')}
-                    </button>
+                  <div key={idx} className="sortable-row">
+                    <span className="sortable-row-main">
+                      <span className="sortable-row-index">{idx + 1}.</span>
+                      <input
+                        style={{ width: 130 }}
+                        placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
+                        value={p.start}
+                        onChange={(e) => updatePeriod(idx, 'start', e.target.value)}
+                      />
+                      <span>→</span>
+                      <input
+                        style={{ width: 130 }}
+                        placeholder={t('dstEndPoint.workPeriodsPlaceholder')}
+                        value={p.end}
+                        onChange={(e) => updatePeriod(idx, 'end', e.target.value)}
+                      />
+                    </span>
+                    <span className="sortable-row-actions">
+                      <button type="button" className="btn btn-sm btn-danger" onClick={() => removePeriod(idx)} disabled={periods.length <= 1}>
+                        {t('dstEndPoint.workPeriodsRemove')}
+                      </button>
+                    </span>
                   </div>
                 ))}
                 <div>

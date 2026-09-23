@@ -5,6 +5,8 @@ import { isAdminRole } from '../shared/auth'
 import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import CollapsibleList from '../components/CollapsibleList'
+import OrderButtons from '../components/OrderButtons'
+import { moveItem, isFirst } from '../shared/listOrder'
 import TimeRangeSelector from '../components/TimeRangeSelector'
 import Skeleton from '../components/Skeleton'
 import EmptyState from '../components/EmptyState'
@@ -259,12 +261,12 @@ export default function AIRouteManage() {
     setForm({ ...form, endpoints: [...form.endpoints, { id: epId, algorithm_type: epAlgoForProtocol(ep, form.protocol_type), in_route_status: 1 }] })
   }
   const removeEndpoint = (epId) => setForm({ ...form, endpoints: form.endpoints.filter((x) => x.id !== epId) })
-  const moveEndpoint = (idx, dir) => {
-    const next = form.endpoints.slice()
-    const j = idx + dir
-    if (j < 0 || j >= next.length) return
-    ;[next[idx], next[j]] = [next[j], next[idx]]
-    setForm({ ...form, endpoints: next })
+  // 顺序调整（阶段CO）：目标下标由 OrderButtons 给出 —— 0=置顶、i-1=上移、i+1=下移、length-1=置底。
+  // 列表下标即优先级：下标 0 最高，保存时同时作为主源站 dst_endpoint_id，
+  // 稳定型/经济型算法失败切换时由后端把第 0 个滚动到末尾（models/mysql_http_ai_route_manage.go）。
+  // 搬移收敛到 shared/listOrder.moveItem（纯函数、返回新数组、越界钳制），可单测。
+  const reorderEndpoint = (from, to) => {
+    setForm((f) => (f ? { ...f, endpoints: moveItem(f.endpoints, from, to) } : f))
   }
   const setEpAlgo = (idx, algo) => {
     const ep = formEndpoints.find((e) => e.id == form.endpoints[idx].id) // eslint-disable-line eqeqeq
@@ -581,7 +583,9 @@ export default function AIRouteManage() {
       {form ? (
         <Modal
           title={form.id ? t('aiRouteManage.editRoute') : t('aiRouteManage.addRoute')}
-          width={760}
+          // 阶段CO：行内新增「置顶/置底」后按钮变多，760 会把源站名称挤到换行、按钮簇变形 → 加宽 200px。
+          // Modal 的 width 是 maxWidth（.modal-box 为 width:100%），窄屏自动回落、≤600px 由 CSS 转全屏。
+          width={960}
           onClose={() => setForm(null)}
           closeOnOverlayClick={false}
           footer={
@@ -652,19 +656,33 @@ export default function AIRouteManage() {
                   : null}
               </select>
             </div>
-            <div style={{ border: '1px solid #ddd', borderRadius: 4, padding: 8, minHeight: 40, background: '#fafafa' }}>
-              {form.endpoints.length === 0 ? <span style={{ color: '#999', fontSize: 13 }}>{t('aiRouteManage.noSelectedEndpoints')}</span> : form.endpoints.map((sel, i) => {
+            {/* 顺序即优先级：提示行显式说明，避免用户靠猜（置顶=主源站） */}
+            <div className="sortable-list-hint">
+              <b>{t('aiRouteManage.priority')}</b>
+              <span>{t('aiRouteManage.orderHint')}</span>
+            </div>
+            {/* 限高内滚：十几条以上不再撑破弹窗，置顶/置底在滚动区内即可完成（.sortable-list） */}
+            <div className="sortable-list">
+              {form.endpoints.length === 0 ? (
+                <span style={{ color: '#999', fontSize: 13 }}>{t('aiRouteManage.noSelectedEndpoints')}</span>
+              ) : form.endpoints.map((sel, i) => {
                 const ep = formEndpoints.find((e) => e.id == sel.id) // eslint-disable-line eqeqeq
+                const primary = isFirst(form.endpoints, i)
+                const epName = ep ? `${ep.platform_name} / ${ep.model_name} [${protocolName(ep.protocol_type)}]` : 'ID: ' + sel.id
                 return (
-                  <div key={sel.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '6px 8px', border: '1px solid #e0e0e0', borderRadius: 6, marginBottom: 6, fontSize: 13, background: '#fff' }}>
-                    <span>{i + 1}. {ep ? `${ep.platform_name} / ${ep.model_name} [${protocolName(ep.protocol_type)}]` : 'ID: ' + sel.id}</span>
-                    <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <div key={sel.id} className={'sortable-row' + (primary ? ' sortable-row-primary' : '') + (sel.in_route_status === 0 ? ' sortable-row-off' : '')}>
+                    <span className="sortable-row-main">
+                      <span className="sortable-row-index" title={`${t('aiRouteManage.priority')}: ${i + 1}`}>{i + 1}.</span>
+                      {primary ? <span className="primary-tag">{t('aiRouteManage.primaryTag')}</span> : null}
+                      <span className="sortable-row-name" title={epName}>{epName}</span>
+                    </span>
+                    <span className="sortable-row-actions">
                       <label style={{ fontSize: 12 }}><input type="radio" checked={sel.algorithm_type === 1} onChange={() => setEpAlgo(i, 1)} disabled={ep && !epAlgoValid(ep, form.protocol_type, 1)} />{t('aiRouteManage.directConnect')}</label>
                       <label style={{ fontSize: 12 }}><input type="radio" checked={sel.algorithm_type === 2} onChange={() => setEpAlgo(i, 2)} disabled={ep && !epAlgoValid(ep, form.protocol_type, 2)} />{t('aiRouteManage.converter')}</label>
-                      <button className="btn btn-sm" onClick={() => toggleEpStatus(i)}>{sel.in_route_status === 0 ? t('aiRouteManage.disabledStatus') : t('aiRouteManage.enabledStatus')}</button>
-                      <button className="btn btn-sm" disabled={i === 0} onClick={() => moveEndpoint(i, -1)}>↑</button>
-                      <button className="btn btn-sm" disabled={i === form.endpoints.length - 1} onClick={() => moveEndpoint(i, 1)}>↓</button>
-                      <button className="btn btn-sm btn-danger" onClick={() => removeEndpoint(sel.id)}>{t('aiRouteManage.removeOp')}</button>
+                      <button type="button" className="btn btn-sm" onClick={() => toggleEpStatus(i)}>{sel.in_route_status === 0 ? t('aiRouteManage.disabledStatus') : t('aiRouteManage.enabledStatus')}</button>
+                      <OrderButtons index={i} total={form.endpoints.length} onMove={(to) => reorderEndpoint(i, to)} />
+                      <span className="order-divider" aria-hidden="true" />
+                      <button type="button" className="btn btn-sm btn-danger" onClick={() => removeEndpoint(sel.id)}>{t('aiRouteManage.removeOp')}</button>
                     </span>
                   </div>
                 )
