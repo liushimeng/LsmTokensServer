@@ -16,6 +16,7 @@ export default function Login() {
   const [loginType, setLoginType] = useState('model') // 'model' 或 'user'
   const [captchaId, setCaptchaId] = useState('')
   const [captchaUrl, setCaptchaUrl] = useState('')
+  const [captchaToken, setCaptchaToken] = useState('') // v2.0.78：验证码客户端绑定 token
   // 模型登录字段
   const [modelName, setModelName] = useState('')
   const [apiKey, setApiKey] = useState('')
@@ -36,11 +37,22 @@ export default function Login() {
   // 阶段AO：组件卸载后 setState 静默丢弃
   const aliveRef = useRef(true)
 
-  const refreshCaptcha = async () => {
+  // v2.0.78 安全加固：验证码刷新节流状态（3 秒冷却，防快速连刷触发后端限速）
+  const captchaCooldownUntilRef = useRef(0)
+
+  const refreshCaptcha = async (force = false) => {
+    // 非强制刷新时执行节流（3 秒冷却）
+    if (!force && Date.now() < captchaCooldownUntilRef.current) return
     try {
       const d = await get('CaptchaGenerate')
       if (!aliveRef.current) return
-      if (d.success) { setCaptchaId(d.captcha_id); setCaptchaUrl(d.image_url) }
+      if (d.success) {
+        setCaptchaId(d.captcha_id)
+        setCaptchaUrl(d.image_url)
+        // v2.0.78：保存 captcha_token，提交登录时携带用于客户端绑定校验
+        setCaptchaToken(d.captcha_token || '')
+        captchaCooldownUntilRef.current = Date.now() + 3000
+      }
       else { setError(t('login.captchaRefreshFailed') || '验证码刷新失败') }
     } catch { setError(t('login.captchaRefreshFailed') || '验证码刷新失败，请检查网络') }
   }
@@ -95,7 +107,7 @@ export default function Login() {
     setLoginType(type)
     setError('')
     setCaptchaCode('')
-    refreshCaptcha()
+    refreshCaptcha(true) // 切换 Tab 强制刷新（用户显式操作，不受节流限制）
     // 恢复目标 Tab 的已保存值和"记住我"状态
     if (type === 'user') {
       const ud = savedCredsRef.current.userData
@@ -125,12 +137,14 @@ export default function Login() {
       if (!userName || !password || !captchaCode) { setError(t('login.emptyUserName')); return }
     }
 
+    // v2.0.78 安全加固：提交后立即禁用按钮防连点
     setBusy(true)
     try {
       const reqBody = {
         login_type: loginType,
         captcha_id: captchaId,
         captcha_code: captchaCode,
+        captcha_token: captchaToken, // v2.0.78：客户端绑定 token
       }
       if (loginType === 'model') {
         reqBody.model_name = modelName
@@ -162,13 +176,16 @@ export default function Login() {
       } else {
         setError(d.message || t('login.loginFailed'))
         // 阶段BQ：await refreshCaptcha 消除竞态（避免旧图/旧 id 残留）
+        // v2.0.78 安全加固：失败 → 强制刷新验证码（新 token）+ 短冷却防连点
         setCaptchaCode('')
-        await refreshCaptcha()
+        await refreshCaptcha(true)
       }
     } catch (err) {
       setError(err.message || t('login.loginFailed'))
       setCaptchaCode('')
-      await refreshCaptcha()
+      await refreshCaptcha(true)
+      // v2.0.78 安全加固：网络/服务端错误后短暂保持禁用，降低暴力提交频度
+      await new Promise(r => setTimeout(r, 1500))
     } finally { setBusy(false) }
   }
 

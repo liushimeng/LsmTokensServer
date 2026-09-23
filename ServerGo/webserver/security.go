@@ -28,6 +28,7 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 }
 
 // publicSecurityHeadersMiddleware 公网服务使用的严格安全头
+// v2.0.78 安全加固：HTTPS 请求追加 HSTS 头（防 SSL stripping）。
 func publicSecurityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -37,6 +38,10 @@ func publicSecurityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self';")
+		// 仅 HTTPS 请求设置 HSTS（HTTP 不设置，避免代理/缓存污染）
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		next.ServeHTTP(w, r)
 	})
 }

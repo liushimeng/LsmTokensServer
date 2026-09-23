@@ -1,6 +1,7 @@
 package webserver
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -164,5 +165,32 @@ func TestPrefixStripMiddleware(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/UserLogin", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "idx") {
 		t.Fatalf("非页面请求应回落 index.html 而非 301: code=%d", rec.Code)
+	}
+}
+
+// v2.0.78 安全加固：HSTS 头仅 HTTPS 请求返回，HTTP 请求不设置（避免代理/缓存污染）
+func TestPublicSecurityHeaders_HSTSForHTTPSOnly(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	handler := publicSecurityHeadersMiddleware(next)
+
+	// HTTPS 请求（r.TLS 非 nil）→ 应有 HSTS
+	recHTTPS := httptest.NewRecorder()
+	reqHTTPS := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqHTTPS.TLS = &tls.ConnectionState{} // 非 nil 即视为 HTTPS
+	handler.ServeHTTP(recHTTPS, reqHTTPS)
+	hsts := recHTTPS.Header().Get("Strict-Transport-Security")
+	if hsts == "" {
+		t.Error("HTTPS 请求应返回 Strict-Transport-Security 头")
+	} else if !strings.Contains(hsts, "max-age=31536000") || !strings.Contains(hsts, "includeSubDomains") {
+		t.Errorf("HSTS 头内容不符: %s", hsts)
+	}
+
+	// HTTP 请求（r.TLS 为 nil）→ 不应有 HSTS
+	recHTTP := httptest.NewRecorder()
+	reqHTTP := httptest.NewRequest(http.MethodGet, "/", nil)
+	// reqHTTP.TLS 默认为 nil
+	handler.ServeHTTP(recHTTP, reqHTTP)
+	if hsts := recHTTP.Header().Get("Strict-Transport-Security"); hsts != "" {
+		t.Errorf("HTTP 请求不应返回 Strict-Transport-Security 头，实际: %s", hsts)
 	}
 }

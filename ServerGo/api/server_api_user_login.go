@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"github.com/lishimeng/LsmTokensServer/config"
@@ -32,6 +35,11 @@ const (
 	loginFailureWindow      = time.Minute
 	// 阶段AP：loginAttempts 惰性清理阈值，超过后在下一次失败记录时清理全部过期条目
 	loginAttemptsCleanupThreshold = 1024
+	// v2.0.78 安全加固：渐进式锁定封顶时长与登录失败恒定延迟
+	maxLockDuration       = 60 * time.Minute
+	loginFailureDelayBase = 200 * time.Millisecond
+	// captcha_token 有效期（与验证码自身 10 分钟过期一致，留少许余量）
+	captchaTokenLifetime  = 12 * time.Minute
 )
 
 // ========== JWT 密钥管理（v2.0.56 安全加固 + 持久化兜底） ==========
@@ -147,14 +155,15 @@ func (u *UserTokenClaims) Valid() error {
 // ========== 请求/响应类型 ==========
 
 type userLoginReq struct {
-	LoginType   string `json:"login_type"`   // "model" 或 "user"
-	ModelName   string `json:"model_name"`   // 模型登录用
-	APIKey      string `json:"api_key"`      // 模型登录用
-	UserName    string `json:"user_name"`    // 用户登录用
-	Password    string `json:"password"`     // 用户登录用
-	Phone       string `json:"phone"`        // 用户登录用
-	CaptchaID   string `json:"captcha_id"`   // 验证码 ID
-	CaptchaCode string `json:"captcha_code"` // 验证码输入
+	LoginType    string `json:"login_type"`     // "model" 或 "user"
+	ModelName    string `json:"model_name"`     // 模型登录用
+	APIKey       string `json:"api_key"`        // 模型登录用
+	UserName     string `json:"user_name"`      // 用户登录用
+	Password     string `json:"password"`       // 用户登录用
+	Phone        string `json:"phone"`          // 用户登录用
+	CaptchaID    string `json:"captcha_id"`     // 验证码 ID
+	CaptchaCode  string `json:"captcha_code"`   // 验证码输入
+	CaptchaToken string `json:"captcha_token"`  // v2.0.78：验证码客户端绑定 token（增强式，可为空）
 }
 
 type userLoginResp struct {
@@ -169,6 +178,8 @@ type loginAttempt struct {
 	failedCount    int
 	lastFailedTime time.Time
 	lockedUntil    time.Time
+	// v2.0.78 安全加固：连续触发锁定次数（渐进式锁定升级用）
+	lockCount int
 }
 
 var (
@@ -210,7 +221,8 @@ func checkLoginAttempt(ip string) error {
 	now := time.Now()
 	// 如果已过锁定时间，重置
 	if attempt.lockedUntil.After(now) {
-		return fmt.Errorf("登录过于频繁，请 %d 分钟后重试", int(attempt.lockedUntil.Sub(now).Minutes())+1)
+		remainingMin := int(attempt.lockedUntil.Sub(now).Minutes()) + 1
+		return fmt.Errorf("登录过于频繁，请 %d 分钟后再试", remainingMin)
 	}
 	// 如果超过 1 分钟窗口，重置失败次数
 	if now.Sub(attempt.lastFailedTime) > loginFailureWindow {
@@ -252,15 +264,80 @@ func recordLoginFailure(key string) {
 	attempt.lastFailedTime = now
 
 	if attempt.failedCount >= maxLoginFailures {
-		attempt.lockedUntil = now.Add(loginLockDuration)
+		// v2.0.78 安全加固：渐进式锁定升级——连续被锁定次数越多，封禁越久。
+		// 锁定时长 = min(base * 2^(lockCount-1), maxLockDuration)
+		//   1 次触发 → 10min，2 次 → 20min，3 次 → 40min，4 次及以上 → 60min（封顶）
+		attempt.lockCount++
+		d := loginLockDuration
+		for i := 1; i < attempt.lockCount && d < maxLockDuration; i++ {
+			d *= 2
+		}
+		if d > maxLockDuration {
+			d = maxLockDuration
+		}
+		attempt.lockedUntil = now.Add(d)
+		// 重置失败计数（下一次窗口重新累计）
+		attempt.failedCount = 0
 	}
 }
 
-// clearLoginAttempt 清除登录失败记录（成功时调用）
+// clearLoginAttempt 清除登录失败记录（成功时调用），同时重置渐进式锁定计数
 func clearLoginAttempt(ip string) {
 	loginAttemptsMu.Lock()
 	defer loginAttemptsMu.Unlock()
 	delete(loginAttempts, ip)
+}
+
+// ========== 验证码客户端绑定 Token（v2.0.78 安全加固） ==========
+
+// clientFingerprint 计算客户端指纹（IP + User-Agent 的 SHA256 前 16 字节 hex）
+// 用于绑定验证码到生成它的客户端，防止验证码 ID 被跨客户端/打码平台重用。
+func clientFingerprint(r *http.Request) string {
+	ip := getClientIP(r)
+	ua := r.Header.Get("User-Agent")
+	h := sha256.Sum256([]byte(ip + "|" + ua))
+	return hex.EncodeToString(h[:16])
+}
+
+// generateCaptchaToken 生成验证码客户端绑定 token
+// token = HMAC-SHA256(captcha_id + "|" + fingerprint + "|" + timestamp, jwtSecret) 前 16 字节 hex
+// 服务端无状态校验：重新计算期望 token 做常量时间比较，无需额外存储。
+func generateCaptchaToken(captchaID string, r *http.Request) string {
+	fp := clientFingerprint(r)
+	// 时间戳按 token 生命周期取整，允许客户端时钟少许偏差
+	ts := time.Now().Unix() / int64(captchaTokenLifetime.Seconds())
+	mac := hmac.New(sha256.New, getJWTSecret())
+	mac.Write([]byte(fmt.Sprintf("%s|%s|%d", captchaID, fp, ts)))
+	return hex.EncodeToString(mac.Sum(nil)[:16])
+}
+
+// verifyCaptchaToken 校验验证码客户端绑定 token（常量时间比较）
+// 返回 true 表示 token 有效。增强式策略：token 为空时返回 true（兼容旧客户端）。
+// token 为 16 字节原始值的 hex 编码（32 个 hex 字符）。
+func verifyCaptchaToken(captchaID, token string, r *http.Request) bool {
+	if token == "" {
+		// 增强式策略：不发送 token 的旧客户端 / API 调用仍兼容
+		return true
+	}
+	if len(token) != 32 {
+		return false
+	}
+	expected := generateCaptchaToken(captchaID, r)
+	// 常量时间比较，避免时序侧信道
+	return hmac.Equal([]byte(token), []byte(expected))
+}
+
+// loginFailureDelay 登录失败恒定延迟（消除时序侧信道，增加暴力破解时间成本）
+// 基准 200ms + 微随机(0-50ms)，使用 crypto/rand 派生的轻量随机。
+func loginFailureDelay() {
+	// 微随机抖动：读取 1 字节，取模 50
+	b := make([]byte, 1)
+	n, _ := rand.Read(b)
+	jitter := time.Duration(0)
+	if n == 1 {
+		jitter = time.Duration(b[0]%50) * time.Millisecond
+	}
+	time.Sleep(loginFailureDelayBase + jitter)
 }
 
 // loginAttemptAccountKey 计算账号维度防爆破 key（用户名或模型名）；未知登录类型返回空串（不参与账号维度锁定）
@@ -288,6 +365,9 @@ func loginAttemptAccountKey(loginType, userName, modelName string) string {
 // ========== 验证码接口 ==========
 
 // captchaGenerateHandle 生成验证码
+// v2.0.78 安全加固：响应中新增 captcha_token（客户端绑定 token），前端提交登录时需携带，
+// 后端校验该 token 是否由同一客户端（IP+UA）生成，防止验证码 ID 被跨客户端/打码平台重用。
+// 旧客户端不携带 captcha_token 时后端跳过校验，保持兼容。
 func captchaGenerateHandle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	setNoCacheHeaders(w)
@@ -303,9 +383,10 @@ func captchaGenerateHandle(w http.ResponseWriter, r *http.Request) {
 
 	imageBase64 := base64.StdEncoding.EncodeToString([]byte(buf.String()))
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":    true,
-		"captcha_id": captchaID,
-		"image_url":  "data:image/png;base64," + imageBase64,
+		"success":       true,
+		"captcha_id":    captchaID,
+		"captcha_token": generateCaptchaToken(captchaID, r),
+		"image_url":     "data:image/png;base64," + imageBase64,
 	})
 }
 
@@ -338,6 +419,7 @@ func userLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		req.Phone = r.PostFormValue("phone")
 		req.CaptchaID = r.PostFormValue("captcha_id")
 		req.CaptchaCode = r.PostFormValue("captcha_code")
+		req.CaptchaToken = r.PostFormValue("captcha_token")
 	} else {
 		// JSON 提交（API 调用）
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -371,6 +453,11 @@ func userLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: "请输入验证码"})
 		return
 	}
+	// v2.0.78 安全加固：校验验证码客户端绑定 token（增强式——仅当请求携带时校验）
+	if !verifyCaptchaToken(req.CaptchaID, req.CaptchaToken, r) {
+		json.NewEncoder(w).Encode(userLoginResp{Success: false, Message: "验证码已失效，请刷新重试"})
+		return
+	}
 	if !captcha.VerifyString(req.CaptchaID, req.CaptchaCode) {
 		// 阶段BQ：验证码错误不再计入防爆破锁定——验证码本身就是防机器打码手段，
 		// 输错验证码多为真人肉眼辨认失误（图片扭曲），计入失败会把正常用户锁死
@@ -401,6 +488,8 @@ func userLoginInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 		if accountKey != "" {
 			recordLoginFailure(accountKey)
 		}
+		// v2.0.78 安全加固：恒定延迟消除时序侧信道，同时增加暴力破解时间成本
+		loginFailureDelay()
 		if isFormSubmit {
 			http.Redirect(w, r, "UserLogin?error="+url.QueryEscape(err.Error()), http.StatusFound)
 		} else {

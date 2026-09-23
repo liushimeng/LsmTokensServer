@@ -98,8 +98,10 @@ func RegisterManagerAPIRoutes(mux *http.ServeMux) {
 // RegisterUserAPIRoutes 挂载用户端（userWebListenPort）REST API 路由
 func RegisterUserAPIRoutes(mux *http.ServeMux) {
 	// 登录相关 API（公开，userAuthMiddleware 内已放行）
-	mux.HandleFunc("/CaptchaGenerate", captchaGenerateHandle)
-	mux.HandleFunc("/UserLoginInterface", userLoginInterfaceHandle)
+	// v2.0.78 安全加固：高成本端点套专用限速器（验证码生成 30/min、登录 15/min），
+	// 与 webserver 全局 100/min 形成双层防护。
+	mux.HandleFunc("/CaptchaGenerate", captchaRateLimiter.Wrap(captchaGenerateHandle, "验证码刷新过于频繁，请稍后再试"))
+	mux.HandleFunc("/UserLoginInterface", loginRateLimiter.Wrap(userLoginInterfaceHandle, "登录尝试过于频繁，请稍后再试"))
 
 	// 用户首页 API
 	mux.HandleFunc("/UserInfoInterface", userInfoInterfaceHandle)

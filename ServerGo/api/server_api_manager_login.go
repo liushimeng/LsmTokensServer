@@ -170,9 +170,10 @@ func getManagerToken(r *http.Request) *ManagerTokenClaims {
 }
 
 // RegisterManagerLoginRoutes 挂载管理端公开路由（登录/验证码/登出）
+// v2.0.78 安全加固：登录/验证码端点套专用限速器，与用户端共享同一限速实例（同包单例）。
 func RegisterManagerLoginRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/CaptchaGenerate", captchaGenerateHandle)
-	mux.HandleFunc("/ManagerLoginInterface", managerLoginInterfaceHandle)
+	mux.HandleFunc("/CaptchaGenerate", captchaRateLimiter.Wrap(captchaGenerateHandle, "验证码刷新过于频繁，请稍后再试"))
+	mux.HandleFunc("/ManagerLoginInterface", loginRateLimiter.Wrap(managerLoginInterfaceHandle, "登录尝试过于频繁，请稍后再试"))
 	mux.HandleFunc("/ManagerLogoutInterface", managerLogoutInterfaceHandle)
 }
 
