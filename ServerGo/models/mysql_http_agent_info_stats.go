@@ -142,8 +142,10 @@ func GetAgentInfoUsageStatsAll(subTableNum int, days int) (*AgentInfoUsageSummar
 	return summary, stats, nil
 }
 
-// GetAgentInfoUsageStatsByUser 用户 Agent 信息页统计：仅统计当前用户的平台模型分表，
-// 按 agent_tool_name 聚合调用次数和 Tokens（用户维度）。
+// GetAgentInfoUsageStatsByUser 用户 Agent 信息页统计：按当前用户绑定模型列表
+// 逐个 (user_name, model_name) 精确聚合调用次数和 Tokens（用户「本人全模型」维度）。
+// 20260923：每个模型只统计自己的行（user_name + model_name 双过滤），
+// 不再计入列表外（已解绑/已删除）模型的历史数据。
 // days 参数为统一 span 编码（20260826）：0 无限制；>0 最近 N 天（≤365）；<0 最近 |N| 小时（≤720）。
 func GetAgentInfoUsageStatsByUser(userName string, modelNames []string, subTableNum int, days int) (*AgentInfoUsageSummary, []AgentInfoUsageStat, error) {
 	if database.DB == nil {
@@ -156,20 +158,23 @@ func GetAgentInfoUsageStatsByUser(userName string, modelNames []string, subTable
 	subTableNum = normalizeSubTableNum(subTableNum)
 	days = ClampStatsSpan(days)
 
-	// 一个用户的多个模型可能落在同一张分表，需对 (表名) 去重，避免重复累加。
-	seenTable := make(map[string]struct{})
+	// 20260923：改为按 (user_name, model_name) 精确过滤 + 模型名去重。
+	// 旧实现按「表名」去重且循环内只过滤 user_name，会把该用户在该分表中
+	// 列表之外的模型（已解绑/已删除）数据一并计入，语义不精确。
+	// 同一分表被多个模型命中时各自只统计自己的行，天然不重复累加。
+	seenModel := make(map[string]struct{})
 	acc := make(map[string]*agentInfoUsageAccumulator)
 	for _, modelName := range modelNames {
 		modelName = strings.TrimSpace(modelName)
 		if modelName == "" {
 			continue
 		}
-
-		tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
-		if _, ok := seenTable[tableName]; ok {
+		if _, ok := seenModel[modelName]; ok {
 			continue
 		}
-		seenTable[tableName] = struct{}{}
+		seenModel[modelName] = struct{}{}
+
+		tableName := GetAgentHttpTableName(userName, modelName, subTableNum)
 		if !IsTableExists(tableName) {
 			continue
 		}
@@ -183,7 +188,7 @@ func GetAgentInfoUsageStatsByUser(userName string, modelNames []string, subTable
 		}
 		err := applyStatsSpanWhere(database.DB.Table(tableName), days).
 			Select("agent_tool_name, COUNT(*) as call_count, COALESCE(SUM(tokens_all_size), 0) as tokens_all_size, COALESCE(SUM(tokens_input_size), 0) as tokens_input_size, COALESCE(SUM(tokens_output_size), 0) as tokens_output_size").
-			Where("user_name = ?", userName).
+			Where("user_name = ? AND model_name = ?", userName, modelName).
 			Group("agent_tool_name").
 			Scan(&rows).Error
 		if err != nil {
@@ -248,9 +253,13 @@ func GetAgentInfoUsageStatsByUserModel(userName string, modelName string, subTab
 		TokensInputSize  uint64 `gorm:"column:tokens_input_size"`
 		TokensOutputSize uint64 `gorm:"column:tokens_output_size"`
 	}
+	// 20260923：分表按 (user_name, model_name) 哈希共享，同一张表内有该用户其它模型
+	// 乃至其他用户的记录，必须同时过滤 user_name + model_name（命中
+	// idx_user_model_created 复合索引），否则单用户单模型视角会串入同表其它
+	// (user, model) 的 Agent 统计（切换模型名结果不变的根因）。
 	err := applyStatsSpanWhere(database.DB.Table(tableName), days).
 		Select("agent_tool_name, COUNT(*) as call_count, COALESCE(SUM(tokens_all_size), 0) as tokens_all_size, COALESCE(SUM(tokens_input_size), 0) as tokens_input_size, COALESCE(SUM(tokens_output_size), 0) as tokens_output_size").
-		Where("user_name = ?", userName).
+		Where("user_name = ? AND model_name = ?", userName, modelName).
 		Group("agent_tool_name").
 		Scan(&rows).Error
 	if err != nil {

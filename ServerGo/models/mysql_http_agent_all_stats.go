@@ -63,6 +63,11 @@ type shardScanRow struct {
 	AgentToolName    string    `gorm:"column:agent_tool_name"`
 }
 
+// shardScanFilter 分页扫描的可选额外过滤（20260923）：scoped（用户/模型维度）趋势
+// 查询复用 keyset 分页时，必须追加 user_name/model_name WHERE，否则整张分表
+// （所有用户所有模型）都会被聚合进单用户单模型视角。
+type shardScanFilter func(*gorm.DB) *gorm.DB
+
 // scanShardPaged 对单张分表按主键 id keyset 分页扫描，每批回调 fn 做增量聚合。
 //
 // selectCols：本次需要读取的列（逗号分隔，必须含 id 供 keyset 游标）。
@@ -71,13 +76,16 @@ type shardScanRow struct {
 // days 参数为统一 span 编码（20260826）：0 省略 created_at 过滤；>0 最近 N 天；<0 最近 |N| 小时。
 // 过滤统一加 created_at >= cutoff（Go 端计算，避免 SQL 方言差异）。
 //
+// filters：可选额外过滤链（变长参数，向后兼容既有调用点）；每批在新建链上追加，
+// 供 scoped 查询传入 user_name/model_name 过滤。
+//
 // 终止条件：某批返回行数 < StatsShardScanBatch，或 ctx 取消。
 // ctx.Canceled / DeadlineExceeded 直接返回该 err（调用方按现有约定 break 返回部分结果）。
 //
 // GORM 链复用陷阱：每批必须从 sdb.Table(tableName) 新建链，禁止跨批复用同一 *gorm.DB
 // （.Where 累积会污染下一批的 WHERE 条件）。
 // sdb 已由 database.StatsDB() 绑定 25s ctx，helper 内不再 WithContext。
-func scanShardPaged(sdb *gorm.DB, tableName, selectCols string, days int, fn func(rows []shardScanRow)) error {
+func scanShardPaged(sdb *gorm.DB, tableName, selectCols string, days int, fn func(rows []shardScanRow), filters ...shardScanFilter) error {
 	if sdb == nil {
 		return nil
 	}
@@ -90,6 +98,11 @@ func scanShardPaged(sdb *gorm.DB, tableName, selectCols string, days int, fn fun
 		q := sdb.Table(tableName).Select(selectCols).Where("id > ?", lastID)
 		if filterTime {
 			q = q.Where("created_at >= ?", cutoff)
+		}
+		for _, f := range filters {
+			if f != nil {
+				q = f(q)
+			}
 		}
 		if err := q.Order("id ASC").Limit(StatsShardScanBatch).Find(&rows).Error; err != nil {
 			return err
@@ -144,9 +157,10 @@ func GetTimeRangeStatsAll(subTableNum int, days int) ([]TimeRangeStat, error) {
 		}
 
 		// v2.0.58: keyset 分页扫描，避免一次性拉全表 created_at
+		// 20260923：hour 粒度桶键需截断整点（statsTimeBucketKey），否则全部掉零
 		err := scanShardPaged(sdb, tableName, "id, created_at", days, func(rows []shardScanRow) {
 			for _, r := range rows {
-				bucketCounts[r.CreatedAt.Format(goFmt)]++
+				bucketCounts[statsTimeBucketKey(r.CreatedAt, granularity)]++
 			}
 		})
 		if err != nil {
@@ -708,10 +722,6 @@ func GetHourlyTrendAll(subTableNum int, hours int) (*HourlyTrendResult, error) {
 	if hours > hourlyTrendHourBucketThreshold {
 		granularity = "day"
 	}
-	goFmt := "2006-01-02 15:04"
-	if granularity == "day" {
-		goFmt = "2006-01-02"
-	}
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -739,11 +749,13 @@ func GetHourlyTrendAll(subTableNum int, hours int) (*HourlyTrendResult, error) {
 			continue
 		}
 
+		// 20260923：hour 粒度桶键需截断整点（statsTimeBucketKey），否则数据永远
+		// 匹配不上整点槽位、趋势 K 线全部掉零。
 		err := scanShardPaged(sdb, tableName,
 			"id, created_at, tokens_input_size, tokens_output_size, tokens_all_size",
 			daysForFilter, func(rows []shardScanRow) {
 				for _, r := range rows {
-					key := r.CreatedAt.Format(goFmt)
+					key := statsTimeBucketKey(r.CreatedAt, granularity)
 					b, ok := buckets[key]
 					if !ok {
 						b = &hourlyTrendBucket{}

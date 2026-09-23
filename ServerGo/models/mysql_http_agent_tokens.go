@@ -378,8 +378,10 @@ func GetTokensRangeReport(userName, modelName string, subTableNum int, start, en
 		genValidCount  int64
 	}
 	buckets := make(map[string]*bucket)
+	// 20260923：hour 粒度桶键需截断整点（statsTimeBucketKey），否则数据键
+	// （如 "10:37"）永远匹配不上槽位键（"10:00"），报告时序全部掉零。
 	for _, r := range rows {
-		dateKey := r.CreatedAt.Format(goFmt)
+		dateKey := statsTimeBucketKey(r.CreatedAt, granularity)
 		b, ok := buckets[dateKey]
 		if !ok {
 			b = &bucket{date: dateKey}
@@ -432,7 +434,7 @@ func GetTokensRangeReport(userName, modelName string, subTableNum int, start, en
 		}
 	}
 
-	series := tokensFillGaps(results, start, end, step, goFmt)
+	series := tokensFillGaps(results, start, end, step, goFmt, granularity)
 
 	var totalInput, totalOutput, totalAll uint64
 	var totalCount int64
@@ -504,7 +506,8 @@ func tokensRangeGoFormat(granularity string) string {
 
 // tokensFillGaps 按时间步长补齐空槽位，让时序长度对齐真实的区间跨度
 // 最多补齐 maxBuckets(=2000) 个桶，避免 UI / 网络爆炸；超出时保留原始聚合结果。
-func tokensFillGaps(series []TokensRangeStat, start, end time.Time, step time.Duration, goFmt string) []TokensRangeStat {
+// 20260923：hour 粒度槽位起点截断到整点，与 statsTimeBucketKey 的数据桶键对齐。
+func tokensFillGaps(series []TokensRangeStat, start, end time.Time, step time.Duration, goFmt, granularity string) []TokensRangeStat {
 	const maxBuckets = 2000
 	if start.IsZero() || end.IsZero() || !end.After(start) {
 		return series
@@ -512,6 +515,10 @@ func tokensFillGaps(series []TokensRangeStat, start, end time.Time, step time.Du
 	totalBuckets := int(end.Sub(start) / step)
 	if totalBuckets <= 0 || totalBuckets > maxBuckets {
 		return series
+	}
+
+	if granularity == "hour" {
+		start = truncateToHour(start)
 	}
 
 	m := make(map[string]TokensRangeStat, len(series))

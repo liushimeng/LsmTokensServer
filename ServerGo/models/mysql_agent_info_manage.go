@@ -169,7 +169,10 @@ func MigrateAgentToolColumns(subTableNum int) error {
 	}
 
 	for i := 0; i < subTableNum; i++ {
-		tableName := GetAgentHttpTableName("", "", i+1)
+		// 20260923 修复：旧实现 GetAgentHttpTableName("", "", i+1) 的第三参是分表总数，
+		// 实际得到 hash("_") % (i+1)，既跳过部分分表又重复检查其它分表；
+		// 迁移场景应直接枚举全部分表名。
+		tableName := fmt.Sprintf("TAgentHttpTransactionDataItem_%02d", i)
 
 		// 检查并添加 agent_tool_name 字段
 		if !tableHasColumn(tableName, "agent_tool_name") {

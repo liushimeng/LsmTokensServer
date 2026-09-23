@@ -1102,10 +1102,10 @@ func GetTimeRangeStats(userName, modelName string, subTableNum int, days int) ([
 		return nil, fmt.Errorf("failed to get time range stats rows: %w", err)
 	}
 
-	// Go 端桶聚合
+	// Go 端桶聚合（20260923：hour 粒度桶键需截断整点，见 statsTimeBucketKey）
 	bucketCounts := make(map[string]int64)
 	for _, ts := range createdAts {
-		key := ts.Format(goFmt)
+		key := statsTimeBucketKey(ts, granularity)
 		bucketCounts[key]++
 	}
 
@@ -1582,6 +1582,32 @@ func applyStatsSpanWhere(tx *gorm.DB, span int) *gorm.DB {
 		return tx.Where("created_at >= ?", cutoff)
 	}
 	return tx
+}
+
+// truncateToHour 把时间截断到整点（分/秒/纳秒清零）。
+// 用 time.Date 构造而非 t.Truncate(time.Hour)：Truncate 自 UTC epoch 起算，
+// 在非整时区（如 +05:30）会错位；time.Date 对任意时区都精确对齐本地整点。
+func truncateToHour(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
+}
+
+// statsTimeBucketKey 生成时序统计的桶键（20260923 修复小时桶键错位）。
+//
+// 槽位序列一律按整点/整日对齐生成（如 "17:00"），若数据桶键直接用
+// created_at 原始分钟格式化（如 "17:49"），永远匹配不上任何槽位，
+// 小时粒度趋势/时间分布图会全部掉零。规则：
+//   - minute：槽位步长 1 分钟，键与原始分钟天然对齐，直接格式化；
+//   - hour：created_at 先截断到整点再格式化；
+//   - day/week（默认）：键只含日期，直接格式化。
+func statsTimeBucketKey(ts time.Time, granularity string) string {
+	switch granularity {
+	case "minute":
+		return ts.Format("2006-01-02 15:04")
+	case "hour":
+		return truncateToHour(ts).Format("2006-01-02 15:04")
+	default:
+		return ts.Format("2006-01-02")
+	}
 }
 
 // DailyStat 全站单日汇总（调用次数 + Tokens），用于 ModelInfo / AgentInfo 时序折线图。
@@ -2863,9 +2889,11 @@ func protocolTypeKey(protocolType int) string {
 	}
 }
 
-// GetHourlyTrendByUser 用户端趋势：按当前用户的平台模型(model_name)聚合调用次数与 Tokens。
-// 仅扫描该用户每个 model 对应的单张分表（GetAgentHttpTableName 哈希定位），
-// 不会越权读到其他用户的数据。
+// GetHourlyTrendByUser 用户端趋势：按当前用户的平台模型(model_name)列表逐个
+// (user_name, model_name) 精确聚合调用次数与 Tokens。
+// 20260923：每个模型扫描时追加 user_name + model_name 过滤（分表按
+// (user, model) 哈希共享，缺过滤会把同表其他用户/模型数据全部计入），
+// 同一分表被多个模型命中时各自只统计自己的行，不会重复累加。
 //
 // 参数 hours 语义与 GetHourlyTrendAll 一致：
 //   - hours<=0 → 视为 24
@@ -2895,10 +2923,6 @@ func GetHourlyTrendByUser(userName string, modelNames []string, subTableNum int,
 	granularity := "hour"
 	if hours > hourlyTrendHourBucketThreshold {
 		granularity = "day"
-	}
-	goFmt := "2006-01-02 15:04"
-	if granularity == "day" {
-		goFmt = "2006-01-02"
 	}
 
 	sdb, cancel := database.StatsDB()
@@ -2935,11 +2959,14 @@ func GetHourlyTrendByUser(userName string, modelNames []string, subTableNum int,
 			continue
 		}
 
+		// 20260923：scoped 查询必须追加 user_name + model_name 过滤。
+		// 旧实现整表扫描（分表内含所有用户所有模型），且同一张表被多个模型
+		// 命中时重复扫描整表，趋势 K 线严重虚高。
 		err := scanShardPaged(sdb, tableName,
 			"id, created_at, tokens_input_size, tokens_output_size, tokens_all_size",
 			daysForFilter, func(rows []shardScanRow) {
 				for _, r := range rows {
-					key := r.CreatedAt.Format(goFmt)
+					key := statsTimeBucketKey(r.CreatedAt, granularity)
 					b, ok := buckets[key]
 					if !ok {
 						b = &hourlyTrendBucket{}
@@ -2950,6 +2977,8 @@ func GetHourlyTrendByUser(userName string, modelNames []string, subTableNum int,
 					b.outTokens += r.TokensOutputSize
 					b.allTokens += r.TokensAllSize
 				}
+			}, func(q *gorm.DB) *gorm.DB {
+				return q.Where("user_name = ? AND model_name = ?", userName, modelName)
 			})
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -2974,6 +3003,7 @@ func GetHourlyTrendByUser(userName string, modelNames []string, subTableNum int,
 // GetHourlyTrendByUserModel 用户+模型维度按小时/天桶聚合调用次数与 Tokens。
 // 与 GetHourlyTrendByUser 的区别：仅扫一张分表（按 user_name + model_name 路由），
 // 适用于 ModelInfo / AgentInfo 页面指定 user/model 后查看单一模型视角趋势。
+// 20260923：扫描追加 user_name + model_name 过滤（缺过滤会整表聚合）。
 //
 // hours 语义：<=0 视为 24；1~168 小时桶；169~720 天桶。
 // 调用方：管理端 /ModelInfoInterface 与 /AgentInfoInterface action="trend"（指定 user_name+model_name），
@@ -3001,10 +3031,6 @@ func GetHourlyTrendByUserModel(userName string, modelName string, subTableNum in
 	if hours > hourlyTrendHourBucketThreshold {
 		granularity = "day"
 	}
-	goFmt := "2006-01-02 15:04"
-	if granularity == "day" {
-		goFmt = "2006-01-02"
-	}
 
 	sdb, cancel := database.StatsDB()
 	defer cancel()
@@ -3023,11 +3049,13 @@ func GetHourlyTrendByUserModel(userName string, modelName string, subTableNum in
 		daysForFilter = 1
 	}
 
+	// 20260923：scoped 查询必须追加 user_name + model_name 过滤，
+	// 旧实现整表扫描把分表内其他用户/模型数据全部计入单用户单模型趋势。
 	err := scanShardPaged(sdb, tableName,
 		"id, created_at, tokens_input_size, tokens_output_size, tokens_all_size",
 		daysForFilter, func(rows []shardScanRow) {
 			for _, r := range rows {
-				key := r.CreatedAt.Format(goFmt)
+				key := statsTimeBucketKey(r.CreatedAt, granularity)
 				b, ok := buckets[key]
 				if !ok {
 					b = &hourlyTrendBucket{}
@@ -3038,6 +3066,8 @@ func GetHourlyTrendByUserModel(userName string, modelName string, subTableNum in
 				b.outTokens += r.TokensOutputSize
 				b.allTokens += r.TokensAllSize
 			}
+		}, func(q *gorm.DB) *gorm.DB {
+			return q.Where("user_name = ? AND model_name = ?", userName, modelName)
 		})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
