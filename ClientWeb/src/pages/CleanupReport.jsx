@@ -6,10 +6,13 @@ import PageHeader from '../components/PageHeader'
 import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
 import { nearestSpan } from '../shared/timeSpan'
 import { useI18n } from '../i18n'
+import { aggregateTables, spanDaysBetween, retentionJudgment, buildSubTableShares } from './cleanup-report/coverageStats'
 
 // 过期数据清理报告：CleanupReportInterface（POST JSON）
 // action: list {page,page_size,days} / state / tables [table=精确计数]
 // 20260826：时间跨度为动态档位（1 小时 ~ transactionRetentionDays+1 天，统一 span 编码）
+// 阶段CR：KPI 卡「数据保留配置 / 数据清理覆盖」重设计去重 + 新增「清理任务统计」模块
+// （stats/sub_table_stats：TAgentHttpTransactionCleanupReport 项统计，参考模型显示占比条）
 
 const PAGE_SIZE = 20
 
@@ -59,6 +62,8 @@ export default function CleanupReport() {
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState({})
   const [daily, setDaily] = useState([])
+  const [stats, setStats] = useState(null) // v2.0.79 阶段CR: 清理报告项统计
+  const [subStats, setSubStats] = useState([]) // v2.0.79 阶段CR: 按分表聚合统计
   const [selDay, setSelDay] = useState(null) // 趋势图选中日期（触屏点击替代 hover title）
   const [state, setState] = useState(null)
   const [tables, setTables] = useState(null)
@@ -74,6 +79,8 @@ export default function CleanupReport() {
         setTotal(res.total || 0)
         setSummary(res.total_summary || {})
         setDaily(res.daily_summaries || [])
+        setStats(res.stats || null)
+        setSubStats(res.sub_table_stats || [])
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false))
@@ -121,6 +128,36 @@ export default function CleanupReport() {
     ? (state.retention_days <= 0 ? t('cleanup.retentionDaysDisabled') : t('cleanup.retentionDaysValue', { days: state.retention_days }))
     : '-'
   const dailyMax = Math.max(1, ...daily.map((s) => s.deleted_rows || 0))
+
+  // v2.0.79 阶段CR: 现存数据（TAgentHttpTransactionDataItem 分表现存汇总）
+  // 与保留配置健康判定。注意不再用 state.earliest_transaction_at（仅在每日清理
+  // 执行时刷新，禁用清理时恒为空）；分表元数据的 MIN/MAX(created_at) 更可靠。
+  const kept = aggregateTables(tables)
+  const keptSpan = spanDaysBetween(kept.earliest, kept.latest)
+  const retDays = state && typeof state.retention_days === 'number' ? state.retention_days : 0
+  const judgment = retentionJudgment(keptSpan, retDays)
+  const judgmentColors = { on: '#059669', warn: '#d97706', off: '#dc2626', muted: '#94a3b8' }
+  const rowShares = buildSubTableShares(subStats, 'deleted_rows')
+  const tokenShares = buildSubTableShares(subStats, 'deleted_tokens_all')
+
+  // shareBars 占比条（参考 ModelInfo 页「模型 Token 用量」实现）
+  const shareBars = (items) => {
+    if (!items || !items.length) return <div className="table-empty">{t('cleanup.taskStatsNoData')}</div>
+    return items.map((it) => {
+      const share = Math.min(Math.max(Number(it.share) || 0, 0), 100)
+      return (
+        <div key={it.name} style={{ padding: '12px 0', borderTop: '1px solid #f1f5f9' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+            <b style={{ fontSize: 12, wordBreak: 'break-all' }}>{it.name}</b>
+            <span style={{ color: '#475569', fontSize: 12 }}>{fmt(it.value)} · {share.toFixed(1)}%</span>
+          </div>
+          <div style={{ height: 10, background: '#e2e8f0', borderRadius: 999, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: share + '%', minWidth: 2, borderRadius: 999, background: 'linear-gradient(90deg,#38bdf8,#2563eb)' }} />
+          </div>
+        </div>
+      )
+    })
+  }
 
   const columns = [
     { key: 'cleanup_date', title: t('cleanup.cleanupDate'), render: (v) => <b>{v}</b> },
@@ -176,41 +213,49 @@ export default function CleanupReport() {
           <div className="card-grid kpi-grid">
             <div className="card"><h3>{t('cleanup.totalDeletedRows')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.total_deleted_rows)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('cleanup.allTasksCumulative')}</div></div>
             <div className="card"><h3>{t('cleanup.totalRecoveredTokens')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmt(summary.total_tokens_all)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('cleanup.inputOutputCumulative')}</div></div>
+            {/* v2.0.79 阶段CR: 卡3 重设计——保存的时间配置信息 + TAgentHttpTransactionDataItem 现有保存信息（原「当前保留天数配置」，去重） */}
             <div className="card">
-              <h3>{t('cleanup.dataCoverage')}</h3>
-              {(() => {
-                const earliest = state && state.earliest_transaction_at
-                const latest = state && state.latest_transaction_at
-                if (!earliest || !latest) {
-                  return <div style={{ fontSize: 24, fontWeight: 800, color: '#cbd5e1' }}>-</div>
-                }
-                const d1 = new Date(earliest)
-                const d2 = new Date(latest)
-                const days = Math.max(1, Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)))
-                const retDays = state && typeof state.retention_days === 'number' ? state.retention_days : 0
-                let color = '#059669' // green: normal
-                let label = t('cleanup.coverageNormal')
-                if (retDays > 0) {
-                  if (days > retDays + 7) { color = '#dc2626'; label = t('cleanup.coverageAbnormal') }
-                  else if (days > retDays + 1) { color = '#d97706'; label = t('cleanup.coverageBacklog') }
-                }
-                const fmtDate = (v) => {
-                  const d = new Date(v)
-                  if (isNaN(d.getTime())) return '-'
-                  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-                }
-                return (
-                  <>
-                    <div style={{ fontSize: 24, fontWeight: 800, color }}>{days} <span style={{ fontSize: 14 }}>{t('cleanup.daysUnit')}</span></div>
-                    <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                      <span style={{ color, fontWeight: 700 }}>{label}</span>
-                      <div style={{ marginTop: 2 }}>{fmtDate(earliest)} ~ {fmtDate(latest)}</div>
-                    </div>
-                  </>
-                )
-              })()}
+              <h3>{t('cleanup.retentionConfigTitle')}</h3>
+              <div style={{ fontSize: 24, fontWeight: 800 }}>{retention}</div>
+              <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                {retDays > 0 ? t('cleanup.retentionConfigDesc', { days: retDays }) : t('cleanup.retentionConfigDescDisabled')}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.8, color: '#64748b' }}>
+                <div>
+                  {state && state.next_run_at ? t('cleanup.scheduleNext', { time: fmtTime(state.next_run_at) }) : t('cleanup.scheduleDisabled')}
+                </div>
+                <div>
+                  {t('cleanup.currentKeptLabel')}<b>{fmt(kept.rows)}</b> {t('cleanup.rows')}
+                </div>
+                <div>{kept.earliest || '-'} ~ {kept.latest || '-'}{keptSpan > 0 ? `（${keptSpan} ${t('cleanup.daysUnit')}）` : ''}</div>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, fontWeight: 700, color: judgmentColors[judgment.tone] }}>
+                {t(judgment.key)}
+              </div>
             </div>
-            <div className="card"><h3>{t('cleanup.currentRetentionConfig')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{retention}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('cleanup.recordsAutoDeleted')}</div></div>
+            {/* v2.0.79 阶段CR: 卡4 重设计——TAgentHttpTransactionCleanupReport 删除统计 + 现存数据统计与时间（原「数据覆盖范围」，去重） */}
+            <div className="card">
+              <h3>{t('cleanup.coverageTitle')}</h3>
+              <div style={{ fontSize: 20, fontWeight: 800 }}>
+                {fmt(summary.total_deleted_rows)} <span style={{ fontSize: 12, color: '#94a3b8' }}>/</span> ≈{fmt(kept.rows)}
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>{t('cleanup.coverageDeletedVsKept')}</div>
+              <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.8, color: '#64748b' }}>
+                <div>
+                  {t('cleanup.coverageDeletedLabel')}：{t('cleanup.coverageTokens', { count: fmt(summary.total_tokens_all) })}
+                </div>
+                {stats && stats.first_cleanup_date ? (
+                  <div>{t('cleanup.coveragePeriod', { start: stats.first_cleanup_date, end: stats.last_cleanup_date })}</div>
+                ) : null}
+                <div>
+                  {t('cleanup.coverageKeptLabel')}：{kept.earliest || '-'} ~ {kept.latest || '-'}
+                  {kept.dataBytes + kept.indexBytes > 0 ? ` · ${fmtBytes(kept.dataBytes + kept.indexBytes)}` : ''}
+                </div>
+                {state && (state.last_cutoff_time || state.cutoff_time) ? (
+                  <div style={{ color: '#94a3b8' }}>{t('cleanup.coverageCutoff', { time: fmtTime(state.last_cutoff_time || state.cutoff_time) })}</div>
+                ) : null}
+              </div>
+            </div>
           </div>
 
           {daily.length ? (
@@ -231,6 +276,64 @@ export default function CleanupReport() {
                   {(() => { const s = daily.find((x) => x.date === selDay); return s ? t('cleanup.dailyBarDetail', { date: s.date, rows: fmt(s.deleted_rows), tokens: fmt(s.deleted_tokens_all) }) : '' })()}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+
+          {/* v2.0.79 阶段CR: 新模块——TAgentHttpTransactionCleanupReport 项统计（参考模型显示：概览行 + 分表占比条 + 分表明细表） */}
+          {stats && stats.total_tasks > 0 ? (
+            <div className="card">
+              <h3>{t('cleanup.taskStatsTitle')}</h3>
+              <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 12 }}>{t('cleanup.taskStatsSubtitle')}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10, marginBottom: 16 }}>
+                {[
+                  { label: t('cleanup.taskStatsTotalTasks'), value: fmt(stats.total_tasks) },
+                  { label: t('cleanup.taskStatsStatusDist'), value: `${fmt(stats.success_count)} / ${fmt(stats.partial_count)} / ${fmt(stats.failed_count)}` },
+                  { label: t('cleanup.taskStatsAvgDuration'), value: fmt(stats.avg_duration_ms) + t('cleanup.ms') },
+                  { label: t('cleanup.taskStatsMaxDuration'), value: fmt(stats.max_duration_ms) + t('cleanup.ms') },
+                  { label: t('cleanup.taskStatsPeriod'), value: stats.first_cleanup_date && stats.last_cleanup_date ? `${stats.first_cleanup_date} ~ ${stats.last_cleanup_date}` : '-' },
+                ].map((it, i) => (
+                  <div key={i} style={{ border: '1px solid #f1f5f9', borderRadius: 10, padding: '10px 12px' }}>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{it.label}</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2, wordBreak: 'break-all' }}>{it.value}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="card-grid">
+                <div>
+                  <h3 style={{ fontSize: 14 }}>{t('cleanup.taskStatsRowShare')}</h3>
+                  {shareBars(rowShares)}
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 14 }}>{t('cleanup.taskStatsTokenShare')}</h3>
+                  {shareBars(tokenShares)}
+                </div>
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <h3 style={{ fontSize: 14 }}>{t('cleanup.taskStatsTable')}</h3>
+                <DataTable
+                  rowKey="sub_table_index"
+                  rows={subStats}
+                  empty={t('cleanup.taskStatsNoData')}
+                  columns={[
+                    { key: 'sub_table_index', title: t('cleanup.subTableIndex'), render: (v) => <span style={{ background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: 6, fontSize: 11 }}>#{v}</span> },
+                    { key: 'sub_table_name', title: t('cleanup.subTableName'), render: (v) => <code style={{ fontSize: 11, color: '#475569' }}>{v}</code> },
+                    { key: 'task_count', title: t('cleanup.taskStatsTaskCount'), render: fmt },
+                    { key: 'deleted_rows', title: t('cleanup.deletedRows'), render: (v) => <b>{fmt(v)}</b> },
+                    { key: 'deleted_tokens_all', title: t('cleanup.totalTokens'), render: fmt },
+                    { key: 'status_counts', title: t('cleanup.status'), render: (_, s) => (
+                      <span style={{ fontSize: 12 }}>
+                        <span style={{ color: '#059669' }}>{fmt(s.success_count)}</span>
+                        {' / '}
+                        <span style={{ color: s.partial_count > 0 ? '#d97706' : '#94a3b8' }}>{fmt(s.partial_count)}</span>
+                        {' / '}
+                        <span style={{ color: s.failed_count > 0 ? '#dc2626' : '#94a3b8' }}>{fmt(s.failed_count)}</span>
+                      </span>
+                    ) },
+                    { key: 'avg_duration_ms', title: t('cleanup.taskStatsAvgDuration'), render: (v) => fmt(v) + t('cleanup.ms') },
+                    { key: 'last_cleanup_date', title: t('cleanup.lastCleanupDateCol'), render: (v) => v || '-' },
+                  ]}
+                />
+              </div>
             </div>
           ) : null}
 

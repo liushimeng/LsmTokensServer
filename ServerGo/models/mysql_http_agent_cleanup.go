@@ -996,6 +996,176 @@ func GetCleanupReportsTotalSummary() (CleanupReportsTotalSummary, error) {
 	return s, nil
 }
 
+// ============================================================================
+// v2.0.79 阶段CR: 清理报告项统计（/CleanupReport 页面「清理任务统计」模块）
+// ============================================================================
+//
+// 与 GetCleanupReportsTotalSummary 同口径（全部时间，不分页不受 days 过滤），
+// 额外提供：状态分布（success/partial/failed）、耗时统计、清理周期首末日期、
+// 按分表聚合的删除量 —— 供前端占比条（参考 ModelInfo 模型显示）与明细表渲染。
+// 表量级 ≈ 8 行/天（1 年 ≈ 2920 行），全表聚合开销可忽略。
+
+// CleanupReportsStats 清理报告项统计（全部时间口径）
+type CleanupReportsStats struct {
+	TotalTasks       int64  `json:"total_tasks"`
+	SuccessCount     int64  `json:"success_count"`
+	PartialCount     int64  `json:"partial_count"`
+	FailedCount      int64  `json:"failed_count"`
+	TotalDurationMs  int64  `json:"total_duration_ms"`
+	AvgDurationMs    int64  `json:"avg_duration_ms"`
+	MaxDurationMs    int64  `json:"max_duration_ms"`
+	FirstCleanupDate string `json:"first_cleanup_date"`
+	LastCleanupDate  string `json:"last_cleanup_date"`
+	TotalDeletedRows int64  `json:"total_deleted_rows"`
+	TotalTokensIn    uint64 `json:"total_tokens_in"`
+	TotalTokensOut   uint64 `json:"total_tokens_out"`
+	TotalTokensAll   uint64 `json:"total_tokens_all"`
+	MinCutoffTime    string `json:"min_cutoff_time"` // "2006-01-02 15:04:05"，空=无记录
+	MaxCutoffTime    string `json:"max_cutoff_time"`
+}
+
+// CleanupSubTableStats 按分表聚合的清理任务统计
+type CleanupSubTableStats struct {
+	SubTableIndex    int    `json:"sub_table_index"`
+	SubTableName     string `json:"sub_table_name"`
+	TaskCount        int64  `json:"task_count"`
+	SuccessCount     int64  `json:"success_count"`
+	PartialCount     int64  `json:"partial_count"`
+	FailedCount      int64  `json:"failed_count"`
+	DeletedRows      int64  `json:"deleted_rows"`
+	DeletedTokensIn  uint64 `json:"deleted_tokens_in"`
+	DeletedTokensOut uint64 `json:"deleted_tokens_out"`
+	DeletedTokensAll uint64 `json:"deleted_tokens_all"`
+	AvgDurationMs    int64  `json:"avg_duration_ms"`
+	LastCleanupDate  string `json:"last_cleanup_date"`
+}
+
+// GetCleanupReportsStats 汇总清理报告项统计 + 按分表聚合（管理员端 + 用户端共用）
+//
+// 数值列全部 COALESCE 防空表 NULL 泄漏；cutoff_time 用 *string 接收后
+// normalizeInspectorTime 规整（SQLite 驱动返回 string，直接扫 time.Time 会
+// 报 unsupported Scan —— v2.0.63 已实证的坑）。
+func GetCleanupReportsStats() (CleanupReportsStats, []CleanupSubTableStats, error) {
+	var stats CleanupReportsStats
+	if database.DB == nil {
+		return stats, nil, fmt.Errorf("数据库未初始化")
+	}
+
+	var overall struct {
+		TotalTasks       int64   `gorm:"column:total_tasks"`
+		SuccessCount     int64   `gorm:"column:success_count"`
+		PartialCount     int64   `gorm:"column:partial_count"`
+		FailedCount      int64   `gorm:"column:failed_count"`
+		TotalDurationMs  float64 `gorm:"column:total_duration_ms"`
+		AvgDurationMs    float64 `gorm:"column:avg_duration_ms"`
+		MaxDurationMs    int64   `gorm:"column:max_duration_ms"`
+		FirstCleanupDate *string `gorm:"column:first_cleanup_date"`
+		LastCleanupDate  *string `gorm:"column:last_cleanup_date"`
+		TotalDeletedRows int64   `gorm:"column:total_deleted_rows"`
+		TotalTokensIn    uint64  `gorm:"column:total_tokens_in"`
+		TotalTokensOut   uint64  `gorm:"column:total_tokens_out"`
+		TotalTokensAll   uint64  `gorm:"column:total_tokens_all"`
+		MinCutoffTime    *string `gorm:"column:min_cutoff_time"`
+		MaxCutoffTime    *string `gorm:"column:max_cutoff_time"`
+	}
+	err := database.DB.Table(CleanupReportTableName).Select(`
+		COUNT(*)                                                        AS total_tasks,
+		COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END),0) AS success_count,
+		COALESCE(SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END),0) AS partial_count,
+		COALESCE(SUM(CASE WHEN status = 'failed'  THEN 1 ELSE 0 END),0) AS failed_count,
+		COALESCE(SUM(duration_ms), 0)                                   AS total_duration_ms,
+		COALESCE(AVG(duration_ms), 0)                                   AS avg_duration_ms,
+		COALESCE(MAX(duration_ms), 0)                                   AS max_duration_ms,
+		MIN(cleanup_date)                                               AS first_cleanup_date,
+		MAX(cleanup_date)                                               AS last_cleanup_date,
+		COALESCE(SUM(deleted_rows), 0)                                  AS total_deleted_rows,
+		COALESCE(SUM(deleted_tokens_in), 0)                             AS total_tokens_in,
+		COALESCE(SUM(deleted_tokens_out), 0)                            AS total_tokens_out,
+		COALESCE(SUM(deleted_tokens_all), 0)                            AS total_tokens_all,
+		MIN(cutoff_time)                                                AS min_cutoff_time,
+		MAX(cutoff_time)                                                AS max_cutoff_time
+	`).Scan(&overall).Error
+	if err != nil {
+		return stats, nil, fmt.Errorf("汇总清理报告项统计失败: %w", err)
+	}
+
+	stats = CleanupReportsStats{
+		TotalTasks:       overall.TotalTasks,
+		SuccessCount:     overall.SuccessCount,
+		PartialCount:     overall.PartialCount,
+		FailedCount:      overall.FailedCount,
+		TotalDurationMs:  int64(overall.TotalDurationMs + 0.5),
+		AvgDurationMs:    int64(overall.AvgDurationMs + 0.5),
+		MaxDurationMs:    overall.MaxDurationMs,
+		FirstCleanupDate: derefCleanupDate(overall.FirstCleanupDate),
+		LastCleanupDate:  derefCleanupDate(overall.LastCleanupDate),
+		TotalDeletedRows: overall.TotalDeletedRows,
+		TotalTokensIn:    overall.TotalTokensIn,
+		TotalTokensOut:   overall.TotalTokensOut,
+		TotalTokensAll:   overall.TotalTokensAll,
+		MinCutoffTime:    normalizeInspectorTime(overall.MinCutoffTime),
+		MaxCutoffTime:    normalizeInspectorTime(overall.MaxCutoffTime),
+	}
+
+	var subTables []struct {
+		SubTableIndex    int     `gorm:"column:sub_table_index"`
+		SubTableName     string  `gorm:"column:sub_table_name"`
+		TaskCount        int64   `gorm:"column:task_count"`
+		SuccessCount     int64   `gorm:"column:success_count"`
+		PartialCount     int64   `gorm:"column:partial_count"`
+		FailedCount      int64   `gorm:"column:failed_count"`
+		DeletedRows      int64   `gorm:"column:deleted_rows"`
+		DeletedTokensIn  uint64  `gorm:"column:deleted_tokens_in"`
+		DeletedTokensOut uint64  `gorm:"column:deleted_tokens_out"`
+		DeletedTokensAll uint64  `gorm:"column:deleted_tokens_all"`
+		AvgDurationMs    float64 `gorm:"column:avg_duration_ms"`
+		LastCleanupDate  *string `gorm:"column:last_cleanup_date"`
+	}
+	if err := database.DB.Table(CleanupReportTableName).Select(`
+		sub_table_index,
+		MAX(sub_table_name)                                             AS sub_table_name,
+		COUNT(*)                                                        AS task_count,
+		COALESCE(SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END),0) AS success_count,
+		COALESCE(SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END),0) AS partial_count,
+		COALESCE(SUM(CASE WHEN status = 'failed'  THEN 1 ELSE 0 END),0) AS failed_count,
+		COALESCE(SUM(deleted_rows), 0)                                  AS deleted_rows,
+		COALESCE(SUM(deleted_tokens_in), 0)                             AS deleted_tokens_in,
+		COALESCE(SUM(deleted_tokens_out), 0)                            AS deleted_tokens_out,
+		COALESCE(SUM(deleted_tokens_all), 0)                            AS deleted_tokens_all,
+		COALESCE(AVG(duration_ms), 0)                                   AS avg_duration_ms,
+		MAX(cleanup_date)                                               AS last_cleanup_date
+	`).Group("sub_table_index").Order("sub_table_index ASC").Scan(&subTables).Error; err != nil {
+		return stats, nil, fmt.Errorf("按分表聚合清理报告统计失败: %w", err)
+	}
+
+	out := make([]CleanupSubTableStats, 0, len(subTables))
+	for _, s := range subTables {
+		out = append(out, CleanupSubTableStats{
+			SubTableIndex:    s.SubTableIndex,
+			SubTableName:     s.SubTableName,
+			TaskCount:        s.TaskCount,
+			SuccessCount:     s.SuccessCount,
+			PartialCount:     s.PartialCount,
+			FailedCount:      s.FailedCount,
+			DeletedRows:      s.DeletedRows,
+			DeletedTokensIn:  s.DeletedTokensIn,
+			DeletedTokensOut: s.DeletedTokensOut,
+			DeletedTokensAll: s.DeletedTokensAll,
+			AvgDurationMs:    int64(s.AvgDurationMs + 0.5),
+			LastCleanupDate:  derefCleanupDate(s.LastCleanupDate),
+		})
+	}
+	return stats, out, nil
+}
+
+// derefCleanupDate 解引用 cleanup_date 聚合结果（空表为 NULL → 空串）
+func derefCleanupDate(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
+}
+
 // ensure context import used (referenced via getAppContext in cleanup loop)
 var _ = context.Background
 

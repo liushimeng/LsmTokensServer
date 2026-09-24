@@ -45,6 +45,8 @@ type CleanupReportAPIResponse struct {
 	Tables         []modelsdb.SubTableInspectorInfo              `json:"tables,omitempty"`          // v2.0.63: 分表元数据快照
 	ExactTable     string                                        `json:"exact_table,omitempty"`     // v2.0.63: 精确计数的目标表名
 	ExactRowCount  int64                                         `json:"exact_row_count,omitempty"` // v2.0.63: 精确计数结果
+	Stats          *modelsdb.CleanupReportsStats                 `json:"stats,omitempty"`           // v2.0.79 阶段CR: 清理报告项统计
+	SubTableStats  []modelsdb.CleanupSubTableStats               `json:"sub_table_stats,omitempty"` // v2.0.79 阶段CR: 按分表聚合统计
 }
 
 // cleanupReportInterfaceHandle 处理 /CleanupReportInterface API 请求（管理员端）
@@ -124,6 +126,14 @@ func cleanupReportInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			logger.Printf("[WARNING] CleanupReport list: modelsdb.GetCleanupReportsDailySummary failed: %v", err)
 		}
 
+		// v2.0.79 阶段CR: 清理报告项统计（状态分布/耗时/分表聚合），失败降级为空不阻断
+		if stats, subStats, err := modelsdb.GetCleanupReportsStats(); err == nil {
+			resp.Stats = &stats
+			resp.SubTableStats = subStats
+		} else {
+			logger.Printf("[WARNING] CleanupReport list: modelsdb.GetCleanupReportsStats failed: %v", err)
+		}
+
 	case "summary":
 		summary, err := modelsdb.GetCleanupReportsTotalSummary()
 		if err != nil {
@@ -146,6 +156,14 @@ func cleanupReportInterfaceHandle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp.DailySummaries = summaries
+
+		// v2.0.79 阶段CR: 与 list 同口径附带项统计
+		if stats, subStats, err := modelsdb.GetCleanupReportsStats(); err == nil {
+			resp.Stats = &stats
+			resp.SubTableStats = subStats
+		} else {
+			logger.Printf("[WARNING] CleanupReport summary: modelsdb.GetCleanupReportsStats failed: %v", err)
+		}
 
 	case "state":
 		resp.State = modelsdb.GetCleanupStateSnapshot()
