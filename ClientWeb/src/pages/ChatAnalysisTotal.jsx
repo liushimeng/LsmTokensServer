@@ -5,8 +5,8 @@ import { useUserModelOptions, useMyModelNames, modelNamesOf, allModelNames } fro
 import DataTable from '../components/DataTable'
 import TimeRangeSelector from '../components/TimeRangeSelector'
 import PageHeader from '../components/PageHeader'
-import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
-import { nearestSpan } from '../shared/timeSpan'
+import { usePersistedSpan, useDebouncedMemorySave } from '../shared/useListMemory'
+import { loadListMemory, roleSuffix } from '../shared/listMemory'
 import { fmtNum, fmtMs, pickRouteQuery } from '../shared/format'
 import { useI18n } from '../i18n'
 
@@ -43,10 +43,12 @@ export default function ChatAnalysisTotal({ route }) {
 
   const init = pickRouteQuery(route && route.query)
   const isAdmin = isAdminRole() // 用户端：服务端强制本人数据，隐藏用户名输入
-  const [userName, setUserName] = useState(isAdmin ? init.userName : '')
-  const [modelName, setModelName] = useState(init.modelName)
-  const { levels, loading: levelsLoading } = useTimeSpanLevels()
-  const [days, setDays] = useState(null) // 档位加载后初始化（默认就近 7 天档）
+  // 阶段CS：筛选/时间跨度记忆（路由 query > localStorage > 默认；F5 刷新不丢）
+  const savedFilters = loadListMemory(`lsm:chat_analysis_total:filters:${roleSuffix(isAdmin)}`)
+  const [userName, setUserName] = useState(isAdmin ? (init.userName || (savedFilters && savedFilters.userName) || '') : '')
+  const [modelName, setModelName] = useState(init.modelName || (savedFilters && savedFilters.modelName) || '')
+  const { days, setDays, levels, levelsLoading } = usePersistedSpan('chat_analysis_total', isAdmin, 7)
+  useDebouncedMemorySave(`lsm:chat_analysis_total:filters:${roleSuffix(isAdmin)}`, { userName, modelName })
   // 各 stage 累计快照
   const [stages, setStages] = useState({})
   const [running, setRunning] = useState(false)
@@ -245,13 +247,6 @@ export default function ChatAnalysisTotal({ route }) {
     return () => stopQuery() // 离开页面时关闭 WS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  // 动态档位到达后初始化 span（默认 7 天就近档）
-  useEffect(() => {
-    if (!levels.length || days !== null) return
-    setDays(nearestSpan(levels, 7))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levels])
-
   // 首次进入：若路由带了 user/model 则自动查询（等待档位就绪）
   useEffect(() => {
     if (days === null) return

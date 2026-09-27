@@ -4,6 +4,8 @@ import DataTable from '../components/DataTable'
 import PageHeader from '../components/PageHeader'
 import { useI18n } from '../i18n'
 import { useConfirm } from '../components/ConfirmModal'
+import { loadListMemory, roleSuffix } from '../shared/listMemory'
+import { useDebouncedMemorySave } from '../shared/useListMemory'
 
 // 每日 MCP 信息：SpiderDailyInfoInterface
 // 列表：GET ?page&page_size&platform&start_date&end_date（返回 {data:{infos,platforms}, total}）
@@ -42,14 +44,22 @@ export default function SpiderDailyInfo(props) {
   const sysConfirm = useConfirm()
 
   const q = props?.route?.query
+  // 阶段CS：筛选记忆（URL query 优先，缺失时回退 localStorage；F5/直达刷新不丢筛选）
+  const role = roleSuffix(__APP_ROLE__ === 'manager')
+  const savedFilters = loadListMemory(`lsm:spider_daily_info:filters:${role}`)
   const [page, setPage] = useState(() => Math.max(1, parseInt(q?.get('page') || '1', 10) || 1))
   const [pageSize, setPageSize] = useState(() => {
-    const n = parseInt(q?.get('page_size') || '20', 10)
-    return PAGE_SIZES.includes(n) ? n : 20
+    const fromQuery = parseInt(q?.get('page_size') || '', 10)
+    if (PAGE_SIZES.includes(fromQuery)) return fromQuery
+    const fromSaved = savedFilters && savedFilters.page_size
+    return PAGE_SIZES.includes(fromSaved) ? fromSaved : 20
   })
-  const [platform, setPlatform] = useState(q?.get('platform') || '')
-  const [startDate, setStartDate] = useState(q?.get('start_date') || '')
-  const [endDate, setEndDate] = useState(q?.get('end_date') || '')
+  const [platform, setPlatform] = useState(q?.get('platform') || (savedFilters && savedFilters.platform) || '')
+  const [startDate, setStartDate] = useState(q?.get('start_date') || (savedFilters && savedFilters.start_date) || '')
+  const [endDate, setEndDate] = useState(q?.get('end_date') || (savedFilters && savedFilters.end_date) || '')
+  useDebouncedMemorySave(`lsm:spider_daily_info:filters:${role}`, {
+    platform, start_date: startDate, end_date: endDate, page_size: pageSize,
+  })
   const [infos, setInfos] = useState([])
   const [platforms, setPlatforms] = useState([])
   const [total, setTotal] = useState(0)

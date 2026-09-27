@@ -3,8 +3,7 @@ import { post } from '../shared/api'
 import DataTable from '../components/DataTable'
 import TimeRangeSelector from '../components/TimeRangeSelector'
 import PageHeader from '../components/PageHeader'
-import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
-import { nearestSpan } from '../shared/timeSpan'
+import { usePersistedSpan } from '../shared/useListMemory'
 import { useI18n } from '../i18n'
 import { aggregateTables, spanDaysBetween, retentionJudgment, buildSubTableShares } from './cleanup-report/coverageStats'
 
@@ -55,8 +54,9 @@ export default function CleanupReport() {
     return <span>{s}</span>
   }
 
-  const { levels, loading: levelsLoading } = useTimeSpanLevels()
-  const [days, setDays] = useState(null) // 档位加载后按旧 localStorage 值就近迁移
+  // 阶段CS：时间跨度记忆统一走 usePersistedSpan（角色隔离 key；兼容迁移旧 key lsm:cleanupReport:days:v1）
+  const isAdmin = __APP_ROLE__ === 'manager'
+  const { days, setDays, levels, levelsLoading } = usePersistedSpan('cleanup_report', isAdmin, 30, 'lsm:cleanupReport:days:v1')
   const [page, setPage] = useState(1)
   const [reports, setReports] = useState([])
   const [total, setTotal] = useState(0)
@@ -99,14 +99,7 @@ export default function CleanupReport() {
   }, [])
 
   useEffect(() => {
-    if (!levels.length || days !== null) return
-    setDays(nearestSpan(levels, localStorage.getItem('lsm:cleanupReport:days:v1') || 30))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levels])
-
-  useEffect(() => {
     if (days === null) return
-    localStorage.setItem('lsm:cleanupReport:days:v1', String(days))
     loadData(1, days)
     loadState()
     loadTables()

@@ -4,8 +4,8 @@ import { fmtTime } from '../shared/format'
 import DataTable from '../components/DataTable'
 import TimeRangeSelector from '../components/TimeRangeSelector'
 import PageHeader from '../components/PageHeader'
-import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
-import { nearestSpan } from '../shared/timeSpan'
+import { usePersistedSpan, useDebouncedMemorySave } from '../shared/useListMemory'
+import { loadListMemory, roleSuffix } from '../shared/listMemory'
 import { useI18n } from '../i18n'
 
 // 协议转换分析器（实验性页面，迁移自旧 server_web_manager_protocol_converter*.go）
@@ -129,11 +129,13 @@ export default function ProtocolConvertAnalyzer() {
   const [tab, setTab] = useState('test')
 
   // ===== 筛选与记录列表 =====
-  const [userName, setUserName] = useState('')
-  const [modelName, setModelName] = useState('')
-  const [protocolType, setProtocolType] = useState('0')
-  const { levels, loading: levelsLoading } = useTimeSpanLevels()
-  const [days, setDays] = useState(null) // 档位加载后初始化（默认就近 3 天档；span 编码负值=小时）
+  // 阶段CS：筛选/时间跨度记忆（localStorage 角色隔离；F5 刷新不丢）
+  const savedFilters = loadListMemory(`lsm:protocol_convert_analyzer:filters:${roleSuffix(isAdmin)}`)
+  const [userName, setUserName] = useState((isAdmin && savedFilters && savedFilters.userName) || '')
+  const [modelName, setModelName] = useState((savedFilters && savedFilters.modelName) || '')
+  const [protocolType, setProtocolType] = useState((savedFilters && savedFilters.protocolType) || '0')
+  const { days, setDays, levels, levelsLoading } = usePersistedSpan('protocol_convert_analyzer', isAdmin, 3)
+  useDebouncedMemorySave(`lsm:protocol_convert_analyzer:filters:${roleSuffix(isAdmin)}`, { userName, modelName, protocolType })
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [records, setRecords] = useState(null) // null=加载中
@@ -174,13 +176,6 @@ export default function ProtocolConvertAnalyzer() {
     })
     return Array.from(set).sort()
   }, [users, userName])
-
-  // 动态档位到达后初始化 span（默认 3 天就近档）
-  useEffect(() => {
-    if (!levels.length || days !== null) return
-    setDays(String(nearestSpan(levels, 3)))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levels])
 
   // 加载记录列表
   const loadRecords = useCallback((p) => {
@@ -346,7 +341,7 @@ export default function ProtocolConvertAnalyzer() {
                   <option value="2">{t('chatAnalysis.openai')}</option>
                 </select>
                 <label>{t('protocolConvert.timeRange')}</label>
-                <TimeRangeSelector span={days === null ? 3 : Number(days)} onChange={(v) => setDays(String(v))} levels={levels} loading={levelsLoading} />
+                <TimeRangeSelector span={days ?? 3} onChange={setDays} levels={levels} loading={levelsLoading} />
                 <span style={{ color: 'var(--muted)', fontSize: 12 }}>{t('protocolConvert.totalRecords', { count: total })}</span>
               </div>
             )}

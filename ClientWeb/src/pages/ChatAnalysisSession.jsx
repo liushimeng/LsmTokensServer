@@ -7,8 +7,8 @@ import DataTable from '../components/DataTable'
 import Modal from '../components/Modal'
 import TimeRangeSelector from '../components/TimeRangeSelector'
 import PageHeader from '../components/PageHeader'
-import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
-import { nearestSpan } from '../shared/timeSpan'
+import { usePersistedSpan, useDebouncedMemorySave } from '../shared/useListMemory'
+import { loadListMemory, roleSuffix } from '../shared/listMemory'
 import { fmtTime, fmtNum, fmtBytes, fmtMs, pickRouteQuery } from '../shared/format'
 
 // 会话分析页（/ChatAnalysisSessionInterface）
@@ -20,10 +20,12 @@ export default function ChatAnalysisSession({ route }) {
   const { t } = useI18n()
   const init = pickRouteQuery(route && route.query)
   const isAdmin = isAdminRole() // 用户端：服务端强制 claims.UserName
-  const [userName, setUserName] = useState(isAdmin ? init.userName : '')
-  const [modelName, setModelName] = useState(init.modelName)
-  const { levels, loading: levelsLoading } = useTimeSpanLevels()
-  const [days, setDays] = useState(null) // 档位加载后初始化（默认就近 3 天档）
+  // 阶段CS：筛选/时间跨度记忆（路由 query > localStorage > 默认；F5 刷新不丢）
+  const savedFilters = loadListMemory(`lsm:chat_analysis_session:filters:${roleSuffix(isAdmin)}`)
+  const [userName, setUserName] = useState(isAdmin ? (init.userName || (savedFilters && savedFilters.userName) || '') : '')
+  const [modelName, setModelName] = useState(init.modelName || (savedFilters && savedFilters.modelName) || '')
+  const { days, setDays, levels, levelsLoading } = usePersistedSpan('chat_analysis_session', isAdmin, 3)
+  useDebouncedMemorySave(`lsm:chat_analysis_session:filters:${roleSuffix(isAdmin)}`, { userName, modelName })
   const [data, setData] = useState(null) // SessionAnalysisResult
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -52,13 +54,6 @@ export default function ChatAnalysisSession({ route }) {
       setError(e.message || t('chatAnalysisSession.queryFailed'))
     } finally { setLoading(false) }
   }
-
-  // 动态档位到达后初始化 span（默认 3 天就近档）
-  useEffect(() => {
-    if (!levels.length || days !== null) return
-    setDays(nearestSpan(levels, 3))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levels])
 
   // 路由带参进入时自动查询（等待档位就绪）
   useEffect(() => {

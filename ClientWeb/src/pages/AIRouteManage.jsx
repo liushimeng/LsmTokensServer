@@ -10,8 +10,7 @@ import { moveItem, isFirst } from '../shared/listOrder'
 import TimeRangeSelector from '../components/TimeRangeSelector'
 import Skeleton from '../components/Skeleton'
 import EmptyState from '../components/EmptyState'
-import { useTimeSpanLevels } from '../shared/useTimeSpanLevels'
-import { nearestSpan } from '../shared/timeSpan'
+import { usePersistedSpan } from '../shared/useListMemory'
 import { useI18n } from '../i18n'
 import { useConfirm } from '../components/ConfirmModal'
 import PageHeader from '../components/PageHeader'
@@ -61,8 +60,8 @@ export default function AIRouteManage() {
   const [userRoutes, setUserRoutes] = useState([])
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
-  const { levels, loading: levelsLoading } = useTimeSpanLevels()
-  const [days, setDays] = useState(null) // 档位加载后初始化（默认就近 3 天档；span 编码负值=小时）
+  // 阶段CS：时间跨度记忆（localStorage `lsm:airoute:span:{role}`，角色隔离；F5 刷新不丢档位，span 负值=小时）
+  const { days, setDays, levels, levelsLoading } = usePersistedSpan('airoute', isAdmin, 3)
   const [stats, setStats] = useState({}) // route_id -> {anthropic_count, openai_count}
   const [batchEditOpen, setBatchEditOpen] = useState(false) // 批量编辑路由弹窗（追加/删除源站）
   // v2.0.x：批量编辑弹窗仅管理端使用。动态 import 经 __APP_ROLE__ === 'manager' 常量门控，
@@ -132,13 +131,6 @@ export default function AIRouteManage() {
       .then((d) => setUsers((d && d.data) || []))
       .catch(() => {})
   }, [isAdmin])
-
-  // 动态档位到达后初始化 span（默认 3 天就近档）
-  useEffect(() => {
-    if (!levels.length || days !== null) return
-    setDays(nearestSpan(levels, 3))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [levels])
 
   // 时间跨度统计：管理端 batch_stats 批量聚合；用户端 count_record_by_protocol 按模型逐条
   useEffect(() => {
