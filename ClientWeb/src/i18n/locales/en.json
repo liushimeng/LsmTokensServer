@@ -253,6 +253,7 @@
   "chatAnalysis.noRecords": "No records found",
   "chatAnalysis.nonZero": "Non-zero",
   "chatAnalysis.openai": "OpenAI",
+  "chatAnalysis.openaiResponses": "OpenAI Responses",
   "chatAnalysis.outputTokens": "Output Tokens",
   "chatAnalysis.outputTokensCard": "Output Tokens",
   "chatAnalysis.pageInfo": "Page {page} / {totalPages}",

@@ -36,6 +36,11 @@
 //   3) JsonTree 渲染（toolbar=false）：标准排版 / 折叠 / 语法高亮 / 超长字符串保护 /
 //      查找高亮 / 渲染预算，与 JSON 美化按钮行为一致；
 //   4) merged=null（未知协议）时整块不渲染，保持既有提示链路。
+// 阶段CT：OpenAI Responses 协议支持 ——
+//   1) 协议标签查表化：mergedProtocol 新增 'openai-responses'（青色标签，
+//      i18n chatAnalysis.openaiResponses），与 anthropic 蓝 / openai 绿区分；
+//   2) Events 标签配色新增 response.* 前缀族（delta 类青绿、其余青色），
+//      精确匹配优先、前缀兜底，不影响既有事件类型配色。
 
 import { useI18n } from '../i18n'
 import SearchText from './SearchText'
@@ -73,6 +78,25 @@ const EVENT_TYPE_COLORS = {
   'complete': { bg: '#ede9fe', color: '#5b21b6' },
 }
 const DEFAULT_EVENT_COLOR = { bg: '#e0e7ff', color: '#3730a3' }
+// 阶段CT：OpenAI Responses 事件族配色（前缀兜底：delta 类增量青绿、其余生命周期青色）
+const RESPONSES_DELTA_COLOR = { bg: '#ccfbf1', color: '#115e59' }
+const RESPONSES_LIFECYCLE_COLOR = { bg: '#cffafe', color: '#155e75' }
+
+// 事件类型 → 颜色（阶段CT：精确匹配优先，response.* 前缀族兜底）
+function eventTagColor(name) {
+  if (EVENT_TYPE_COLORS[name]) return EVENT_TYPE_COLORS[name]
+  if (typeof name === 'string' && name.startsWith('response.')) {
+    return name.includes('delta') ? RESPONSES_DELTA_COLOR : RESPONSES_LIFECYCLE_COLOR
+  }
+  return DEFAULT_EVENT_COLOR
+}
+
+// mergedProtocol → 协议标签文案键（阶段CT：查表化，新增 openai-responses）
+const PROTO_TAG_KEYS = {
+  anthropic: 'chatAnalysis.anthropic',
+  openai: 'chatAnalysis.openai',
+  'openai-responses': 'chatAnalysis.openaiResponses',
+}
 
 export default function AggregateView({ result, query }) {
   const { t } = useI18n()
@@ -149,7 +173,7 @@ export default function AggregateView({ result, query }) {
             🧩 {t('chatAnalysis.aggMergedJson')}
             {mergedProtocol ? (
               <span className={`agg-proto-tag ${mergedProtocol}`}>
-                {mergedProtocol === 'anthropic' ? t('chatAnalysis.anthropic') : t('chatAnalysis.openai')}
+                {t(PROTO_TAG_KEYS[mergedProtocol] || 'chatAnalysis.openai')}
               </span>
             ) : null}
           </summary>
@@ -263,7 +287,7 @@ export default function AggregateView({ result, query }) {
                 <div className="agg-block-body">
                   <ul className="agg-tag-list">
                     {Object.entries(eventTypes).map(([k, v]) => {
-                      const c = EVENT_TYPE_COLORS[k] || DEFAULT_EVENT_COLOR
+                      const c = eventTagColor(k)
                       return (
                         <li key={k} className="agg-tag" style={{ background: c.bg, color: c.color }}>
                           <span className="agg-tag-name"><SearchText query={query} text={k || '(default)'} /></span>

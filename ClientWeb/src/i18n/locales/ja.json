@@ -253,6 +253,7 @@
   "chatAnalysis.noRecords": "レコードが見つかりません",
   "chatAnalysis.nonZero": "ゼロ以外",
   "chatAnalysis.openai": "OpenAI",
+  "chatAnalysis.openaiResponses": "OpenAI Responses",
   "chatAnalysis.outputTokens": "出力トークン",
   "chatAnalysis.outputTokensCard": "出力トークン",
   "chatAnalysis.pageInfo": "{page} / {totalPages} ページ",

@@ -280,6 +280,7 @@
   "chatAnalysis.noRecords": "没有找到记录",
   "chatAnalysis.nonZero": "非零",
   "chatAnalysis.openai": "OpenAI",
+  "chatAnalysis.openaiResponses": "OpenAI Responses",
   "chatAnalysis.outputTokens": "输出 Tokens",
   "chatAnalysis.outputTokensCard": "输出 Tokens",
   "chatAnalysis.pageInfo": "第 {page} / {totalPages} 页",

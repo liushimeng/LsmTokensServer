@@ -19,6 +19,14 @@
 //   3) 非流式完整响应：parsed 原样透传；
 //   4) aggregateSSE 结果新增 merged / mergedProtocol 字段（只增不改，向后兼容），
 //      aggregateToText 追加「完整响应 JSON」段（merged 为空时输出与旧版逐字节一致）。
+// 阶段CT：新增 OpenAI Responses 协议（/v1/responses，Codex Agent 使用）第三族支持 ——
+//   1) 协议识别：type 以 "response." 开头或 object === 'response' → 'openai-responses'；
+//   2) 流式聚合：response.output_text.delta / reasoning_text.delta /
+//      reasoning_summary_text.delta 文本增量、output_item.added(function_call) 工具名、
+//      终态事件 p.response.usage（含 input_tokens_details.cached_tokens → cache_read）；
+//   3) 非流式完整响应：object==='response' / output[] 数组识别 + output[] 提取；
+//   4) mergeResponsesStream：完整响应 JSON 重组（终态 response.completed 权威优先，
+//      截断流按 output_index/item_id 累积 items + 增量回填兜底）。
 //
 // 设计要点：
 //   - 纯函数，无 React/DOM 依赖；
@@ -147,10 +155,14 @@ export function aggregateSSE(text) {
     const p = events[0].parsed
     if (p && typeof p === 'object') {
       // 阶段BH：非流式完整响应 → merged 原样透传（协议按结构特征推断）
+      // 阶段CT：新增 Responses 识别（object==='response' 或 output 数组，优先级在
+      // chat choices 之后、Anthropic content 之前，三者结构特征互不冲突）
       out.merged = p
       out.mergedProtocol = Array.isArray(p.choices)
         ? 'openai'
-        : (Array.isArray(p.content) || p.type === 'message' ? 'anthropic' : null)
+        : ((p.object === 'response' || Array.isArray(p.output))
+          ? 'openai-responses'
+          : (Array.isArray(p.content) || p.type === 'message' ? 'anthropic' : null))
       // Anthropic 完整响应格式：content: [{type: 'text', text: '...'}]
       if (Array.isArray(p.content)) {
         for (const block of p.content) {
@@ -177,6 +189,29 @@ export function aggregateSSE(text) {
           out.textParts.push(`\n\n<think>\n${msg.reasoning_content}\n</think>\n`)
         }
       }
+      // 阶段CT：OpenAI Responses 完整响应格式：output[] →
+      //   message item 的 content[].text（output_text 部件）/ function_call 的 name /
+      //   reasoning item 的 content[].text 或 summary[].text
+      if (Array.isArray(p.output)) {
+        for (const item of p.output) {
+          if (!item || typeof item !== 'object') continue
+          if (Array.isArray(item.content)) {
+            for (const part of item.content) {
+              if (part && typeof part === 'object' && typeof part.text === 'string' && part.text) {
+                out.textParts.push(part.text)
+              }
+            }
+          }
+          if (Array.isArray(item.summary)) {
+            for (const part of item.summary) {
+              if (part && typeof part === 'object' && typeof part.text === 'string' && part.text) {
+                out.textParts.push(part.text)
+              }
+            }
+          }
+          if (item.type === 'function_call' && item.name) out.toolCalls.push(String(item.name))
+        }
+      }
       // usage：Anthropic 在顶层 (input_tokens/output_tokens)，
       // OpenAI 在顶层或 choices[0]，字段名 prompt_tokens/completion_tokens
       let usageObj = null
@@ -197,6 +232,10 @@ export function aggregateSSE(text) {
         }
         if (usageObj.cache_read_input_tokens !== undefined) {
           out.usage.cache_read_input_tokens = Number(usageObj.cache_read_input_tokens) || 0
+        }
+        // 阶段CT：OpenAI Responses 的 input_tokens_details.cached_tokens → cache_read 展示
+        if (usageObj.input_tokens_details && usageObj.input_tokens_details.cached_tokens !== undefined) {
+          out.usage.cache_read_input_tokens = Number(usageObj.input_tokens_details.cached_tokens) || 0
         }
       }
     }
@@ -228,14 +267,40 @@ export function aggregateSSE(text) {
       }
     } else if (p.type === 'content_block_start' && p.content_block && p.content_block.type === 'tool_use') {
       out.toolCalls.push(p.content_block.name || '')
+    } else if (typeof p.type === 'string' && p.type.startsWith('response.')) {
+      // 阶段CT：OpenAI Responses 协议流（Codex Agent 使用的 /v1/responses 接口）
+      //   - 文本增量：response.output_text.delta（delta 字段，非 choices[].delta.content）
+      //   - 推理文本增量：response.reasoning_text.delta / reasoning_summary_text.delta
+      //     （与 chat 流 delta.reasoning_content 裸拼接语义一致，不包 <think>）
+      //   - 工具调用：response.output_item.added 且 item.type==='function_call' 取 name
+      //     （与 Anthropic content_block_start 工具名语义一致；arguments 增量不进
+      //      textParts，与 chat 流 delta.tool_calls 语义一致，完整参数见 merged 块）
+      if (p.type === 'response.output_text.delta' && typeof p.delta === 'string' && p.delta) {
+        out.textParts.push(p.delta)
+      } else if ((p.type === 'response.reasoning_text.delta' ||
+                  p.type === 'response.reasoning_summary_text.delta') &&
+                 typeof p.delta === 'string' && p.delta) {
+        out.textParts.push(p.delta)
+      } else if (p.type === 'response.output_item.added' &&
+                 p.item && p.item.type === 'function_call' && p.item.name) {
+        out.toolCalls.push(String(p.item.name))
+      }
     }
-    const u = p.usage || (p.message && p.message.usage)
+    // 阶段CT：usage 提取链扩展 —— Responses 终态事件（completed/failed/incomplete）
+    // 的 usage 嵌套在 p.response.usage（字段名同为 input_tokens/output_tokens）
+    const respUsage = p.response && typeof p.response === 'object' ? p.response.usage : null
+    const u = p.usage || (p.message && p.message.usage) || respUsage
     if (u) {
       out.usage = out.usage || {}
       out.usage.input_tokens = (out.usage.input_tokens || 0) + (u.input_tokens || 0)
       out.usage.output_tokens = (out.usage.output_tokens || 0) + (u.output_tokens || 0)
       if (u.input_tokens !== undefined) out.usage.input_tokens_final = u.input_tokens
       if (u.output_tokens !== undefined) out.usage.output_tokens_final = u.output_tokens
+      // 阶段CT：Responses 的 input_tokens_details.cached_tokens → cache_read 展示
+      // （Anthropic 的 cache_read_input_tokens 语义等价：命中的输入缓存 tokens）
+      if (u.input_tokens_details && u.input_tokens_details.cached_tokens !== undefined) {
+        out.usage.cache_read_input_tokens = Number(u.input_tokens_details.cached_tokens) || 0
+      }
     }
   })
 
@@ -272,6 +337,10 @@ function detectEventProtocol(p) {
   }
   if (Array.isArray(p.choices) || p.object === 'chat.completion.chunk' || p.object === 'chat.completion') {
     return 'openai'
+  }
+  // 阶段CT：OpenAI Responses 协议（event: response.*；非流式 object === 'response'）
+  if ((typeof p.type === 'string' && p.type.startsWith('response.')) || p.object === 'response') {
+    return 'openai-responses'
   }
   return null
 }
@@ -487,14 +556,173 @@ function mergeOpenAIStream(events) {
 }
 
 /**
+ * OpenAI Responses 流式事件 → 完整 response 对象重组（阶段CT）。
+ *
+ * 事件语义（依据 OpenAI Responses API streaming 规范，MiniMax 等兼容源站同构）：
+ *   - response.created / in_progress / queued.response → 响应骨架（output 置空待铺）
+ *   - response.output_item.added / .done               → output[output_index] 项
+ *       （item.type: message / function_call / reasoning / web_search_call 等；
+ *        done 携带完整 item，权威覆盖累积态）
+ *   - response.content_part.added / .done              → message item 的 content 部件
+ *   - response.output_text.delta / .done               → 部件文本增量拼接 / 权威全文
+ *   - response.reasoning_text.delta / .done            → reasoning item 的 content 文本
+ *       （官方另有 reasoning_summary_text.* → summary 文本）
+ *   - response.function_call_arguments.delta / .done   → function_call item 的
+ *       arguments 增量拼接 /（done 时）name + 完整 arguments
+ *   - response.completed / failed / incomplete.response → 终态权威完整 response
+ *       （含 output 数组 + usage + status + error / incomplete_details）
+ *
+ * 重组策略：终态事件的 response 对象本身就是"等价非流式完整响应"，直接作为 merged
+ * 返回；截断流（无终态事件）按 output_index 累积 items + 增量回填兜底重组。
+ *
+ * @param {Array<{parsed:any}>} events
+ * @returns {object|null} 完整 response 对象；一条可识别事件都没有时 null
+ */
+function mergeResponsesStream(events) {
+  let skeleton = null   // 生命周期事件的 response 骨架
+  let terminal = null   // 终态事件的权威完整 response（最后出现的终态生效）
+  const items = new Map() // output_index → item（增量累积态）
+  const byId = new Map()  // item.id → output_index（delta 事件按 item_id 反查兜底）
+
+  const ensureItem = (outputIndex, itemId) => {
+    let idx = typeof outputIndex === 'number' ? outputIndex : null
+    if (idx === null && typeof itemId === 'string' && byId.has(itemId)) idx = byId.get(itemId)
+    if (idx === null) idx = items.size
+    let item = items.get(idx)
+    if (!item) {
+      item = itemId ? { id: itemId } : {}
+      items.set(idx, item)
+    }
+    return { idx, item }
+  }
+  // 定位 message item 的 content 部件（content_index 缺省 0；部件缺失时兜底创建）
+  const ensurePart = (item, contentIndex, partType) => {
+    if (!Array.isArray(item.content)) item.content = []
+    const ci = typeof contentIndex === 'number' ? contentIndex : 0
+    let part = item.content[ci]
+    if (!part || typeof part !== 'object') {
+      part = { type: partType, text: '' }
+      item.content[ci] = part
+    }
+    if (typeof part.text !== 'string') part.text = ''
+    return part
+  }
+  // 定位 reasoning item 的 summary 文本部件（reasoning_summary_text.* 专用）
+  const ensureSummaryPart = (item, contentIndex) => {
+    if (!Array.isArray(item.summary)) item.summary = []
+    const ci = typeof contentIndex === 'number' ? contentIndex : 0
+    let part = item.summary[ci]
+    if (!part || typeof part !== 'object') {
+      part = { type: 'summary_text', text: '' }
+      item.summary[ci] = part
+    }
+    if (typeof part.text !== 'string') part.text = ''
+    return part
+  }
+
+  for (const e of events) {
+    const p = e.parsed
+    if (!p || typeof p !== 'object') continue
+    const t = p.type
+    if (typeof t !== 'string') continue
+
+    if ((t === 'response.created' || t === 'response.in_progress' || t === 'response.queued') &&
+        p.response && typeof p.response === 'object') {
+      if (!skeleton) skeleton = deepClone(p.response)
+      continue
+    }
+    if (t === 'response.completed' || t === 'response.failed' || t === 'response.incomplete') {
+      if (p.response && typeof p.response === 'object') terminal = deepClone(p.response)
+      continue
+    }
+    if (t === 'response.output_item.added' || t === 'response.output_item.done') {
+      if (p.item && typeof p.item === 'object') {
+        const idx = typeof p.output_index === 'number' ? p.output_index : items.size
+        const item = deepClone(p.item)
+        items.set(idx, item)
+        if (item.id) byId.set(item.id, idx)
+      }
+      continue
+    }
+    if (t === 'response.content_part.added' || t === 'response.content_part.done') {
+      if (p.part && typeof p.part === 'object') {
+        const { item } = ensureItem(p.output_index, p.item_id)
+        if (item.type !== 'function_call' && item.type !== 'reasoning') {
+          if (!Array.isArray(item.content)) item.content = []
+          const ci = typeof p.content_index === 'number' ? p.content_index : 0
+          item.content[ci] = deepClone(p.part)
+        }
+      }
+      continue
+    }
+    if (t === 'response.output_text.delta' && typeof p.delta === 'string') {
+      const { item } = ensureItem(p.output_index, p.item_id)
+      ensurePart(item, p.content_index, 'output_text').text += p.delta
+      continue
+    }
+    if (t === 'response.output_text.done' && typeof p.text === 'string') {
+      const { item } = ensureItem(p.output_index, p.item_id)
+      ensurePart(item, p.content_index, 'output_text').text = p.text
+      continue
+    }
+    if (t === 'response.reasoning_text.delta' && typeof p.delta === 'string') {
+      const { item } = ensureItem(p.output_index, p.item_id)
+      // reasoning item：优先 content[].text；无 content 结构的源站落到 summary[].text
+      if (Array.isArray(item.content)) ensurePart(item, p.content_index, 'reasoning_text').text += p.delta
+      else ensureSummaryPart(item, p.content_index).text += p.delta
+      continue
+    }
+    if (t === 'response.reasoning_text.done' && typeof p.text === 'string') {
+      const { item } = ensureItem(p.output_index, p.item_id)
+      if (Array.isArray(item.content)) ensurePart(item, p.content_index, 'reasoning_text').text = p.text
+      else ensureSummaryPart(item, p.content_index).text = p.text
+      continue
+    }
+    if (t === 'response.reasoning_summary_text.delta' && typeof p.delta === 'string') {
+      const { item } = ensureItem(p.output_index, p.item_id)
+      ensureSummaryPart(item, p.content_index).text += p.delta
+      continue
+    }
+    if (t === 'response.reasoning_summary_text.done' && typeof p.text === 'string') {
+      const { item } = ensureItem(p.output_index, p.item_id)
+      ensureSummaryPart(item, p.content_index).text = p.text
+      continue
+    }
+    if (t === 'response.function_call_arguments.delta' && typeof p.delta === 'string') {
+      const { item } = ensureItem(p.output_index, p.item_id)
+      item.arguments = (typeof item.arguments === 'string' ? item.arguments : '') + p.delta
+      continue
+    }
+    if (t === 'response.function_call_arguments.done') {
+      const { item } = ensureItem(p.output_index, p.item_id)
+      if (typeof p.arguments === 'string') item.arguments = p.arguments
+      if (typeof p.name === 'string' && p.name) item.name = p.name
+      continue
+    }
+  }
+
+  // 终态权威优先；其 output 为空但累积到 items 时（个别源站终态不带明细）用 items 回填
+  const base = terminal || skeleton
+  const hasItems = items.size > 0
+  if (!base && !hasItems) return null
+  const resp = base ? deepClone(base) : { object: 'response', output: [] }
+  if (!Array.isArray(resp.output)) resp.output = []
+  if (hasItems && resp.output.length === 0) {
+    resp.output = [...items.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v)
+  }
+  return resp
+}
+
+/**
  * 把 SSE 事件流重组为"等价非流式完整响应"的 JSON 对象（阶段BH）。
  *
  * 协议识别：扫描全部事件，取首个能识别的事件（Anthropic message_ 或 content_block_
- * 前缀、OpenAI choices 或 chat.completion 对象）；混合协议流以首个识别结果为准。
+ * 前缀、OpenAI choices 或 chat.completion 对象、OpenAI Responses 的 response. 前缀
+ * 或 response 对象）；混合协议流以首个识别结果为准。
  * 未知协议 / 一条可识别事件都没有 → merged=null（UI 不渲染该块）。
  *
  * @param {Array<{event: string, raw: string, parsed: any}>} events
- * @returns {{ merged: object|null, protocol: 'anthropic'|'openai'|null }}
+ * @returns {{ merged: object|null, protocol: 'anthropic'|'openai'|'openai-responses'|null }}
  */
 export function mergeSSEEvents(events) {
   if (!Array.isArray(events) || events.length === 0) return { merged: null, protocol: null }
@@ -504,7 +732,10 @@ export function mergeSSEEvents(events) {
     if (p) { protocol = p; break }
   }
   if (!protocol) return { merged: null, protocol: null }
-  const merged = protocol === 'anthropic' ? mergeAnthropicStream(events) : mergeOpenAIStream(events)
+  // 阶段CT：新增 openai-responses 路由
+  const merged = protocol === 'anthropic'
+    ? mergeAnthropicStream(events)
+    : (protocol === 'openai-responses' ? mergeResponsesStream(events) : mergeOpenAIStream(events))
   return { merged, protocol }
 }
 

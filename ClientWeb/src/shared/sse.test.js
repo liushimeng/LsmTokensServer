@@ -514,6 +514,170 @@ eq(
 // 9) 兼容回归：null 入参返回结构不含 merged（历史断言原样保留）
 eq(aggregateSSE(null), { textParts: [], usage: null, toolCalls: [], eventTypes: {} }, 'null → 空结构（回归）')
 
+// ===== 阶段CT：OpenAI Responses 协议（/v1/responses，Codex Agent）=====
+section('阶段CT：OpenAI Responses 协议流式聚合 + 重组')
+
+// 1) 文本流（真实样本缩样：MiniMax /v1/responses）
+const responsesTextStream = [
+  'event: response.created',
+  'data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_01","object":"response","created_at":1790758304,"model":"MiniMax-M3.1","status":"in_progress","output":[],"usage":null}}',
+  '',
+  'event: response.in_progress',
+  'data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_01","object":"response","status":"in_progress","output":[],"usage":null}}',
+  '',
+  'event: response.output_item.added',
+  'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"resp_01_msg","type":"message","status":"in_progress","role":"assistant","content":[]}}',
+  '',
+  'event: response.content_part.added',
+  'data: {"type":"response.content_part.added","sequence_number":3,"item_id":"resp_01_msg","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}',
+  '',
+  'event: response.output_text.delta',
+  'data: {"type":"response.output_text.delta","sequence_number":4,"item_id":"resp_01_msg","output_index":0,"content_index":0,"delta":"全部完成。以下是"}',
+  '',
+  'event: response.output_text.delta',
+  'data: {"type":"response.output_text.delta","sequence_number":5,"item_id":"resp_01_msg","output_index":0,"content_index":0,"delta":"本次任务总结。"}',
+  '',
+  'event: response.output_text.done',
+  'data: {"type":"response.output_text.done","sequence_number":6,"item_id":"resp_01_msg","output_index":0,"content_index":0,"text":"全部完成。以下是本次任务总结。"}',
+  '',
+  'event: response.content_part.done',
+  'data: {"type":"response.content_part.done","sequence_number":7,"item_id":"resp_01_msg","output_index":0,"content_index":0,"part":{"type":"output_text","text":"全部完成。以下是本次任务总结。","annotations":[]}}',
+  '',
+  'event: response.output_item.done',
+  'data: {"type":"response.output_item.done","sequence_number":8,"output_index":0,"item":{"id":"resp_01_msg","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"全部完成。以下是本次任务总结。","annotations":[]}]}}',
+  '',
+  'event: response.completed',
+  'data: {"type":"response.completed","sequence_number":9,"response":{"id":"resp_01","object":"response","status":"completed","output":[{"id":"resp_01_msg","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"全部完成。以下是本次任务总结。","annotations":[]}]}],"usage":{"input_tokens":450083,"output_tokens":687,"total_tokens":450770,"input_tokens_details":{"cached_tokens":449796}},"error":null}}',
+  '',
+].join('\n')
+const ct1 = aggregateSSE(responsesTextStream)
+eq(ct1.textParts.join(''), '全部完成。以下是本次任务总结。', 'Responses 流 output_text.delta 文本合并')
+eq(ct1.toolCalls, [], 'Responses 纯文本流无工具调用')
+eq(ct1.usage && ct1.usage.input_tokens_final, 450083, 'Responses 终态 usage.input_tokens 覆盖')
+eq(ct1.usage && ct1.usage.output_tokens_final, 687, 'Responses 终态 usage.output_tokens 覆盖')
+eq(ct1.usage && ct1.usage.cache_read_input_tokens, 449796, 'Responses cached_tokens → cache_read_input_tokens')
+eq(ct1.eventTypes && ct1.eventTypes['response.output_text.delta'], 2, 'Responses eventTypes 统计')
+eq(ct1.eventTypes && ct1.eventTypes['(default)'], undefined, 'Responses 流无 (default) 键')
+eq(ct1.mergedProtocol, 'openai-responses', 'Responses 流 mergedProtocol=openai-responses')
+eq(ct1.merged.id, 'resp_01', 'Responses merged 取终态权威 response（id）')
+eq(ct1.merged.status, 'completed', 'Responses merged status=completed')
+eq(ct1.merged.usage.input_tokens, 450083, 'Responses merged usage 完整保留')
+const ct1msg = ct1.merged.output && ct1.merged.output[0]
+eq(ct1msg && ct1msg.type, 'message', 'Responses merged output[0] 为 message item')
+eq(ct1msg && ct1msg.content[0].text, '全部完成。以下是本次任务总结。', 'Responses merged message.content[0].text 完整')
+
+// 2) 纯函数调用流（Codex 真实形态：无 assistant 文本，仅 function_call）
+const responsesToolStream = [
+  'event: response.created',
+  'data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_02","object":"response","status":"in_progress","output":[]}}',
+  '',
+  'event: response.output_item.added',
+  'data: {"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"resp_02_fc_0","type":"function_call","status":"in_progress","call_id":"call_1","name":"exec_command","arguments":""}}',
+  '',
+  'event: response.function_call_arguments.delta',
+  'data: {"type":"response.function_call_arguments.delta","sequence_number":2,"output_index":0,"item_id":"resp_02_fc_0","delta":"{\\"cmd\\": \\"cd"}',
+  '',
+  'event: response.function_call_arguments.delta',
+  'data: {"type":"response.function_call_arguments.delta","sequence_number":3,"output_index":0,"item_id":"resp_02_fc_0","delta":" /tmp && ls\\"}"}',
+  '',
+  'event: response.function_call_arguments.done',
+  'data: {"type":"response.function_call_arguments.done","sequence_number":4,"output_index":0,"item_id":"resp_02_fc_0","name":"exec_command","arguments":"{\\"cmd\\": \\"cd /tmp && ls\\"}"}',
+  '',
+  'event: response.output_item.done',
+  'data: {"type":"response.output_item.done","sequence_number":5,"output_index":0,"item":{"id":"resp_02_fc_0","type":"function_call","status":"completed","call_id":"call_1","name":"exec_command","arguments":"{\\"cmd\\": \\"cd /tmp && ls\\"}"}}',
+  '',
+  'event: response.completed',
+  'data: {"type":"response.completed","sequence_number":6,"response":{"id":"resp_02","object":"response","status":"completed","output":[{"id":"resp_02_fc_0","type":"function_call","status":"completed","call_id":"call_1","name":"exec_command","arguments":"{\\"cmd\\": \\"cd /tmp && ls\\"}"}],"usage":{"input_tokens":1000,"output_tokens":50,"total_tokens":1050}}}',
+  '',
+].join('\n')
+const ct2 = aggregateSSE(responsesToolStream)
+eq(ct2.toolCalls, ['exec_command'], 'Responses 流 function_call 工具名提取')
+eq(ct2.textParts, [], 'Responses 纯函数调用流 → textParts=[]（arguments 不进文本，与 chat 流语义一致）')
+eq(ct2.usage && ct2.usage.input_tokens_final, 1000, 'Responses 纯函数调用流 usage 提取')
+eq(ct2.mergedProtocol, 'openai-responses', '纯函数调用流 mergedProtocol=openai-responses')
+eq(ct2.merged.output[0].name, 'exec_command', '纯函数调用流 merged output[0].name')
+eq(ct2.merged.output[0].arguments, '{"cmd": "cd /tmp && ls"}', '纯函数调用流 merged arguments 完整（终态权威）')
+// AggregateView 期望的 hasEventsButNoText 判定 → 走 withTools 提示分支
+const isCt2Blind = ct2.textParts.length === 0 && Object.keys(ct2.eventTypes).length > 0
+eq(isCt2Blind, true, '纯函数调用流被识别为"有事件无文本"（withTools 提示分支）')
+
+// 3) reasoning 流（MiniMax 变体 reasoning_text.delta + summary 变体）
+const responsesReasoningStream = [
+  'event: response.output_item.added',
+  'data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[]}}',
+  '',
+  'event: response.reasoning_text.delta',
+  'data: {"type":"response.reasoning_text.delta","output_index":0,"item_id":"rs_1","delta":"思考片段A"}',
+  '',
+  'event: response.reasoning_text.delta',
+  'data: {"type":"response.reasoning_text.delta","output_index":0,"item_id":"rs_1","delta":" + 思考片段B"}',
+  '',
+  'event: response.output_item.added',
+  'data: {"type":"response.output_item.added","output_index":1,"item":{"id":"msg_1","type":"message","status":"in_progress","role":"assistant","content":[]}}',
+  '',
+  'event: response.output_text.delta',
+  'data: {"type":"response.output_text.delta","output_index":1,"item_id":"msg_1","content_index":0,"delta":"答案文本"}',
+  '',
+].join('\n')
+const ct3 = aggregateSSE(responsesReasoningStream)
+eq(ct3.textParts.join(''), '思考片段A + 思考片段B答案文本', 'reasoning_text.delta + output_text.delta 均进 textParts（按到达序）')
+eq(ct3.mergedProtocol, 'openai-responses', 'reasoning 流 mergedProtocol=openai-responses')
+eq(ct3.merged.output.length, 2, '截断流（无终态）merged output 含 2 个累积 item')
+eq(ct3.merged.output[0].summary[0].text, '思考片段A + 思考片段B', 'reasoning item 无 content → summary 兜底累积')
+eq(ct3.merged.output[1].content[0].text, '答案文本', 'message item content part 增量拼接')
+
+// 4) 截断流（无 response.completed）：骨架 + items 重组兜底
+const responsesTruncated = [
+  'event: response.created',
+  'data: {"type":"response.created","response":{"id":"resp_03","object":"response","model":"gpt-5","status":"in_progress","output":[],"usage":null}}',
+  '',
+  'event: response.output_item.added',
+  'data: {"type":"response.output_item.added","output_index":0,"item":{"id":"m_0","type":"message","status":"in_progress","role":"assistant","content":[]}}',
+  '',
+  'event: response.content_part.added',
+  'data: {"type":"response.content_part.added","item_id":"m_0","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}',
+  '',
+  'event: response.output_text.delta',
+  'data: {"type":"response.output_text.delta","item_id":"m_0","output_index":0,"content_index":0,"delta":"流被中断前的文本"}',
+  '',
+].join('\n')
+const ct4 = aggregateSSE(responsesTruncated)
+eq(ct4.merged.id, 'resp_03', '截断流 merged 骨架取自 response.created')
+eq(ct4.merged.model, 'gpt-5', '截断流 merged 骨架 model 保留')
+eq(ct4.merged.output[0].content[0].text, '流被中断前的文本', '截断流 merged 增量回填到 content part')
+eq(ct4.textParts.join(''), '流被中断前的文本', '截断流 textParts 同步提取')
+
+// 5) 非流式完整 Responses 响应（单 JSON）
+const responsesComplete = {
+  id: 'resp_99',
+  object: 'response',
+  status: 'completed',
+  output: [
+    { id: 'rs_0', type: 'reasoning', status: 'completed', summary: [{ type: 'summary_text', text: '推理摘要' }] },
+    { id: 'm_1', type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: '最终回答', annotations: [] }] },
+    { id: 'fc_1', type: 'function_call', status: 'completed', call_id: 'call_x', name: 'shell', arguments: '{}' },
+  ],
+  usage: { input_tokens: 88, output_tokens: 66, total_tokens: 154, input_tokens_details: { cached_tokens: 80 } },
+}
+const ct5 = aggregateSSE(JSON.stringify(responsesComplete))
+eq(ct5.isComplete, true, 'Responses 完整响应 isComplete=true')
+eq(ct5.mergedProtocol, 'openai-responses', 'Responses 完整响应 mergedProtocol=openai-responses')
+eq(ct5.textParts.join(''), '推理摘要最终回答', 'Responses 完整响应 output 提取（summary + output_text）')
+eq(ct5.toolCalls, ['shell'], 'Responses 完整响应 function_call 工具名提取')
+eq(ct5.usage.input_tokens_final, 88, 'Responses 完整响应 usage input_tokens_final')
+eq(ct5.usage.cache_read_input_tokens, 80, 'Responses 完整响应 cached_tokens → cache_read_input_tokens')
+eq(ct5.merged.output.length, 3, 'Responses 完整响应 merged 原样透传（output 3 项）')
+
+// 6) aggregateToText：merged 段协议标注 openai-responses
+const ct6 = aggregateToText(ct1)
+eq(ct6.includes('---- 完整响应 JSON (openai-responses) ----'), true, 'aggregateToText 标注 openai-responses 协议')
+
+// 7) 回归：chat/completions 与 Anthropic 流协议识别不受影响（混合以首识别为准）
+eq(mergeSSEEvents(parseSSEEvents(openaiFullStream)).protocol, 'openai', '回归：chat.completion.chunk 流仍识别为 openai')
+eq(mergeSSEEvents(parseSSEEvents(anthropicFullStream)).protocol, 'anthropic', '回归：Anthropic 流仍识别为 anthropic')
+eq(aggregateSSE(openaiStream).textParts.join(''), 'Hi therethinking', '回归：OpenAI chat 流文本合并不变')
+eq(aggregateSSE(anthropicStream).textParts.join(''), 'Hello world', '回归：Anthropic 流文本合并不变')
+
 // 总结
 // eslint-disable-next-line no-console
 console.log(`\n总计：${pass} 通过 / ${fail} 失败`)
