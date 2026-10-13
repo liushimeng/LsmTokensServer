@@ -729,6 +729,7 @@
   "common.warning": "警告",
   "common.yes": "はい",
   "datatable.clearSelection": "選択解除",
+  "datatable.colResize": "ドラッグで列幅を調整、ダブルクリックでリセット",
   "datatable.filter": "フィルター",
   "datatable.firstPage": "最初",
   "datatable.jumpTo": "移動",

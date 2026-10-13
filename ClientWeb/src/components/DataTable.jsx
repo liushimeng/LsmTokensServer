@@ -17,8 +17,14 @@
 //   让"刷新后保持用户当前列排序"对所有页面默认生效（提交/刷新后顺序不会跳）。
 // onSortChange(sort|null)：排序变化时回调，父组件可用此暴露"恢复默认排序"按钮。
 //   v2.0.79 阶段CK：弹出式窗口提交后表格顺序稳定性全面优化新增。
+// v2.0.80 阶段CU：表头列宽拖拽调整（通用控件，全站 DataTable 自动生效，方案见
+//   docs/项目迁移解决方案/数据表格列宽拖拽调整通用控件方案_20261013_164137.md）：
+//   表头列右缘拖拽调整列宽（与右邻列此消彼长，最小 48px），百分比存储 localStorage
+//   （key 自动生成：角色+路径+列 keys 哈希，同页多表天然区分），刷新后恢复；
+//   双击把手重置该表列宽；列结构变更自动丢弃旧数据。enableColumnResize=false 可关闭。
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '../i18n'
+import { useColumnResize, defaultColWidthStorageKey } from '../shared/columnResize'
 
 // 根据当前路径+角色生成稳定的 sortStorageKey（避免不同页面相互覆盖）
 function defaultSortStorageKey() {
@@ -42,7 +48,8 @@ function compare(a, b) {
 
 export default function DataTable({ columns, rows, loading, empty, rowKey, cardMode = true, rowClass,
   collapsible, collapsedIds, onToggleCollapse, renderCollapsedRow, collapsedHiddenColumns = [], sortStorageKey,
-  enableSortPersist = true, onSortChange, expandedIds, renderExpandedRow }) {
+  enableSortPersist = true, onSortChange, expandedIds, renderExpandedRow,
+  enableColumnResize = true, resizeStorageKey }) {
   const { t } = useI18n()
   // 排序状态：{key, dir: 1|-1}；
   // 1) sortStorageKey 显式传入时按其持久化；
@@ -81,6 +88,22 @@ export default function DataTable({ columns, rows, loading, empty, rowKey, cardM
     onSortChange(sort)
   }, [sort, onSortChange])
 
+  // ===== 阶段CU：表头列宽拖拽（通用控件，见 shared/columnResize.js）=====
+  // 存储 key：显式 resizeStorageKey 优先；否则按 角色+路径+列keys哈希 自动生成（同页多表区分）
+  const tableRef = useRef(null)
+  const effectiveResizeKey = useMemo(() => {
+    if (!enableColumnResize) return null
+    if (resizeStorageKey) return resizeStorageKey
+    if (typeof window === 'undefined') return null
+    const role = (typeof __APP_ROLE__ !== 'undefined' && __APP_ROLE__) || 'common'
+    const p = window.location && window.location.pathname ? window.location.pathname : 'global'
+    return defaultColWidthStorageKey(role, p, (collapsible ? ['#toggle'] : []).concat(columns.map((c) => c.key)))
+  }, [enableColumnResize, resizeStorageKey, collapsible, columns])
+  const { enabled: resizeEnabled, colPercents, livePxWidths, resizingIndex, onHandleDown, onHandleReset } =
+    useColumnResize({ columns, collapsible, storageKey: effectiveResizeKey, tableRef })
+  // 列宽受控（拖拽中 or 已有存储百分比）→ 渲染 colgroup + fixed 布局；否则保持自然布局零回归
+  const resizeActive = !!livePxWidths || !!colPercents
+
   if (!empty) empty = t('datatable.noData')
 
   const hiddenSet = useMemo(() => new Set(collapsedHiddenColumns), [collapsedHiddenColumns])
@@ -101,18 +124,38 @@ export default function DataTable({ columns, rows, loading, empty, rowKey, cardM
   if (loading) return <div className="table-loading">{t('common.loading')}</div>
   if (!rows || !rows.length) return <div className="table-empty">{empty}</div>
   const keyOf = (r, i) => (rowKey ? r[rowKey] : i)
+  // 阶段CU：colgroup 列宽 —— 拖拽中实时像素宽优先，其次存储百分比；未受控不渲染 colgroup
+  const colgroup = resizeActive ? (
+    <colgroup>
+      {collapsible ? <col key="#toggle" style={{ width: 40 }} /> : null}
+      {columns.map((c, i) => (
+        <col key={c.key} style={livePxWidths ? { width: livePxWidths[i] } : { width: colPercents[i] + '%' }} />
+      ))}
+    </colgroup>
+  ) : null
   return (
     <div className={'table-wrap' + (cardMode ? ' card-wrap' : '')}>
-      <table className={'data-table' + (cardMode ? ' card-mode' : '')}>
+      <table ref={tableRef}
+        className={'data-table' + (cardMode ? ' card-mode' : '') + (resizeActive ? ' col-resize-fixed' : '') + (resizingIndex >= 0 ? ' col-resizing' : '')}>
+        {colgroup}
         <thead>
           <tr>
             {collapsible ? <th style={{ width: 40 }} title={t('common.expand') + '/' + t('common.collapse')}></th> : null}
-            {columns.map((c) => (
-              <th key={c.key} style={c.width ? { width: c.width } : undefined}
-                className={c.sortable ? 'sortable' : undefined}
+            {columns.map((c, i) => (
+              <th key={c.key} style={!resizeActive && c.width ? { width: c.width } : undefined}
+                className={[
+                  c.sortable ? 'sortable' : undefined,
+                  resizingIndex === i ? 'col-resizing-th' : undefined,
+                ].filter(Boolean).join(' ') || undefined}
                 onClick={() => clickSort(c)}
                 title={c.sortable ? t('datatable.sortAsc') + ' / ' + t('datatable.sortDesc') : undefined}>
                 {c.title}{c.sortable && sort && sort.key === c.key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}
+                {resizeEnabled ? (
+                  <span className="col-resize-handle" role="separator" aria-orientation="vertical"
+                    title={t('datatable.colResize')}
+                    onPointerDown={onHandleDown(i)} onDoubleClick={onHandleReset}
+                    onClick={(e) => e.stopPropagation()} />
+                ) : null}
               </th>
             ))}
           </tr>

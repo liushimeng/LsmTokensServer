@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { get, post, download } from '../shared/api'
 import Modal from './Modal'
 import DataTable from './DataTable'
@@ -887,33 +887,33 @@ function GitDialog({ onClose }) {
           <p style={{ fontSize: 13 }}>分支：<strong>{info.branch || '-'}</strong>
             {info.remote ? <span style={{ color: 'var(--muted)' }}>（{info.remote}）</span> : null}
             ，共 {info.count || 0} 次提交，展示最近 {commits.length} 条<span style={{ color: 'var(--muted)' }}>（点击行展开文件变更）</span></p>
-          <div className="table-wrap"><table className="data-table">
-            <thead><tr><th>Hash</th><th>作者</th><th>日期</th><th>说明</th></tr></thead>
-            <tbody>{pageCommits.map((c) => (
-              <Fragment key={c.hash}>
-                <tr className="row-click" onClick={() => toggleCommit(c.hash)}
-                    style={openHash === c.hash ? { background: '#eef4ff' } : undefined}>
-                  <td><code>{String(c.hash || '').slice(0, 7)}</code></td>
-                  <td>{c.author}</td>
-                  <td>{c.date}</td>
-                  <td className="wrap">{c.message}</td>
-                </tr>
-                {openHash === c.hash && (
-                  <tr><td colSpan={4}>
-                    <div className="commit-files">
-                      {changes[c.hash]
-                        ? (changes[c.hash].length
-                            ? changes[c.hash].map((f, i) => (
-                                <div key={i}><span className={`chg chg-${f.status}`}>{f.status}</span><code>{f.path}</code></div>
-                              ))
-                            : t('common.noData'))
-                        : t('common.loading')}
-                    </div>
-                  </td></tr>
-                )}
-              </Fragment>
-            ))}</tbody>
-          </table></div>
+          {/* 阶段CU：改用 DataTable 通用控件（原手写 table），获得展开行 + 列宽拖拽能力，
+              交互与对话分析详情一致（行首 ▶/▼ 开关） */}
+          <DataTable
+            columns={[
+              { key: 'hash', title: 'Hash', render: (v) => <code>{String(v || '').slice(0, 7)}</code> },
+              { key: 'author', title: '作者' },
+              { key: 'date', title: '日期', nowrap: true },
+              { key: 'message', title: '说明' },
+            ]}
+            rows={pageCommits}
+            rowKey="hash"
+            empty={t('common.noData')}
+            collapsible
+            expandedIds={openHash ? new Set([openHash]) : new Set()}
+            onToggleCollapse={toggleCommit}
+            renderExpandedRow={(c) => (
+              <div className="commit-files">
+                {changes[c.hash]
+                  ? (changes[c.hash].length
+                      ? changes[c.hash].map((f, i) => (
+                          <div key={i}><span className={`chg chg-${f.status}`}>{f.status}</span><code>{f.path}</code></div>
+                        ))
+                      : t('common.noData'))
+                  : t('common.loading')}
+              </div>
+            )}
+          />
         </>
       )}
       {!info && !err && <div className="table-loading">加载中…</div>}
@@ -992,12 +992,17 @@ function SysDialog({ onClose }) {
           {info.process_tops && (info.process_tops.cpu || []).length > 0 && (
             <>
               <p style={{ fontSize: 13, fontWeight: 600, margin: '10px 0 6px' }}>CPU Top 进程</p>
-              <div className="table-wrap"><table className="data-table">
-                <thead><tr><th style={{ width: 70 }}>PID</th><th>名称</th><th style={{ width: 100 }}>CPU</th></tr></thead>
-                <tbody>{(info.process_tops.cpu || []).slice(0, 8).map((p, i) => (
-                  <tr key={i}><td>{p.pid}</td><td>{p.name}</td><td>{p.usage_pct}%</td></tr>
-                ))}</tbody>
-              </table></div>
+              {/* 阶段CU：改用 DataTable 通用控件（原手写 table），获得列宽拖拽能力 */}
+              <DataTable
+                columns={[
+                  { key: 'pid', title: 'PID', width: 70 },
+                  { key: 'name', title: '名称' },
+                  { key: 'usage_pct', title: 'CPU', width: 100, render: (v) => `${v}%` },
+                ]}
+                rows={(info.process_tops.cpu || []).slice(0, 8)}
+                rowKey="pid"
+                empty={t('common.noData')}
+              />
             </>
           )}
         </>

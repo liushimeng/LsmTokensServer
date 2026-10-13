@@ -755,6 +755,7 @@
   "common.warning": "Warning",
   "common.yes": "Yes",
   "datatable.clearSelection": "Clear Selection",
+  "datatable.colResize": "Drag to resize column, double-click to reset",
   "datatable.filter": "Filter",
   "datatable.firstPage": "First",
   "datatable.jumpTo": "Go to",

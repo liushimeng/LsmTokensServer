@@ -115,6 +115,19 @@ a { color: var(--primary); text-decoration: none; }
 /* 操作列按钮组：inline-flex 换行，按钮整体不断散 */
 .op-btns { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .op-btns .btn { margin: 0; }
+
+/* ===== 阶段CU：表头列宽拖拽（通用控件，见 shared/columnResize.js）===== */
+/* 列宽受控（拖拽中/已存储百分比）时启用 fixed 布局，colgroup 精确控制各列宽；
+   表格总宽随容器缩放时各列按百分比等比例缩放（docs/项目迁移解决方案/数据表格列宽拖拽调整通用控件方案_20261013_164137.md §3.2） */
+.data-table.col-resize-fixed { table-layout: fixed; }
+/* 拖拽把手：表头列右缘 8px 热区，col-resize 光标；th 自身 position: sticky 即定位基准 */
+.data-table th { position: relative; }
+.data-table .col-resize-handle { position: absolute; right: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; touch-action: none; }
+.data-table .col-resize-handle:hover, .data-table th.col-resizing-th .col-resize-handle { background: rgba(37, 99, 235, .18); }
+/* 拖拽中：全局禁选，整表列宽由 colgroup 实时像素控制 */
+.data-table.col-resizing { user-select: none; }
+.data-table.col-resizing th { cursor: col-resize; }
+/* 卡片模式（≤600px）thead 隐藏，colgroup 在 display:block 布局下失效，均无需处理 */
 /* 操作按钮内文字禁止逐字折行：任何列宽下保持横向显示 */
 .op-btns .btn { white-space: nowrap; }
 /* 纵向变体：展开行操作列按钮竖向堆叠、文字横排（AIRouteManage 智能路由管理等宽表场景） */

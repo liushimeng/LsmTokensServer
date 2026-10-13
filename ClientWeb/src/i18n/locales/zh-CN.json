@@ -782,6 +782,7 @@
   "common.warning": "警告",
   "common.yes": "是",
   "datatable.clearSelection": "清除选择",
+  "datatable.colResize": "拖拽调整列宽，双击重置",
   "datatable.filter": "筛选",
   "datatable.firstPage": "首页",
   "datatable.jumpTo": "跳转到",
