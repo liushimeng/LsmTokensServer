@@ -313,7 +313,7 @@
   "chatAnalysis.sseEvents": "SSE 事件",
   "chatAnalysis.sseParse": "SSE 解析",
   "chatAnalysis.status": "状态",
-  "chatAnalysis.statusPlaceholder": "200",
+  "chatAnalysis.statusPlaceholder": "如 200",
   "chatAnalysis.streaming": "流式",
   "chatAnalysis.target": "目标端",
   "chatAnalysis.time": "时间",

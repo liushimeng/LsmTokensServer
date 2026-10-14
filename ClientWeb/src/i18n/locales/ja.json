@@ -286,7 +286,7 @@
   "chatAnalysis.sseEvents": "SSE イベント",
   "chatAnalysis.sseParse": "SSE解析",
   "chatAnalysis.status": "ステータス",
-  "chatAnalysis.statusPlaceholder": "200",
+  "chatAnalysis.statusPlaceholder": "例: 200",
   "chatAnalysis.streaming": "ストリーミング",
   "chatAnalysis.target": "対象",
   "chatAnalysis.time": "時刻",

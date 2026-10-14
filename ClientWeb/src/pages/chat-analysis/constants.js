@@ -21,6 +21,9 @@ export const ALGO_TYPE_CONVERTER = 2
 // 分页大小选项
 export const PAGE_SIZES = [3, 5, 10, 15, 20, 50, 100]
 
+// 阶段CV：状态筛选候选码清单 + 输入净化函数（独立无依赖模块，node 自检可直接加载）
+export { HTTP_STATUS_OPTIONS, sanitizeStatusCodeInput } from './statusOptions.js'
+
 // localStorage 工具（带容错）
 export const safeGet = (k) => { try { return window.localStorage.getItem(k) } catch { return null } }
 export const safeSet = (k, v) => { try { window.localStorage.setItem(k, v) } catch { /* 忽略 */ } }

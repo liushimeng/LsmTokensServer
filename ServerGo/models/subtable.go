@@ -723,11 +723,14 @@ func QueryAgentHttpTransactions(
 	if filterMethod != "" {
 		query = query.Where("request_method = ?", filterMethod)
 	}
-	if filterStatus != "" {
+	// 阶段CV：response_status 存的是 http.Response.Status 完整文本（"200 OK"、"529 "），
+	// 旧「全串精确匹配」永远命中 0 行；改为状态码前缀匹配（LIKE 'code%' / NOT LIKE）。
+	if code := NormalizeStatusCodeFilter(filterStatus); code != "" {
+		pattern := code + "%"
 		if filterStatusNot {
-			query = query.Where("response_status != ?", filterStatus)
+			query = query.Where("response_status NOT LIKE ?", pattern)
 		} else {
-			query = query.Where("response_status = ?", filterStatus)
+			query = query.Where("response_status LIKE ?", pattern)
 		}
 	}
 	if filterProtocolType > 0 {
@@ -801,11 +804,13 @@ func QueryAgentHttpTransactions(
 	if filterMethod != "" {
 		listQuery = listQuery.Where("request_method = ?", filterMethod)
 	}
-	if filterStatus != "" {
+	// 阶段CV：状态码前缀匹配（与上方 count 查询保持同一语义）
+	if code := NormalizeStatusCodeFilter(filterStatus); code != "" {
+		pattern := code + "%"
 		if filterStatusNot {
-			listQuery = listQuery.Where("response_status != ?", filterStatus)
+			listQuery = listQuery.Where("response_status NOT LIKE ?", pattern)
 		} else {
-			listQuery = listQuery.Where("response_status = ?", filterStatus)
+			listQuery = listQuery.Where("response_status LIKE ?", pattern)
 		}
 	}
 	if filterProtocolType > 0 {
@@ -2198,6 +2203,24 @@ func ParseResponseStatusCode(s string) int {
 		return 0
 	}
 	return code
+}
+
+// NormalizeStatusCodeFilter 净化「状态」筛选输入为纯数字状态码（阶段CV）。
+//
+// 背景：/ChatAnalysis 状态筛选框只允许数字（前端 datalist 组合框 + \D 剔除），
+// 但历史客户端/接口直调可能传入 "200 OK"、带空白等脏值；本函数统一收敛：
+//   - TrimSpace 后截取前导连续数字（至多 3 位），其余全部丢弃；
+//   - 无有效数字返回 ""（调用方约定：空值 = 该筛选不生效）。
+//
+// 配套匹配语义：返回码做 LIKE 前缀匹配（"200" → LIKE '200%' 命中 "200 OK"；
+// "529" → 命中 "529 "；手输 1~2 位如 "5" → 命中全部 5xx）。
+func NormalizeStatusCodeFilter(s string) string {
+	s = strings.TrimSpace(s)
+	end := 0
+	for end < len(s) && end < 3 && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	return s[:end]
 }
 
 // isResponseSuccess 判断整数 HTTP 状态码是否在 2xx 成功区间。

@@ -286,7 +286,7 @@
   "chatAnalysis.sseEvents": "SSE Events",
   "chatAnalysis.sseParse": "SSE Parse",
   "chatAnalysis.status": "Status",
-  "chatAnalysis.statusPlaceholder": "200",
+  "chatAnalysis.statusPlaceholder": "e.g. 200",
   "chatAnalysis.streaming": "Streaming",
   "chatAnalysis.target": "Target",
   "chatAnalysis.time": "Time",

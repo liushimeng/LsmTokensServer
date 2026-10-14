@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { pickRouteQuery } from '../../shared/format'
 import { useTimeSpanLevels } from '../../shared/useTimeSpanLevels'
 import { nearestSpan } from '../../shared/timeSpan'
-import { safeGet, safeSet } from './constants'
+import { safeGet, safeSet, sanitizeStatusCodeInput } from './constants'
 
 // 从 localStorage 恢复筛选参数（按角色隔离 key）
 function loadFiltersFromStorage(isAdmin) {
@@ -32,7 +32,8 @@ export default function useChatAnalysisFilters(route, isAdmin) {
   const [pageSize, setPageSize] = useState((saved && saved.pageSize) || 10)
   const [filterUrl, setFilterUrl] = useState((saved && saved.filterUrl) || '')
   const [filterMethod, setFilterMethod] = useState((saved && saved.filterMethod) || '')
-  const [filterStatus, setFilterStatus] = useState((saved && saved.filterStatus) || '')
+  // 阶段CV：状态筛选恢复时净化（兜底历史 localStorage 脏值，如 "200 OK"）
+  const [filterStatus, setFilterStatus] = useState(sanitizeStatusCodeInput((saved && saved.filterStatus) || ''))
   const [filterStatusNot, setFilterStatusNot] = useState((saved && saved.filterStatusNot) || false)
   const [filterProtocolType, setFilterProtocolType] = useState((saved && saved.filterProtocolType) || 0)
   const [filterAlgorithmType, setFilterAlgorithmType] = useState((saved && saved.filterAlgorithmType) || 0)

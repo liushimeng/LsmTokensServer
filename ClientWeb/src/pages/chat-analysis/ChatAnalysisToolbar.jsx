@@ -3,6 +3,7 @@
 import TimeRangeSelector from '../../components/TimeRangeSelector'
 import { modelNamesOf, allModelNames } from '../../shared/userModelOptions'
 import { useI18n } from '../../i18n'
+import { HTTP_STATUS_OPTIONS, sanitizeStatusCodeInput } from './constants'
 
 export default function ChatAnalysisToolbar({
   isAdmin,
@@ -83,7 +84,21 @@ export default function ChatAnalysisToolbar({
         </select>
       </label>
       <label>{t('chatAnalysis.method')} <input value={filterMethod} onChange={(e) => setFilterMethod(e.target.value)} placeholder={t('chatAnalysis.methodPlaceholder')} style={{ width: 80 }} /></label>
-      <label>{t('chatAnalysis.status')} <input value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} placeholder={t('chatAnalysis.statusPlaceholder')} style={{ width: 80 }} /></label>
+      {/* 阶段CV：状态筛选改为可编辑 List 控件（datalist 组合框）——下拉选码 + 手输数字，onChange 净化非数字字符 */}
+      <label>{t('chatAnalysis.status')}
+        <input
+          list="chat-analysis-status-options"
+          inputMode="numeric"
+          autoComplete="off"
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(sanitizeStatusCodeInput(e.target.value))}
+          placeholder={t('chatAnalysis.statusPlaceholder')}
+          style={{ width: 90 }}
+        />
+        <datalist id="chat-analysis-status-options">
+          {HTTP_STATUS_OPTIONS.map((o) => <option key={o.code} value={o.code}>{o.label}</option>)}
+        </datalist>
+      </label>
       <label className="field-check" style={{ margin: 0 }}>
         <input type="checkbox" checked={filterStatusNot} onChange={(e) => setFilterStatusNot(e.target.checked)} />{t('chatAnalysis.invert')}
       </label>
