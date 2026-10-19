@@ -16,20 +16,33 @@ import (
 	"github.com/lishimeng/LsmTokensServer/protocol"
 )
 
-// TestExtractAPIKey 测试从 Authorization Header 提取 API Key
+// TestExtractAPIKey 测试从 Authorization / x-api-key 头提取 API Key
+// 阶段CW：Anthropic 协议客户端（DSH anthropic-messages 等）只发 x-api-key，
+// 双头并存时 Authorization 优先；Authorization 非法格式不回退。
 func TestExtractAPIKey(t *testing.T) {
 	tests := []struct {
 		name      string
 		auth      string
+		xAPIKey   string
 		wantKey   string
 		wantError bool
 	}{
-		{"valid bearer", "Bearer sk-test123", "sk-test123", false},
-		{"valid bearer lowercase", "bearer sk-test456", "sk-test456", false},
-		{"missing header", "", "", true},
-		{"invalid format no space", "Bearer-sk-test", "", true},
-		{"invalid format no bearer", "Basic sk-test", "", true},
-		{"empty key", "Bearer ", "", true},
+		{"valid bearer", "Bearer sk-test123", "", "sk-test123", false},
+		{"valid bearer lowercase", "bearer sk-test456", "", "sk-test456", false},
+		{"missing both headers", "", "", "", true},
+		{"invalid format no space", "Bearer-sk-test", "", "", true},
+		{"invalid format no bearer", "Basic sk-test", "", "", true},
+		{"empty key", "Bearer ", "", "", true},
+		// 阶段CW：x-api-key 回退
+		{"x-api-key basic", "", "sk-test789", "sk-test789", false},
+		{"x-api-key with Bearer prefix", "", "Bearer sk-testabc", "sk-testabc", false},
+		{"x-api-key with bearer prefix lowercase", "", "bearer sk-testabc", "sk-testabc", false},
+		{"x-api-key trimmed", "", "  sk-test789  ", "sk-test789", false},
+		{"x-api-key empty value", "", "   ", "", true},
+		// 双头并存：Authorization 优先
+		{"both headers authorization wins", "Bearer sk-aaa", "sk-bbb", "sk-aaa", false},
+		// Authorization 非法格式 + x-api-key 存在：不回退，报错
+		{"invalid auth does not fall back", "Basic sk-test", "sk-test789", "", true},
 	}
 
 	for _, tt := range tests {
@@ -37,6 +50,9 @@ func TestExtractAPIKey(t *testing.T) {
 			req, _ := http.NewRequest("POST", "/Anthropic/v1/messages", nil)
 			if tt.auth != "" {
 				req.Header.Set("Authorization", tt.auth)
+			}
+			if tt.xAPIKey != "" {
+				req.Header.Set("X-Api-Key", tt.xAPIKey)
 			}
 			key, err := extractAPIKey(req)
 			if tt.wantError {

@@ -485,7 +485,7 @@ func TestProxyAuthFailures(t *testing.T) {
 			auth:       "",
 			body:       `{"model":"test","messages":[]}`,
 			wantStatus: http.StatusUnauthorized,
-			wantBody:   "missing Authorization header",
+			wantBody:   "missing Authorization or x-api-key header",
 		},
 		{
 			name:       "invalid api key",

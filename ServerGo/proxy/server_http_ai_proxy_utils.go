@@ -19,21 +19,37 @@ import (
 	"time"
 )
 
-// extractAPIKey 从请求头提取 Bearer API Key
+// extractAPIKey 从请求头提取 API Key。
+// 优先取 Authorization: Bearer（优先级最高，双头并存时以此为准）；
+// Authorization 缺失时回退 x-api-key（Anthropic 官方 SDK / DSH anthropic-messages
+// 等客户端的标准做法）。回退提取的 key 仅用于本服务鉴权与模型路由查询，
+// 不会作为上游出站头转发（x-api-key/authorization 在上游转发层始终丢弃改写给源站凭据）。
+// 注意：Authorization 存在但格式非法时不回退——显式携带非法头应报错而非静默回退，
+// 避免掩盖客户端配置错误。
 func extractAPIKey(r *http.Request) (string, error) {
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		return "", fmt.Errorf("missing Authorization header")
+	if auth := r.Header.Get("Authorization"); auth != "" {
+		parts := strings.SplitN(auth, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+			return "", fmt.Errorf("invalid Authorization format, expected 'Bearer {api_key}'")
+		}
+		key := strings.TrimSpace(parts[1])
+		if key == "" {
+			return "", fmt.Errorf("empty API Key")
+		}
+		return key, nil
 	}
-	parts := strings.SplitN(auth, " ", 2)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return "", fmt.Errorf("invalid Authorization format, expected 'Bearer {api_key}'")
+	if apiKey := r.Header.Get("X-Api-Key"); apiKey != "" {
+		// 兼容整行粘贴 "Bearer sk-..." 的客户端，剥离 Bearer 前缀
+		// （与 system/ai_api_connectivity.go resolveAuthHeaders 既有约定对齐）
+		key := strings.TrimSpace(apiKey)
+		key = strings.TrimPrefix(key, "Bearer ")
+		key = strings.TrimPrefix(key, "bearer ")
+		if key == "" {
+			return "", fmt.Errorf("empty API Key")
+		}
+		return key, nil
 	}
-	key := strings.TrimSpace(parts[1])
-	if key == "" {
-		return "", fmt.Errorf("empty API Key")
-	}
-	return key, nil
+	return "", fmt.Errorf("missing Authorization or x-api-key header")
 }
 
 // isValidProtocol 验证用户是否启用了指定协议
@@ -875,11 +891,14 @@ func validateRequestModelName(reqModelName, expectedModelName string) error {
 	return nil
 }
 
-// setCORSHeaders 设置跨域访问响应头，允许 Web 管理页面的 JavaScript 请求
+// setCORSHeaders 设置跨域访问响应头，允许 Web 管理页面的 JavaScript 请求。
+// Allow-Headers 与 protocol.ShouldForwardProxyHeader 放行集合对齐：
+// anthropic-beta / openai-beta / x-request-id / x-stainless-* 缺失会导致浏览器
+// 类客户端在预检阶段被拦截，转发白名单形同虚设（阶段CW 修复）。
 func setCORSHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, anthropic-version, x-api-key")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, api-key, anthropic-version, anthropic-beta, openai-beta, x-request-id, x-stainless-*")
 	w.Header().Set("Access-Control-Max-Age", "86400")
 }
 
