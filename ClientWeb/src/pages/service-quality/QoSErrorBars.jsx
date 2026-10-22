@@ -19,13 +19,15 @@ export default function QoSErrorBars({ models, win, t }) {
     if (!models.length) return []
     const n = windowSeries(models[0], win).length
     const out = []
-    for (let i = 0; i < n; i++) out.push({ e429: 0, e5xx: 0, other: 0 })
+    for (let i = 0; i < n; i++) out.push({ e429: 0, e5xx: 0, other: 0, total: 0, partial: false })
     for (const m of models) {
       const pts = windowSeries(m, win)
       for (let i = 0; i < Math.min(n, pts.length); i++) {
         out[i].e429 += Number(pts[i].error_429) || 0
         out[i].e5xx += Number(pts[i].error_5xx) || 0
         out[i].other += Number(pts[i].error_other) || 0
+        out[i].total += Number(pts[i].count) || 0
+        out[i].partial = out[i].partial || !!pts[i].partial
       }
     }
     return out
@@ -141,6 +143,7 @@ export default function QoSErrorBars({ models, win, t }) {
           }}>
             <div style={{ color: '#94a3b8', marginBottom: 2 }}>
               {windowSeries(models[0], win)[hoverIdx].bucket}
+              {buckets[hoverIdx].partial ? ` · ${t('serviceQuality.period.partial')}` : ''}
             </div>
             {legend.map((l) => (
               <div key={l.key} style={{ display: 'flex', alignItems: 'center', gap: 6, lineHeight: 1.5 }}>
@@ -149,6 +152,15 @@ export default function QoSErrorBars({ models, win, t }) {
                 <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>{fmtNum(buckets[hoverIdx][l.key])}</span>
               </div>
             ))}
+            <div style={{ marginTop: 3, paddingTop: 3, borderTop: '1px solid #e2e8f0', color: '#475569' }}>
+              {t('serviceQuality.errors.totalBucket', { count: fmtNum(buckets[hoverIdx].total) })}
+              {' · '}
+              {t('serviceQuality.errors.rate', {
+                v: buckets[hoverIdx].total > 0
+                  ? ((buckets[hoverIdx].e429 + buckets[hoverIdx].e5xx + buckets[hoverIdx].other) / buckets[hoverIdx].total * 100).toFixed(1) + '%'
+                  : '0%',
+              })}
+            </div>
           </div>
         ) : null}
       </div>

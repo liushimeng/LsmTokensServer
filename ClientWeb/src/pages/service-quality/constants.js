@@ -1,4 +1,4 @@
-// service-quality 页共享常量：状态四档色 / 多模型分类色 / 错误分类色 / 分档阈值。
+// service-quality 页共享常量：状态四档色 / 多模型分类色 / 错误分类色 / 分档阈值 / 指标定义。
 // 配色经 dataviz palette 校验器验证（方案 §5.2）：
 //   - 分类色固定 8 槽（超 8 折叠「其他」），颜色跟随模型实体（按名称稳定分配）
 //   - 状态色仅承载状态语义，始终伴随文字标签，不与系列色混用
@@ -30,6 +30,38 @@ export const CONGESTION_TIERS = [
   { key: 'moderate', max: 5.0, color: STATUS_COLORS.moderate },
   { key: 'severe', max: Infinity, color: STATUS_COLORS.severe },
 ]
+
+// 低样本阈值：与后端 qosMinCoefficientSamples 一致
+export const MIN_COEFFICIENT_SAMPLES = 5
+
+// METRICS 趋势图指标集（同一时刻只画一个 Y 轴 —— 禁止双轴）。
+//   kind: ms | ratio | pct，决定刻度与 tooltip 格式
+//   thresholds: 参考线（虚线仅承载阈值语义），color 取状态色并始终配文字标签
+//   coefficient: true 表示指标依赖拥堵系数样本，低样本时段不取点（断线而非画 0）
+export const METRICS = [
+  { key: 'avg', i18n: 'serviceQuality.metric.avg', field: 'ok_avg_elapsed_ms', kind: 'ms', thresholds: [] },
+  { key: 'p95', i18n: 'serviceQuality.metric.p95', field: 'ok_p95_ms', kind: 'ms', thresholds: [] },
+  {
+    key: 'congestion', i18n: 'serviceQuality.metric.congestion', field: 'avg_congestion', kind: 'ratio', coefficient: true,
+    thresholds: [
+      { value: 1.2, color: STATUS_COLORS.light, i18n: 'serviceQuality.status.light' },
+      { value: 2.0, color: STATUS_COLORS.moderate, i18n: 'serviceQuality.status.moderate' },
+      { value: 5.0, color: STATUS_COLORS.severe, i18n: 'serviceQuality.status.severe' },
+    ],
+  },
+  {
+    key: 'stall', i18n: 'serviceQuality.metric.stall', field: 'stall_rate', kind: 'pct', coefficient: true,
+    thresholds: [{ value: 20, color: STATUS_COLORS.moderate, i18n: 'serviceQuality.metric.stallThreshold' }],
+  },
+  {
+    key: 'error', i18n: 'serviceQuality.metric.error', field: 'error_rate', kind: 'pct',
+    thresholds: [{ value: 5, color: STATUS_COLORS.severe, i18n: 'serviceQuality.metric.errorThreshold' }],
+  },
+]
+
+export function metricOf(key) {
+  return METRICS.find((m) => m.key === key) || METRICS[0]
+}
 
 // tierOfCongestion 拥堵系数 → 分档 key（<0 视为无数据）
 export function tierOfCongestion(v) {
@@ -63,10 +95,36 @@ export function fmtPct(v) {
   return n >= 10 ? n.toFixed(0) + '%' : n.toFixed(1) + '%'
 }
 
+// fmtRatio 拥堵系数（两位小数）
+export function fmtRatio(v) {
+  const n = Number(v)
+  if (!isFinite(n) || n <= 0) return '-'
+  return n.toFixed(2)
+}
+
+// fmtMetric 按指标类型格式化
+export function fmtMetric(v, metric) {
+  if (v === null || v === undefined || !isFinite(Number(v))) return '-'
+  if (metric.kind === 'ms') return fmtMs(v)
+  if (metric.kind === 'pct') return `${Number(v).toFixed(Number(v) >= 10 ? 0 : 1)}%`
+  return Number(v).toFixed(2)
+}
+
 // fmtNum 千分位
 export function fmtNum(n) {
   n = Number(n) || 0
   return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
+// metricValue 取某指标在某时间桶的数值：
+//   - 空桶 → null（断开折线，不画 0）
+//   - 系数类指标样本 < MIN_COEFFICIENT_SAMPLES → null（低样本不取点）
+export function metricValue(point, metric) {
+  if (!point || !point.count) return null
+  if (metric.coefficient && (Number(point.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES) return null
+  const v = Number(point[metric.field])
+  if (!isFinite(v) || v < 0) return null
+  return v
 }
 
 // windowSeries 按窗口取桶序列
@@ -86,4 +144,17 @@ export function bucketShortLabel(key) {
     return parts[1]
   }
   return key.slice(5)
+}
+
+// fmtAgo 相对时间（最后请求）：<1min "刚刚"、<60min "N 分钟前"、<24h "N 小时前"、否则 "N 天前"
+export function fmtAgo(ms, t) {
+  const v = Number(ms) || 0
+  if (!v) return t('serviceQuality.cards.never')
+  const diff = Date.now() - v
+  if (diff < 60_000) return t('serviceQuality.cards.justNow')
+  const min = Math.floor(diff / 60_000)
+  if (min < 60) return t('serviceQuality.cards.minutesAgo', { count: min })
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return t('serviceQuality.cards.hoursAgo', { count: hour })
+  return t('serviceQuality.cards.daysAgo', { count: Math.floor(hour / 24) })
 }

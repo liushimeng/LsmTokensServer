@@ -143,6 +143,10 @@ a { color: var(--primary); text-decoration: none; }
 .data-table th.sortable { cursor: pointer; user-select: none; }
 .data-table th.sortable:hover { color: #2563eb; }
 .data-table tr.row-disabled:hover td, .data-table tr.row-enabled:hover td { background: #eef2f6; }
+/* QoS 时段明细：进行中时段（当前小时/天）整行浅灰底 + 左缘细条，避免被当成完整时段结论 */
+.data-table tr.qos-period-partial td { background: #f8fafc; }
+.data-table tr.qos-period-partial td:first-child { box-shadow: inset 3px 0 0 #cbd5e1; }
+.data-table tr.qos-period-partial:hover td { background: #f1f5f9; }
 .table-loading, .table-empty { padding: 32px; text-align: center; color: var(--muted); background: var(--panel); border: 1px dashed var(--border); border-radius: 8px; }
 .pager { display: flex; gap: 8px; align-items: center; margin-top: 12px; justify-content: flex-end; color: var(--muted); }
 

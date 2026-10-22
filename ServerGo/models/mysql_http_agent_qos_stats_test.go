@@ -7,6 +7,7 @@ package models
 // 直接调用 buildQoSMonitorReport（绕过缓存），缓存行为单独验证。
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -232,7 +233,237 @@ func TestQoSStatusOf_Tiers(t *testing.T) {
 	}
 }
 
-// GetQoSMonitorReport 60s 缓存命中（同键返回同一实例指针）。
+// v2.0.84 时间维度数据质量优化测试
+// ---------------------------------------------------------------
+
+// Token 分档基准：小请求与大请求各自归一化后拥堵系数趋近 1，
+// 不再被全局 Σ/Σ 基准把小请求放大数倍。
+func TestQoSMonitorReport_TokenBandBaseline(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-band-model"
+	// 30 笔小请求：3000ms / 100 tok（分档基准 30ms/token）
+	for i := 0; i < 30; i++ {
+		insertQoSFixture(t, "qos-b1", "qos-bm1", dst, "200 OK", now.Add(-time.Duration(i+5)*time.Minute), 3000, 100)
+	}
+	// 30 笔大请求：20000ms / 4000 tok（分档基准 5ms/token）
+	for i := 0; i < 30; i++ {
+		insertQoSFixture(t, "qos-b1", "qos-bm1", dst, "200 OK", now.Add(-time.Duration(i+5)*time.Minute), 20000, 4000)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	// 全局基准 = (30×3000 + 30×20000) / (30×100 + 30×4000) ≈ 5.61 ms/token
+	if math.Abs(m.BaselineMsPerToken-5.61) > 0.01 {
+		t.Errorf("global baseline = %v, want ≈5.61", m.BaselineMsPerToken)
+	}
+	if m.BaselineBands != 2 {
+		t.Errorf("calibrated bands = %d, want 2", m.BaselineBands)
+	}
+	// 两类请求各自系数 1.0 → 桶均值 1.0（全局基准会让小请求达 5.35）
+	lastHour := m.Hours[len(m.Hours)-1]
+	if math.Abs(lastHour.AvgCongestion-1.0) > 0.01 {
+		t.Errorf("band-normalized congestion = %v, want 1.0", lastHour.AvgCongestion)
+	}
+	if lastHour.CoefficientSamples != 60 {
+		t.Errorf("coefficient samples = %v, want 60", lastHour.CoefficientSamples)
+	}
+	if lastHour.StallRate != 0 {
+		t.Errorf("stall rate = %v, want 0", lastHour.StallRate)
+	}
+}
+
+// 成功时延与全量时延分离：429 快速失败不再拉低成功时延。
+func TestQoSMonitorReport_SuccessLatencySplit(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-split-model"
+	insertQoSFixture(t, "qos-u3", "qos-m3", dst, "200 OK", now.Add(-time.Minute), 5000, 100)
+	insertQoSFixture(t, "qos-u3", "qos-m3", dst, "429 Too Many Requests", now.Add(-2*time.Minute), 50, 0)
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+	lastHour := m.Hours[len(m.Hours)-1]
+
+	if lastHour.Count != 2 || lastHour.SuccessCount != 1 {
+		t.Errorf("count/success = %d/%d, want 2/1", lastHour.Count, lastHour.SuccessCount)
+	}
+	if lastHour.OkAvgElapsedMs != 5000 {
+		t.Errorf("ok avg elapsed = %v, want 5000", lastHour.OkAvgElapsedMs)
+	}
+	if lastHour.AvgElapsedMs != 2525 {
+		t.Errorf("all avg elapsed = %v, want 2525", lastHour.AvgElapsedMs)
+	}
+	if lastHour.ErrorRate != 50 {
+		t.Errorf("error rate = %v, want 50", lastHour.ErrorRate)
+	}
+	if lastHour.Error429 != 1 {
+		t.Errorf("error 429 = %v, want 1", lastHour.Error429)
+	}
+	// 成功率口径：成功 1 笔无 429 干扰
+	if m.Live.SuccessCount != 1 || m.Live.OkAvgElapsedMs != 5000 {
+		t.Errorf("live success/ok avg = %d/%d, want 1/5000", m.Live.SuccessCount, m.Live.OkAvgElapsedMs)
+	}
+}
+
+// 抖动率 = 拥堵系数变异系数（无量纲 %）。
+func TestQoSCV_Jitter(t *testing.T) {
+	if v := qosCV([]float64{2, 2, 2}); v != 0 {
+		t.Errorf("constant series CV = %v, want 0", v)
+	}
+	// [1,2]：均值 1.5、总体标准差 0.5 → CV = 1/3
+	if v := qosCV([]float64{1, 2}); math.Abs(v-1.0/3) > 1e-9 {
+		t.Errorf("CV([1,2]) = %v, want 1/3", v)
+	}
+	if v := qosCV([]float64{1}); v != 0 {
+		t.Errorf("single sample CV = %v, want 0", v)
+	}
+}
+
+// 进行中时间桶标记：当前分钟/小时/天桶 partial=true，历史桶 false。
+func TestQoSMonitorReport_PartialBuckets(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-partial-model"
+	insertQoSFixture(t, "qos-u4", "qos-m4", dst, "200 OK", now.Add(-2*time.Minute), 1000, 100)
+	insertQoSFixture(t, "qos-u4", "qos-m4", dst, "200 OK", now.Add(-26*time.Hour), 1000, 100)
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	if !m.Minutes[len(m.Minutes)-1].Partial {
+		t.Errorf("current minute bucket should be partial")
+	}
+	if m.Minutes[0].Partial {
+		t.Errorf("oldest minute bucket should not be partial")
+	}
+	if !m.Hours[len(m.Hours)-1].Partial {
+		t.Errorf("current hour bucket should be partial")
+	}
+	if m.Hours[0].Partial {
+		t.Errorf("oldest hour bucket should not be partial")
+	}
+	if !m.Days[len(m.Days)-1].Partial {
+		t.Errorf("today bucket should be partial")
+	}
+	if m.Days[0].Partial {
+		t.Errorf("oldest day bucket should not be partial")
+	}
+	// 7 天序列日期连续（末位 = 今天）
+	wantToday := now.Format("2006-01-02")
+	if m.Days[len(m.Days)-1].Bucket != wantToday {
+		t.Errorf("last day bucket = %q, want %q", m.Days[len(m.Days)-1].Bucket, wantToday)
+	}
+	if m.Days[0].Bucket != now.AddDate(0, 0, -6).Format("2006-01-02") {
+		t.Errorf("first day bucket = %q, want 6 days ago", m.Days[0].Bucket)
+	}
+}
+
+// 实时窗口阶梯：5 分钟样本不足时回退 15/60 分钟，并返回实际窗口与最后请求时间。
+func TestQoSMonitorReport_LiveWindowLadder(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-live-model"
+	// 5 分钟窗口内只有 3 笔（< qosLiveMinSamples=5），15 分钟窗口补足到 6 笔
+	for i := 0; i < 3; i++ {
+		insertQoSFixture(t, "qos-u5", "qos-m5", dst, "200 OK", now.Add(-time.Duration(i+1)*time.Minute), 1000, 100)
+	}
+	for i := 0; i < 3; i++ {
+		insertQoSFixture(t, "qos-u5", "qos-m5", dst, "200 OK", now.Add(-time.Duration(i+8)*time.Minute), 1000, 100)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+	if m.Live.WindowMinutes != 15 {
+		t.Errorf("live window = %d, want 15", m.Live.WindowMinutes)
+	}
+	if m.Live.ReqCount < 6 {
+		t.Errorf("live req count = %d, want >= 6", m.Live.ReqCount)
+	}
+	if m.Live.LastRequestAtMs == 0 {
+		t.Errorf("live last request at should be set")
+	}
+}
+
+// 只有 20 分钟前的数据：5/15 分钟窗口为空 → 回退 60 分钟。
+func TestQoSMonitorReport_LiveWindowFallback60(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-live60-model"
+	insertQoSFixture(t, "qos-u6", "qos-m6", dst, "200 OK", now.Add(-20*time.Minute), 1000, 100)
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+	if m.Live.WindowMinutes != 60 {
+		t.Errorf("live window = %d, want 60", m.Live.WindowMinutes)
+	}
+	if m.Live.ReqCount != 1 {
+		t.Errorf("live req count = %d, want 1", m.Live.ReqCount)
+	}
+	if m.Status == "idle" {
+		t.Errorf("model with 20min-old traffic should not be idle")
+	}
+}
+
+// 周成功分位：错误请求不进入 week_ok_* 口径。
+func TestQoSMonitorReport_WeekOkPercentiles(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-weekok-model"
+	for i, e := range []int64{100, 200, 300, 400, 500} {
+		insertQoSFixture(t, "qos-u7", "qos-m7", dst, "200 OK", now.Add(-time.Duration(i+1)*time.Minute), e, 10)
+	}
+	// 错误请求（10ms 快速失败）只进全量口径
+	insertQoSFixture(t, "qos-u7", "qos-m7", dst, "500 Internal Server Error", now.Add(-time.Minute), 10, 0)
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+	if m.WeekOkP50Ms != 300 {
+		t.Errorf("week ok p50 = %v, want 300", m.WeekOkP50Ms)
+	}
+	if m.WeekOkP95Ms != 500 {
+		t.Errorf("week ok p95 = %v, want 500", m.WeekOkP95Ms)
+	}
+	if m.WeekP50Ms == m.WeekOkP50Ms {
+		t.Errorf("all-week p50 should include error sample and differ from ok-only p50")
+	}
+	if m.OkCalls7d != 5 || m.ErrCalls7d != 1 {
+		t.Errorf("ok/err calls 7d = %d/%d, want 5/1", m.OkCalls7d, m.ErrCalls7d)
+	}
+}
+
+// GetQoSMonitorReport 30s 缓存命中（同键返回同一实例指针）。
 func TestGetQoSMonitorReport_Cache(t *testing.T) {
 	cleanup := initTestEnv(t)
 	defer cleanup()

@@ -9,6 +9,7 @@ const HOUR = '00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 
 
 export default function QoSHeatmap({ model, t }) {
   const [hover, setHover] = useState(null) // { dayIdx, hour }
+  const currentHour = new Date().getHours() // 进行中小时（今天最后一行）
 
   if (!model || !Array.isArray(model.heatmap)) {
     return <div style={{ padding: 24, color: '#94a3b8', fontSize: 13 }}>{t('serviceQuality.heatmap.empty')}</div>
@@ -33,6 +34,8 @@ export default function QoSHeatmap({ model, t }) {
     hour: hover.hour,
     v: model.heatmap[hover.dayIdx][hover.hour],
     count: model.heatmap_counts && model.heatmap_counts[hover.dayIdx] ? model.heatmap_counts[hover.dayIdx][hover.hour] : 0,
+    // 今天最后一行 + 当前小时 = 进行中的小时桶（样本未满）
+    partial: hover.dayIdx === model.heatmap.length - 1 && hover.hour === currentHour,
   } : null
 
   return (
@@ -52,14 +55,17 @@ export default function QoSHeatmap({ model, t }) {
               <span style={{ fontSize: 10, color: '#64748b', alignSelf: 'center' }}>{dayLabel(dayIdx)}</span>
               {row.map((v, hour) => {
                 const isHover = hover && hover.dayIdx === dayIdx && hover.hour === hour
+                const isPartial = dayIdx === model.heatmap.length - 1 && hour === currentHour
                 return (
                   <div
                     key={hour}
                     onMouseEnter={() => setHover({ dayIdx, hour })}
                     onMouseLeave={() => setHover(null)}
+                    title={isPartial ? t('serviceQuality.heatmap.partial') : undefined}
                     style={{
                       height: 20, borderRadius: 3, background: cellColor(v),
-                      outline: isHover ? '2px solid #0f172a' : 'none', cursor: 'default',
+                      outline: isHover ? '2px solid #0f172a' : (isPartial ? '1px solid #64748b' : 'none'),
+                      cursor: 'default',
                       opacity: tierOfCongestion(v) === 'idle' ? 1 : 0.92,
                     }}
                   />
@@ -89,6 +95,7 @@ export default function QoSHeatmap({ model, t }) {
               v: hoverInfo.v >= 0 ? hoverInfo.v.toFixed(2) : t('serviceQuality.heatmap.noData'),
               count: hoverInfo.count,
             })}
+            {hoverInfo.partial ? ` · ${t('serviceQuality.heatmap.partial')}` : ''}
           </span>
         ) : null}
       </div>

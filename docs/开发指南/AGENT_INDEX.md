@@ -216,7 +216,7 @@
 | [`mysql_http_agent_model_info.go`](mysql_http_agent_model_info.go) | 模型信息表 | `TAgentModelInfo` |
 | [`mysql_http_agent_analysis.go`](mysql_http_agent_analysis.go) | Session/Task 分析 + `parseRequestToolsFromBody` | `parseRequestToolsFromBody` |
 | [`mysql_http_agent_tokens.go`](mysql_http_agent_tokens.go) | Tokens 时间段统计 | `GetTokensRangeStats` |
-| [`mysql_http_agent_qos_stats.go`](mysql_http_agent_qos_stats.go) | 源站模型 QoS 聚合（拥堵系数/分位时延/热力图） | `GetQoSMonitorReport` |
+| [`mysql_http_agent_qos_stats.go`](mysql_http_agent_qos_stats.go) | 源站模型 QoS 聚合（Token 分档基准/拥堵系数/成功口径分位时延/热力图/逐时段桶） | `GetQoSMonitorReport` |
 | [`mysql_http_agent_sub_table.go`](mysql_http_agent_sub_table.go) | 哈希分表管理 | `QueryAgentHttpTransactions` |
 | [`mysql_http_agent_cache.go`](mysql_http_agent_cache.go) | 内存缓存（零 DB 热路径） | `AgentCache`, `LoadAgentCacheFromDB` |
 | [`mysql_http_stats_cache.go`](mysql_http_stats_cache.go) | 统计查询内存缓存 | — |

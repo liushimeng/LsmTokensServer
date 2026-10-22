@@ -1,47 +1,62 @@
-// QoSTrendChart：时延趋势折线图。
-// X 轴时间桶、Y 轴响应时长（ms，单轴）；多模型分色折线（同色实线 = 平均、
-// 虚线 = P95 警戒线）；图例点击切换模型；十字线 + tooltip 悬浮查看数值。
-// 颜色跟随模型实体（名称稳定分配，刷新不漂移），分类色经 CVD 校验。
+// QoSTrendChart：服务质量趋势折线图（单轴多指标，禁止双轴）。
+//
+// v2.0.84 时间维度优化：
+//   - 指标可切换：平均时延 / P95 时延 / 拥堵系数 / 卡顿率 / 错误率，
+//     同一时刻只画一个 Y 轴（双轴会凭空制造相关性，见 dataviz anti-patterns）。
+//   - 时延取成功请求口径（ok_*）：429/5xx 快速失败不再把曲线"拉好看"。
+//   - 系数类指标在样本 < 5 的时段断线（不画 0），避免小样本伪造结论。
+//   - 进行中时段（当前分钟/小时/天）以空心端点 + 脚注标识。
+//   - 阈值参考线为虚线（虚线仅承载阈值语义），网格保持实线极细。
+//   - tooltip 十字线一次性给出该时段全部指标，避免来回切指标读数。
 import { useMemo, useState } from 'react'
 import ResponsiveSvgChart from '../../components/ResponsiveSvgChart'
-import { modelColor, windowSeries, bucketShortLabel, fmtMs } from './constants'
+import {
+  modelColor, windowSeries, bucketShortLabel, fmtMs, fmtMetric, metricValue, metricOf,
+} from './constants'
 
-const CHART_H = 280
-const PAD = { left: 58, right: 18, top: 14, bottom: 26 }
+const CHART_H = 300
+const PAD = { left: 62, right: 64, top: 16, bottom: 30 }
 const GRID = '#e2e8f0'
 const AXIS = '#94a3b8'
 const TEXT = '#475569'
+const MUTED = '#94a3b8'
 
-export default function QoSTrendChart({ models, allNames, selected, onToggle, win, t }) {
+export default function QoSTrendChart({ models, allNames, selected, onToggle, onAll, onNone, win, metricKey, t }) {
   const [hoverIdx, setHoverIdx] = useState(null)
-  const [vw, setVw] = useState(720) // 容器实测宽度（tooltip 定位用）
+  const [vw, setVw] = useState(720)
 
+  const metric = metricOf(metricKey)
   const shown = useMemo(
     () => models.filter((m) => selected.has(m.dst_model_name)),
     [models, selected],
   )
 
-  const series = useMemo(() => shown.map((m) => ({
-    name: m.dst_model_name,
-    color: modelColor(allNames, m.dst_model_name),
-    pts: windowSeries(m, win),
-  })), [shown, win, allNames])
+  const series = useMemo(() => shown.map((m) => {
+    const pts = windowSeries(m, win)
+    return {
+      name: m.dst_model_name,
+      color: modelColor(allNames, m.dst_model_name),
+      pts,
+      vals: pts.map((p) => metricValue(p, metric)),
+    }
+  }), [shown, win, allNames, metric])
 
   const bucketCount = series.length ? series[0].pts.length : 0
 
   const yMax = useMemo(() => {
     let max = 0
     for (const s of series) {
-      for (const p of s.pts) {
-        if (Number(p.avg_elapsed_ms) > max) max = Number(p.avg_elapsed_ms)
-        if (Number(p.p95_elapsed_ms) > max) max = Number(p.p95_elapsed_ms)
+      for (const v of s.vals) {
+        if (v !== null && v > max) max = v
       }
     }
-    return max > 0 ? max * 1.12 : 1000
-  }, [series])
+    if (max <= 0) return metric.kind === 'ms' ? 1000 : 1
+    // 系数/百分比指标顶部留白略小，参考线更容易落在图内
+    return max * 1.15
+  }, [series, metric])
 
   const xLabels = useMemo(() => {
-    const n = Math.min(5, bucketCount)
+    const n = Math.min(6, bucketCount)
     const out = []
     if (!bucketCount) return out
     const step = (bucketCount - 1) / Math.max(1, n - 1)
@@ -54,16 +69,12 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, wi
   }, [bucketCount, series])
 
   if (!series.length || !bucketCount) {
-    return <div style={{ padding: 24, color: '#94a3b8', fontSize: 13 }}>{t('serviceQuality.trend.empty')}</div>
+    return <div style={{ padding: 24, color: MUTED, fontSize: 13 }}>{t('serviceQuality.trend.empty')}</div>
   }
-
-  const hoverX = hoverIdx !== null
-    ? (W) => PAD.left + (bucketCount <= 1 ? 0 : (hoverIdx / (bucketCount - 1)) * Math.max(120, W - PAD.left - PAD.right))
-    : null
 
   return (
     <div>
-      {/* 图例：色块 + 模型名，点击切换；虚线说明 P95 */}
+      {/* 图例：色块 + 模型名，点击切换；空心点说明在脚注 */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>
         {models.map((m) => {
           const on = selected.has(m.dst_model_name)
@@ -77,7 +88,7 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, wi
                 fontSize: 12, padding: '2px 8px', borderRadius: 999,
                 border: '1px solid ' + (on ? color : '#e2e8f0'),
                 background: on ? color + '14' : '#fff',
-                color: on ? TEXT : '#94a3b8',
+                color: on ? TEXT : MUTED,
               }}
             >
               <span style={{ width: 14, height: 3, borderRadius: 2, background: on ? color : '#cbd5e1' }} />
@@ -85,7 +96,15 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, wi
             </button>
           )
         })}
+        <button
+          onClick={() => (shown.length === models.length ? onNone() : onAll())}
+          style={{
+            marginLeft: 'auto', fontSize: 11, padding: '2px 8px', borderRadius: 999,
+            border: '1px solid #e2e8f0', background: '#fff', color: TEXT, cursor: 'pointer',
+          }}
+        >{shown.length === models.length ? t('serviceQuality.trend.clear') : t('serviceQuality.trend.selectAll')}</button>
       </div>
+
       <div style={{ position: 'relative' }}>
         <ResponsiveSvgChart minWidth={200} height={CHART_H} onWidthChange={setVw}>
           {(W) => {
@@ -93,10 +112,19 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, wi
             const innerH = CHART_H - PAD.top - PAD.bottom
             const xOf = (i) => PAD.left + (bucketCount <= 1 ? 0 : (i / (bucketCount - 1)) * innerW)
             const yOf = (v) => PAD.top + innerH - (Math.max(0, v) / yMax) * innerH
-            const linePath = (pts, field) => pts
-              .map((p, i) => `${i === 0 ? 'M' : 'L'}${xOf(i).toFixed(1)},${yOf(p[field]).toFixed(1)}`)
-              .join(' ')
+            // 断开折线：null 值不连线（空桶 / 低样本）
+            const linePath = (vals) => {
+              let d = ''
+              let pen = false
+              vals.forEach((v, i) => {
+                if (v === null) { pen = false; return }
+                d += `${pen ? 'L' : 'M'}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`
+                pen = true
+              })
+              return d
+            }
             const hx = hoverIdx !== null ? xOf(hoverIdx) : 0
+            const thresholds = metric.thresholds.filter((th) => th.value > 0 && th.value < yMax)
             return (
               <svg
                 width={W} height={CHART_H}
@@ -111,14 +139,32 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, wi
                 {/* 网格 + Y 轴刻度（实线极细，recessive） */}
                 {[0, 0.25, 0.5, 0.75, 1].map((r) => {
                   const y = PAD.top + innerH * r
-                  const val = Math.round(yMax * (1 - r))
+                  const val = yMax * (1 - r)
                   return (
                     <g key={r}>
                       <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke={GRID} strokeWidth={1} />
-                      <text x={PAD.left - 6} y={y + 3} textAnchor="end" fontSize={10} fill={AXIS}>{fmtMs(val)}</text>
+                      <text x={PAD.left - 6} y={y + 3} textAnchor="end" fontSize={10} fill={AXIS}>
+                        {fmtMetric(val, metric)}
+                      </text>
                     </g>
                   )
                 })}
+
+                {/* 阈值参考线（虚线只承载阈值语义；标签用文本色，色块承载状态语义） */}
+                {thresholds.map((th) => {
+                  const y = yOf(th.value)
+                  return (
+                    <g key={th.value}>
+                      <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y}
+                        stroke={th.color} strokeWidth={1} strokeDasharray="4,4" opacity={0.75} />
+                      <rect x={W - PAD.right + 6} y={y - 3} width={8} height={6} rx={2} fill={th.color} />
+                      <text x={W - PAD.right + 17} y={y + 3} fontSize={9.5} fill={TEXT}>
+                        {t(th.i18n)}
+                      </text>
+                    </g>
+                  )
+                })}
+
                 {/* X 轴刻度（首尾贴边对齐，避免越界裁切） */}
                 {xLabels.map((it, i) => (
                   <text
@@ -132,57 +178,100 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, wi
                     {it.label}
                   </text>
                 ))}
-                {/* 模型折线：实线平均 + 同色虚线 P95 */}
+
+                {/* 模型折线（稀疏视图补小圆点：单点/断段也可见） */}
                 {series.map((s) => (
                   <g key={s.name}>
-                    <path d={linePath(s.pts, 'p95_elapsed_ms')} fill="none" stroke={s.color} strokeWidth={1.5}
-                      strokeDasharray="5,4" opacity={0.55} strokeLinecap="round" />
-                    <path d={linePath(s.pts, 'avg_elapsed_ms')} fill="none" stroke={s.color} strokeWidth={2}
+                    <path d={linePath(s.vals)} fill="none" stroke={s.color} strokeWidth={2}
                       strokeLinecap="round" strokeLinejoin="round" />
+                    {bucketCount <= 24 ? s.vals.map((v, i) => (v === null ? null : (
+                      <circle key={i} cx={xOf(i)} cy={yOf(v)} r={2.2} fill={s.color} />
+                    ))) : null}
                   </g>
                 ))}
+
+                {/* 进行中时段端点：空心点（实心=完整时段） */}
+                {series.map((s) => {
+                  const last = s.pts.length - 1
+                  if (last < 0 || !s.pts[last].partial || s.vals[last] === null) return null
+                  return (
+                    <circle key={'partial-' + s.name} cx={xOf(last)} cy={yOf(s.vals[last])} r={3.5}
+                      fill="#fff" stroke={s.color} strokeWidth={2} />
+                  )
+                })}
+
                 {/* 十字线 + 悬浮点 */}
                 {hoverIdx !== null ? (
                   <g>
                     <line x1={hx} x2={hx} y1={PAD.top} y2={PAD.top + innerH} stroke={AXIS} strokeWidth={1} />
-                    {series.filter((s) => s.pts[hoverIdx] && s.pts[hoverIdx].count > 0).map((s) => (
-                      <circle key={s.name} cx={hx} cy={yOf(s.pts[hoverIdx].avg_elapsed_ms)} r={3.5}
+                    {series.map((s) => (s.vals[hoverIdx] === null ? null : (
+                      <circle key={s.name} cx={hx} cy={yOf(s.vals[hoverIdx])} r={3.5}
                         fill="#fff" stroke={s.color} strokeWidth={2} />
-                    ))}
+                    )))}
                   </g>
                 ) : null}
               </svg>
             )
           }}
         </ResponsiveSvgChart>
+
         {hoverIdx !== null ? (
           <div style={{
             position: 'absolute',
-            left: Math.min((hoverX ? hoverX(vw) : 0) + 12, Math.max(0, vw - 210)),
+            left: Math.min(PAD.left + (bucketCount <= 1 ? 0 : (hoverIdx / (bucketCount - 1)) * Math.max(120, vw - PAD.left - PAD.right)) + 12, Math.max(0, vw - 300)),
             top: 6,
             background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
-            boxShadow: '0 4px 12px rgba(15,23,42,.08)', padding: '6px 10px', fontSize: 12,
-            pointerEvents: 'none', minWidth: 170,
+            boxShadow: '0 4px 12px rgba(15,23,42,.08)', padding: '7px 10px', fontSize: 12,
+            pointerEvents: 'none', minWidth: 250, maxWidth: 320,
           }}>
-            <div style={{ color: '#94a3b8', marginBottom: 2 }}>
+            <div style={{ color: MUTED, marginBottom: 4 }}>
               {series[0] && series[0].pts[hoverIdx] ? series[0].pts[hoverIdx].bucket : ''}
+              {series[0] && series[0].pts[hoverIdx] && series[0].pts[hoverIdx].partial
+                ? ` · ${t('serviceQuality.period.partial')}` : ''}
             </div>
             {series.map((s) => {
               const p = s.pts[hoverIdx]
+              if (!p) return null
+              const low = (Number(p.coefficient_samples) || 0) < 5
               return (
-                <div key={s.name} style={{ display: 'flex', alignItems: 'center', gap: 6, lineHeight: 1.6 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 999, background: s.color, flexShrink: 0 }} />
-                  <span style={{ color: TEXT }}>{s.name}</span>
-                  <span style={{ marginLeft: 'auto', color: TEXT, fontVariantNumeric: 'tabular-nums' }}>
-                    {p && p.count > 0 ? `${fmtMs(p.avg_elapsed_ms)} / P95 ${fmtMs(p.p95_elapsed_ms)}` : '-'}
-                  </span>
+                <div key={s.name} style={{ marginBottom: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: TEXT, fontWeight: 600 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: s.color, flexShrink: 0 }} />
+                    {s.name}
+                    <span style={{ marginLeft: 'auto', fontWeight: 400, color: MUTED }}>
+                      {t('serviceQuality.unit.times', { count: p.count })}
+                    </span>
+                  </div>
+                  {p.count > 0 ? (
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: 'auto 1fr auto 1fr', columnGap: 8,
+                      rowGap: 1, fontSize: 11, color: TEXT, fontVariantNumeric: 'tabular-nums', marginLeft: 14,
+                    }}>
+                      <span style={{ color: MUTED }}>{t('serviceQuality.metric.avg')}</span>
+                      <span>{fmtMs(p.ok_avg_elapsed_ms)}</span>
+                      <span style={{ color: MUTED }}>{t('serviceQuality.metric.p95')}</span>
+                      <span>{fmtMs(p.ok_p95_ms)}</span>
+                      <span style={{ color: MUTED }}>{t('serviceQuality.metric.congestion')}</span>
+                      <span>{low ? t('serviceQuality.cards.lowSample', { count: p.coefficient_samples || 0 }) : fmtMetric(p.avg_congestion, { kind: 'ratio' })}</span>
+                      <span style={{ color: MUTED }}>{t('serviceQuality.metric.stall')}</span>
+                      <span>{low ? '-' : fmtMetric(p.stall_rate, { kind: 'pct' })}</span>
+                      <span style={{ color: MUTED }}>{t('serviceQuality.metric.error')}</span>
+                      <span>{fmtMetric(p.error_rate, { kind: 'pct' })}</span>
+                      <span style={{ color: MUTED }}>ms/Token</span>
+                      <span>{Number(p.ok_ms_per_token) > 0 ? Number(p.ok_ms_per_token).toFixed(2) : '-'}</span>
+                    </div>
+                  ) : (
+                    <div style={{ marginLeft: 14, fontSize: 11, color: MUTED }}>{t('serviceQuality.period.empty')}</div>
+                  )}
                 </div>
               )
             })}
           </div>
         ) : null}
       </div>
-      <div style={{ marginTop: 4, fontSize: 11, color: '#94a3b8' }}>{t('serviceQuality.trend.hint')}</div>
+      <div style={{ marginTop: 4, fontSize: 11, color: MUTED }}>
+        {t('serviceQuality.trend.partial')} · {t('serviceQuality.trend.hint')}
+      </div>
     </div>
   )
 }

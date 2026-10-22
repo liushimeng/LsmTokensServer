@@ -1,7 +1,9 @@
 // QoSCards：模型状态总览卡。
-// 每模型一卡：状态点（四档色 + 文字标签）+ 实时拥堵系数 + 当前平均时延 + 错误率；
-// 告警（拥堵系数 > 2.0 或错误率 > 5%）卡片红描边 + 角标；点击选中联动热力图。
-import { STATUS_COLORS, fmtMs, fmtNum } from './constants'
+// v2.0.84：实时窗口不再写死 5 分钟 —— 后端按 5→15→60 分钟阶梯回退，
+// 卡片显示实际窗口与「最后请求」相对时间；无流量模型也能看出最近活跃时间。
+// 时延取成功请求口径（ok_avg），错误率与样本数并列；系数样本 < 5 给低样本提示。
+// 告警（拥堵系数 > 2.0 或错误率 > 5%）卡片红描边 + 角标；点击选中联动热力图/时段明细。
+import { STATUS_COLORS, MIN_COEFFICIENT_SAMPLES, fmtMs, fmtNum, fmtAgo } from './constants'
 import { useI18n } from '../../i18n'
 
 export default function QoSCards({ models, selected, onSelect }) {
@@ -9,10 +11,12 @@ export default function QoSCards({ models, selected, onSelect }) {
 
   if (!models.length) return null
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
       {models.map((m) => {
         const color = STATUS_COLORS[m.status] || STATUS_COLORS.idle
         const isSel = selected === m.dst_model_name
+        const live = m.live || {}
+        const lowSample = (Number(live.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES
         return (
           <div
             key={m.dst_model_name}
@@ -41,22 +45,38 @@ export default function QoSCards({ models, selected, onSelect }) {
                 {m.dst_model_name}
               </b>
             </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
-              <span style={{ fontSize: 24, fontWeight: 800, color }}>{m.live.coefficient ? m.live.coefficient.toFixed(2) : '-'}</span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 2 }}>
+              <span style={{ fontSize: 24, fontWeight: 800, color }}>
+                {lowSample ? '—' : (live.coefficient ? live.coefficient.toFixed(2) : '-')}
+              </span>
               <span style={{ fontSize: 11, color: '#94a3b8' }}>{t('serviceQuality.cards.coefficient')}</span>
               <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>
                 {t(`serviceQuality.status.${m.status}`)}
               </span>
             </div>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
+              {live.window_minutes
+                ? t('serviceQuality.cards.liveWindow', { minutes: live.window_minutes })
+                : t('serviceQuality.cards.noTrafficWindow')}
+              {lowSample && live.req_count > 0
+                ? ` · ${t('serviceQuality.cards.lowSample', { count: live.coefficient_samples || 0 })}`
+                : ''}
+            </div>
             <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.7 }}>
-              {m.live.req_count > 0 ? (
+              {live.req_count > 0 ? (
                 <>
-                  <div>{t('serviceQuality.cards.latency')} {fmtMs(m.live.avg_elapsed_ms)}</div>
-                  <div>{t('serviceQuality.cards.errorRate')} {Number(m.live.error_rate) ? m.live.error_rate.toFixed(1) + '%' : '0%'}</div>
+                  <div>{t('serviceQuality.cards.latency')} {fmtMs(live.ok_avg_elapsed_ms || live.avg_elapsed_ms)}</div>
+                  <div>
+                    {t('serviceQuality.cards.errorRate')} {Number(live.error_rate) ? live.error_rate.toFixed(1) + '%' : '0%'}
+                    <span style={{ color: '#94a3b8' }}> · {t('serviceQuality.cards.stallRate')} {Number(live.stall_rate) ? live.stall_rate.toFixed(1) + '%' : '0%'}</span>
+                  </div>
                 </>
               ) : (
                 <div style={{ color: '#94a3b8' }}>{t('serviceQuality.cards.noTraffic')}</div>
               )}
+              <div style={{ color: '#94a3b8', fontSize: 11 }}>
+                {t('serviceQuality.cards.lastRequest', { ago: fmtAgo(m.last_request_at_ms, t) })}
+              </div>
               <div style={{ color: '#94a3b8', fontSize: 11 }}>
                 {m.baseline_ms_per_token > 0
                   ? t('serviceQuality.cards.baseline', { v: m.baseline_ms_per_token })
