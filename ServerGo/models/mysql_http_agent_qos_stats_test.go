@@ -666,3 +666,296 @@ func TestQoSMonitorReport_PredictionTodayVsWeek(t *testing.T) {
 		t.Errorf("no-full-day trend = %q, want unknown", m2.Prediction.Trend24h)
 	}
 }
+
+// ===================== v2.0.86 阶段DA：时段画像 / 时段带 / 峰谷 / 全站汇总 =====================
+
+// 构造某一天某小时的固定时间点（本地时区）。
+func qosDayHour(now time.Time, daysAgo, hour int) time.Time {
+	d := now.AddDate(0, 0, -daysAgo)
+	return time.Date(d.Year(), d.Month(), d.Day(), hour, 30, 0, 0, now.Location())
+}
+
+// 小时画像：近 7 天同一小时各 1 笔 → calls=7、日均=1、系数=1.0。
+func TestQoSMonitorReport_HourProfile(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-profile-model"
+	const hour = 14
+	for d := 0; d < 7; d++ {
+		// 1000ms / 100 token → 系数 1.0（全局基准 = 1000/100 = 10ms/Token）
+		insertQoSFixture(t, "qos-u9", "qos-m9", dst, "200 OK", qosDayHour(now, d, hour), 1000, 100)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	if len(m.HourProfile) != 24 {
+		t.Fatalf("hour profile len = %d, want 24", len(m.HourProfile))
+	}
+	p := m.HourProfile[hour]
+	if p.Calls != 7 {
+		t.Errorf("profile[%d].calls = %d, want 7", hour, p.Calls)
+	}
+	if p.Days != 7 {
+		t.Errorf("profile[%d].days = %d, want 7", hour, p.Days)
+	}
+	if p.AvgCallsPerDay != 1 {
+		t.Errorf("profile[%d].avg_calls_per_day = %v, want 1", hour, p.AvgCallsPerDay)
+	}
+	if p.AvgCongestion != 1 {
+		t.Errorf("profile[%d].avg_congestion = %v, want 1", hour, p.AvgCongestion)
+	}
+	// 无流量的小时必须是 0 调用、0 系数
+	if m.HourProfile[3].Calls != 0 || m.HourProfile[3].AvgCongestion != 0 {
+		t.Errorf("profile[3] = calls %d / cong %v, want 0/0", m.HourProfile[3].Calls, m.HourProfile[3].AvgCongestion)
+	}
+}
+
+// 时段带归并：上午带（9-11）含 9/10/11 三点；午间带（12-13）两点；Share 之和 ≈ 100%。
+func TestQoSMonitorReport_TimeBands(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-band-model"
+	// 上午带：9/10/11 各 1 笔；午间带：12 时 2 笔、13 时 1 笔
+	for _, h := range []int{9, 10, 11} {
+		insertQoSFixture(t, "qos-u10", "qos-m10", dst, "200 OK", qosDayHour(now, 0, h), 1000, 100)
+	}
+	insertQoSFixture(t, "qos-u10", "qos-m10", dst, "200 OK", qosDayHour(now, 0, 12), 1000, 100)
+	insertQoSFixture(t, "qos-u10", "qos-m10", dst, "200 OK", qosDayHour(now, 0, 12), 1000, 100)
+	insertQoSFixture(t, "qos-u10", "qos-m10", dst, "200 OK", qosDayHour(now, 0, 13), 1000, 100)
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	if len(m.Bands7d) != len(qosTimeBands) {
+		t.Fatalf("bands7d len = %d, want %d", len(m.Bands7d), len(qosTimeBands))
+	}
+	byKey := map[string]QoSTimeBand{}
+	for _, b := range m.Bands7d {
+		byKey[b.Key] = b
+	}
+	if got := byKey["forenoon"].Calls; got != 3 {
+		t.Errorf("forenoon calls = %d, want 3（9/10/11 三点）", got)
+	}
+	if got := byKey["noon"].Calls; got != 3 {
+		t.Errorf("noon calls = %d, want 3（12 时 2 笔 + 13 时 1 笔）", got)
+	}
+	if got := byKey["forenoon"].StartHour; got != 9 {
+		t.Errorf("forenoon start hour = %d, want 9", got)
+	}
+	if got := byKey["forenoon"].EndHour; got != 12 {
+		t.Errorf("forenoon end hour = %d, want 12", got)
+	}
+	// Share 之和 ≈ 100%
+	var shareSum float64
+	for _, b := range m.Bands7d {
+		shareSum += b.Share
+	}
+	if shareSum < 99 || shareSum > 101 {
+		t.Errorf("band share sum = %v, want ~100", shareSum)
+	}
+}
+
+// 时段带时长差异：凌晨带（6h）总调用多于午间带（2h）时，
+// 「每小时强度」口径必须把两者区分开（否则"带越长数越大"会误导比较）。
+func TestQoSMonitorReport_TimeBandLengthSemantics(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-bandlen-model"
+	// 凌晨带 6 小时各 1 笔 = 6 笔（1 笔/小时）；午间带 12 时 3 笔 = 3 笔（1.5 笔/小时）
+	for _, h := range []int{0, 1, 2, 3, 4, 5} {
+		insertQoSFixture(t, "qos-u11", "qos-m11", dst, "200 OK", qosDayHour(now, 0, h), 1000, 100)
+	}
+	for i := 0; i < 3; i++ {
+		insertQoSFixture(t, "qos-u11", "qos-m11", dst, "200 OK", qosDayHour(now, 0, 12), 1000, 100)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	byKey := map[string]QoSTimeBand{}
+	for _, b := range m.Bands7d {
+		byKey[b.Key] = b
+	}
+	dawn, noon := byKey["dawn"], byKey["noon"]
+	if dawn.Calls != 6 || noon.Calls != 3 {
+		t.Fatalf("dawn/noon calls = %d/%d, want 6/3", dawn.Calls, noon.Calls)
+	}
+	// 总调用 凌晨(6) > 午间(3)，但每小时强度 凌晨(1.0) < 午间(1.5)
+	if !(dawn.AvgCallsPerHour < noon.AvgCallsPerHour) {
+		t.Errorf("avg_calls_per_hour dawn=%v noon=%v, want dawn < noon（按时长归一）",
+			dawn.AvgCallsPerHour, noon.AvgCallsPerHour)
+	}
+	// 日均口径 = 该带每天的调用总量（贡献度），凌晨 6 > 午间 3
+	if !(dawn.AvgCallsPerDay > noon.AvgCallsPerDay) {
+		t.Errorf("avg_calls_per_day dawn=%v noon=%v, want dawn > noon", dawn.AvgCallsPerDay, noon.AvgCallsPerDay)
+	}
+}
+
+// 峰谷识别：14 时为峰、3 时为谷；零流量的小时不得被选为谷。
+func TestQoSMonitorReport_PeakValley(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-peak-model"
+	for i := 0; i < 10; i++ {
+		insertQoSFixture(t, "qos-u12", "qos-m12", dst, "200 OK", qosDayHour(now, 0, 14), 1000, 100)
+	}
+	insertQoSFixture(t, "qos-u12", "qos-m12", dst, "200 OK", qosDayHour(now, 0, 3), 1000, 100)
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	if m.PeakValley.PeakHour != 14 {
+		t.Errorf("peak hour = %d, want 14", m.PeakValley.PeakHour)
+	}
+	if m.PeakValley.ValleyHour != 3 {
+		t.Errorf("valley hour = %d, want 3（零流量小时不得被选为谷）", m.PeakValley.ValleyHour)
+	}
+	if m.PeakValley.PeakBandKey != "afternoon" {
+		t.Errorf("peak band = %q, want afternoon", m.PeakValley.PeakBandKey)
+	}
+	if m.PeakValley.ValleyBandKey != "dawn" {
+		t.Errorf("valley band = %q, want dawn", m.PeakValley.ValleyBandKey)
+	}
+	if len(m.PeakValley.TopBands) != len(qosTimeBands) {
+		t.Errorf("top bands len = %d, want %d", len(m.PeakValley.TopBands), len(qosTimeBands))
+	}
+	// TopBands 按调用占比降序
+	for i := 1; i < len(m.PeakValley.TopBands); i++ {
+		if m.PeakValley.TopBands[i-1].Share < m.PeakValley.TopBands[i].Share {
+			t.Errorf("top bands not sorted desc at %d: %v < %v", i,
+				m.PeakValley.TopBands[i-1].Share, m.PeakValley.TopBands[i].Share)
+		}
+	}
+}
+
+// 全站汇总的样本加权口径：直接构造模型报告，验证跨模型聚合是**样本加权**而非算术平均。
+//
+// 模型 A：系数 2.0、样本 30；模型 B：系数 4.0、样本 10
+// → 加权 = (2×30 + 4×10) / 40 = 2.5（算术平均会是 3.0）。
+func TestQoSMonitorReport_ReportAggregationWeighted(t *testing.T) {
+	mkProfile := func(cong float64, samples, calls int64) []QoSHourProfile {
+		ps := make([]QoSHourProfile, 24)
+		for h := range ps {
+			ps[h] = QoSHourProfile{Hour: h}
+		}
+		ps[10] = QoSHourProfile{
+			Hour: 10, Calls: calls, SuccessCount: calls, Days: 1,
+			AvgCongestion: cong, CoefficientSamples: samples, Confidence: "high",
+		}
+		return ps
+	}
+	models := []QoSModelReport{
+		{DstModelName: "agg-a", HourProfile: mkProfile(2, 30, 30)},
+		{DstModelName: "agg-b", HourProfile: mkProfile(4, 10, 10)},
+	}
+	profiles, bands, bandsToday, pv := aggregateQoSReport(models, time.Now())
+	if len(profiles) != 24 {
+		t.Fatalf("profile len = %d, want 24", len(profiles))
+	}
+	p := profiles[10]
+	if p.Calls != 40 {
+		t.Errorf("calls = %d, want 40", p.Calls)
+	}
+	if p.AvgCongestion != 2.5 {
+		t.Errorf("congestion = %v, want 2.5（样本加权，非算术平均 3.0）", p.AvgCongestion)
+	}
+	if p.CoefficientSamples != 40 {
+		t.Errorf("samples = %d, want 40", p.CoefficientSamples)
+	}
+	if len(bands) != len(qosTimeBands) || len(bandsToday) != len(qosTimeBands) {
+		t.Errorf("bands len = %d/%d, want %d", len(bands), len(bandsToday), len(qosTimeBands))
+	}
+	if pv.PeakHour != 10 {
+		t.Errorf("peak hour = %d, want 10", pv.PeakHour)
+	}
+}
+
+// 全站汇总（DB 链路）：两模型同一小时的调用量求和、峰小时取全站口径。
+func TestQoSMonitorReport_ReportAggregation(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dstA = "qos-agg-a"
+	const dstB = "qos-agg-b"
+	// 模型 A：3 时 3 笔（基准样本）+ 10 时 10 笔
+	for i := 0; i < 3; i++ {
+		insertQoSFixture(t, "qos-u13", "qos-m13", dstA, "200 OK", qosDayHour(now, 6, 3), 1000, 100)
+	}
+	for i := 0; i < 10; i++ {
+		insertQoSFixture(t, "qos-u13", "qos-m13", dstA, "200 OK", qosDayHour(now, 0, 10), 2000, 100)
+	}
+	// 模型 B：3 时 3 笔（基准样本）+ 10 时 10 笔
+	for i := 0; i < 3; i++ {
+		insertQoSFixture(t, "qos-u14", "qos-m14", dstB, "200 OK", qosDayHour(now, 6, 3), 1000, 100)
+	}
+	for i := 0; i < 10; i++ {
+		insertQoSFixture(t, "qos-u14", "qos-m14", dstB, "200 OK", qosDayHour(now, 0, 10), 4000, 100)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	if len(report.HourProfile) != 24 {
+		t.Fatalf("report hour profile len = %d, want 24", len(report.HourProfile))
+	}
+	p := report.HourProfile[10]
+	if p.Calls != 20 {
+		t.Errorf("report profile calls = %d, want 20（两模型各 10）", p.Calls)
+	}
+	if len(report.Bands) != len(qosTimeBands) || len(report.BandsToday) != len(qosTimeBands) {
+		t.Errorf("report bands len = %d/%d, want %d", len(report.Bands), len(report.BandsToday), len(qosTimeBands))
+	}
+	if report.PeakValley.PeakHour != 10 {
+		t.Errorf("report peak hour = %d, want 10", report.PeakValley.PeakHour)
+	}
+}
+
+// 窗口状态分档：stats_24h.status 按窗口口径给出四档 + 告警。
+// 告警阈值与实时窗口一致：系数 > 2.0 或错误率 > 5%（轻度排队 1.2~2.0 不告警）。
+func TestQoSMonitorReport_WindowStatus(t *testing.T) {
+	cases := []struct {
+		cong    float64
+		errRate float64
+		want    string
+		alert   bool
+	}{
+		{0.9, 0, "ok", false},
+		{1.5, 0, "light", false},
+		{3.0, 0, "moderate", true},
+		{6.0, 0, "severe", true},
+		{0.5, 8, "severe", true}, // 系数正常但错误率高 → 故障主导
+	}
+	for _, c := range cases {
+		status, alert := qosStatusOfWindow(c.cong, c.errRate, 10)
+		if status != c.want || alert != c.alert {
+			t.Errorf("qosStatusOfWindow(cong=%v, err=%v) = %q/%v, want %q/%v",
+				c.cong, c.errRate, status, alert, c.want, c.alert)
+		}
+	}
+	if status, alert := qosStatusOfWindow(1.0, 0, 0); status != "idle" || alert {
+		t.Errorf("qosStatusOfWindow(no call) = %q/%v, want idle/false", status, alert)
+	}
+}

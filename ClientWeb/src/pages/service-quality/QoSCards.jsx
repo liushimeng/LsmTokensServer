@@ -1,11 +1,19 @@
-// QoSCards：模型状态总览卡。
-// v2.0.84：实时窗口不再写死 5 分钟 —— 后端按 5→15→60 分钟阶梯回退，
-// 卡片显示实际窗口与「最后请求」相对时间；无流量模型也能看出最近活跃时间。
-// 时延取成功请求口径（ok_avg），错误率与样本数并列；系数样本 < 5 给低样本提示。
-// 告警（拥堵系数 > 2.0 或错误率 > 5%）卡片红描边 + 角标；点击选中联动热力图/时段明细。
-// v2.0.85：新增「下一时段预测」行（源站运行经验，四档着色 + 可信度）与
-// 「近24h 次数/错误率」统计行（stats_24h 固定窗口统计）。
-import { STATUS_COLORS, MIN_COEFFICIENT_SAMPLES, tierOfCongestion, fmtMs, fmtNum, fmtAgo } from './constants'
+// QoSCards：模型状态总览（统计卡，v2.0.86 阶段DA）。
+//
+// v2.0.84/85 以「实时窗口（5/15/60 分钟）」为卡片主角；v2.0.86 页面移除自动刷新后，
+// 实时窗口会迅速陈旧且抖动（5 分钟窗口的系数忽高忽低），因此**卡片改为统计口径**：
+//
+//   ┌ 状态点 模型名                                  [告警角标]
+//   │ 24h 拥堵系数 1.38（轻度排队）      ← stats_24h 主导
+//   │ 近24h  2,713 次 · 错误率 0.2% · 成功均值 8.0s · P95 24.0s
+//   │ 近7天  8,097 次 · 拥堵 1.21 · 成功均值 7.6s · 错误率 0.4%
+//   │ 下一时段预测：正常（可信度高）
+//   │ 峰 14:00（日均 512 次）· 谷 03:00（日均 4 次）
+//   │ 最后请求 2 分钟前
+//
+// 状态分档改用 stats_24h.status（窗口口径稳定），系数类指标样本 < 5 仍显示「—」
+// （沿用 MIN_COEFFICIENT_SAMPLES 低样本保护）。
+import { STATUS_COLORS, MIN_COEFFICIENT_SAMPLES, tierOfCongestion, fmtMs, fmtNum, fmtNum1, fmtAgo, fmtHour } from './constants'
 import { useI18n } from '../../i18n'
 
 export default function QoSCards({ models, selected, onSelect }) {
@@ -13,15 +21,17 @@ export default function QoSCards({ models, selected, onSelect }) {
 
   if (!models.length) return null
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
       {models.map((m) => {
-        const color = STATUS_COLORS[m.status] || STATUS_COLORS.idle
+        const s24 = m.stats_24h || {}
+        const s7d = m.stats_7d || {}
+        const status = s24.status || m.status || 'idle'
+        const color = STATUS_COLORS[status] || STATUS_COLORS.idle
         const isSel = selected === m.dst_model_name
-        const live = m.live || {}
-        const lowSample = (Number(live.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES
+        const lowSample = (Number(s24.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES && Number(s24.calls) > 0
         const next = m.prediction && m.prediction.next_hour
         const nextTier = next && next.samples > 0 ? tierOfCongestion(next.avg_congestion) : null
-        const stats24 = m.stats_24h || {}
+        const pv = m.peak_valley || {}
         return (
           <div
             key={m.dst_model_name}
@@ -31,13 +41,13 @@ export default function QoSCards({ models, selected, onSelect }) {
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { if (onSelect) onSelect(m.dst_model_name) } }}
             style={{
               border: '1px solid ' + (isSel ? '#2563eb' : '#e2e8f0'),
-              boxShadow: m.alert ? '0 0 0 2px ' + STATUS_COLORS.severe + '33' : 'none',
+              boxShadow: (s24.alert || m.alert) ? '0 0 0 2px ' + STATUS_COLORS.severe + '33' : 'none',
               borderRadius: 10, padding: '12px 14px', cursor: 'pointer',
               background: '#fff', position: 'relative', outline: 'none',
             }}
             title={t('serviceQuality.heatmap.viewTrend')}
           >
-            {m.alert ? (
+            {(s24.alert || m.alert) ? (
               <span style={{
                 position: 'absolute', top: 8, right: 8, fontSize: 10, fontWeight: 700,
                 color: STATUS_COLORS.severe, border: '1px solid ' + STATUS_COLORS.severe,
@@ -50,40 +60,53 @@ export default function QoSCards({ models, selected, onSelect }) {
                 {m.dst_model_name}
               </b>
             </div>
+
+            {/* 24h 主导指标（统计口径，非实时窗口） */}
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 2 }}>
               <span style={{ fontSize: 24, fontWeight: 800, color }}>
-                {lowSample ? '—' : (live.coefficient ? live.coefficient.toFixed(2) : '-')}
+                {lowSample ? '—' : (Number(s24.avg_congestion) ? s24.avg_congestion.toFixed(2) : '-')}
               </span>
-              <span style={{ fontSize: 11, color: '#94a3b8' }}>{t('serviceQuality.cards.coefficient')}</span>
-              <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748b' }}>
-                {t(`serviceQuality.status.${m.status}`)}
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>{t('serviceQuality.cards.coefficient24h')}</span>
+              <span style={{ marginLeft: 'auto', fontSize: 11, color, fontWeight: 600 }}>
+                {t(`serviceQuality.status.${status}`)}
               </span>
             </div>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
-              {live.window_minutes
-                ? t('serviceQuality.cards.liveWindow', { minutes: live.window_minutes })
-                : t('serviceQuality.cards.noTrafficWindow')}
-              {lowSample && live.req_count > 0
-                ? ` · ${t('serviceQuality.cards.lowSample', { count: live.coefficient_samples || 0 })}`
-                : ''}
-            </div>
-            <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.7 }}>
-              {live.req_count > 0 ? (
-                <>
-                  <div>{t('serviceQuality.cards.latency')} {fmtMs(live.ok_avg_elapsed_ms || live.avg_elapsed_ms)}</div>
-                  <div>
-                    {t('serviceQuality.cards.errorRate')} {Number(live.error_rate) ? live.error_rate.toFixed(1) + '%' : '0%'}
-                    <span style={{ color: '#94a3b8' }}> · {t('serviceQuality.cards.stallRate')} {Number(live.stall_rate) ? live.stall_rate.toFixed(1) + '%' : '0%'}</span>
-                  </div>
-                </>
-              ) : (
-                <div style={{ color: '#94a3b8' }}>{t('serviceQuality.cards.noTraffic')}</div>
-              )}
-              {/* 下一时段预测（v2.0.85）：无同时段历史 → 灰字提示，不伪造结论 */}
+
+            <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.75 }}>
+              <div>
+                <span style={{ color: '#94a3b8' }}>{t('serviceQuality.cards.stats24hLabel')}</span>
+                {' '}
+                {Number(s24.calls) > 0 ? (
+                  <>
+                    {t('serviceQuality.unit.times', { count: fmtNum(s24.calls) })}
+                    {' · '}{t('serviceQuality.cards.errorRate')} {Number(s24.error_rate) ? s24.error_rate.toFixed(1) + '%' : '0%'}
+                    {' · '}{t('serviceQuality.cards.latency')} {fmtMs(s24.ok_avg_elapsed_ms)}
+                    {' · '}P95 {fmtMs(s24.ok_p95_ms)}
+                  </>
+                ) : (
+                  <span style={{ color: '#94a3b8' }}>{t('serviceQuality.cards.noTraffic')}</span>
+                )}
+              </div>
+              <div>
+                <span style={{ color: '#94a3b8' }}>{t('serviceQuality.cards.stats7dLabel')}</span>
+                {' '}
+                {Number(s7d.calls) > 0 ? (
+                  <>
+                    {fmtNum(s7d.calls)}
+                    {' · '}{t('serviceQuality.cards.coefficient')} {Number(s7d.avg_congestion) ? s7d.avg_congestion.toFixed(2) : '-'}
+                    {' · '}{t('serviceQuality.cards.latency')} {fmtMs(s7d.ok_avg_elapsed_ms)}
+                    {' · '}{t('serviceQuality.cards.errorRate')} {Number(s7d.error_rate) ? s7d.error_rate.toFixed(1) + '%' : '0%'}
+                  </>
+                ) : (
+                  <span style={{ color: '#94a3b8' }}>{t('serviceQuality.cards.noTraffic')}</span>
+                )}
+              </div>
+              {/* 下一时段预测（无同时段历史 → 灰字提示，不伪造结论） */}
               <div style={{ fontSize: 11, marginTop: 2 }}>
+                {t('serviceQuality.cards.nextHour')}:{' '}
                 {nextTier ? (
                   <span style={{ color: STATUS_COLORS[nextTier], fontWeight: 600 }}>
-                    {t('serviceQuality.cards.nextHour')}: {t(`serviceQuality.status.${nextTier}`)}
+                    {t(`serviceQuality.status.${nextTier}`)}
                   </span>
                 ) : (
                   <span style={{ color: '#cbd5e1' }}>{t('serviceQuality.cards.noHistory')}</span>
@@ -92,19 +115,21 @@ export default function QoSCards({ models, selected, onSelect }) {
                   <span style={{ color: '#94a3b8' }}> · {t(`serviceQuality.forecast.conf.${next.confidence}`)}</span>
                 ) : null}
               </div>
-              <div style={{ color: '#94a3b8', fontSize: 11 }}>
-                {t('serviceQuality.cards.lastRequest', { ago: fmtAgo(m.last_request_at_ms, t) })}
+              {/* 峰谷（近 7 天时段画像口径） */}
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                {pv.peak_hour >= 0 ? (
+                  <span>
+                    {t('serviceQuality.profile.peak')} {fmtHour(pv.peak_hour)}
+                    {pv.peak_calls_per_day ? ` (${fmtNum1(pv.peak_calls_per_day)}/${t('serviceQuality.profile.perDay')})` : ''}
+                    {' · '}{t('serviceQuality.profile.valley')} {fmtHour(pv.valley_hour)}
+                  </span>
+                ) : null}
               </div>
               <div style={{ color: '#94a3b8', fontSize: 11 }}>
-                {stats24.calls > 0
-                  ? t('serviceQuality.cards.stats24h', {
-                      count: fmtNum(stats24.calls),
-                      rate: Number(stats24.error_rate) ? stats24.error_rate.toFixed(1) + '%' : '0%',
-                    })
-                  : (m.baseline_ms_per_token > 0
-                      ? t('serviceQuality.cards.baseline', { v: m.baseline_ms_per_token })
-                      : '')}
-                {' · '}{t('serviceQuality.cards.calls7d', { count: fmtNum(m.calls_7d) })}
+                {t('serviceQuality.cards.lastRequest', { ago: fmtAgo(m.last_request_at_ms, t) })}
+                {m.baseline_ms_per_token > 0 ? (
+                  <span> · {t('serviceQuality.cards.baseline', { v: m.baseline_ms_per_token })}</span>
+                ) : null}
               </div>
             </div>
           </div>

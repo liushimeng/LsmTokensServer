@@ -220,3 +220,97 @@ export const WEEKDAY_KEYS = [
   'serviceQuality.forecast.weekday.fri',
   'serviceQuality.forecast.weekday.sat',
 ]
+
+// ===================== v2.0.86 阶段DA：时段画像 / 时段带 / 峰谷 =====================
+
+// TIME_BANDS 业务时段带（与后端 qosTimeBands 严格一致：左闭右开 [start, end)）。
+//
+// 关键口径：各带时长不同（凌晨 6h、午间 2h…），跨带比较必须用
+//   - avg_calls_per_hour（每小时强度，跨带可比）
+//   - share（调用量占比）
+// 直接比 calls 会被"带越长数越大"误导。
+export const TIME_BANDS = [
+  { key: 'dawn', start: 0, end: 6 },
+  { key: 'morning', start: 6, end: 9 },
+  { key: 'forenoon', start: 9, end: 12 },
+  { key: 'noon', start: 12, end: 14 },
+  { key: 'afternoon', start: 14, end: 18 },
+  { key: 'evening', start: 18, end: 24 },
+]
+
+// bandOfHour 小时 → 所属时段带 key；无归属返回 ''。
+export function bandOfHour(hour) {
+  for (const b of TIME_BANDS) {
+    if (hour >= b.start && hour < b.end) return b.key
+  }
+  return ''
+}
+
+// HOUR_PROFILE_METRICS 24 小时时段画像指标集（同一时刻一个 Y 轴，禁止双轴）。
+//   field：取值字段；kind：刻度与 tooltip 格式；tier：是否按拥堵四档着色
+export const HOUR_PROFILE_METRICS = [
+  { key: 'calls', i18n: 'serviceQuality.profile.metricCalls', field: 'avg_calls_per_day', kind: 'num' },
+  { key: 'congestion', i18n: 'serviceQuality.metric.congestion', field: 'avg_congestion', kind: 'ratio', tier: true },
+  { key: 'error', i18n: 'serviceQuality.metric.error', field: 'error_rate', kind: 'pct', tier: true },
+]
+
+export function hourProfileMetricOf(key) {
+  return HOUR_PROFILE_METRICS.find((m) => m.key === key) || HOUR_PROFILE_METRICS[0]
+}
+
+// PERIOD_MATRIX_METRICS 「时段 × 模型」矩阵指标集。
+//   tier=true → 按拥堵四档着色（语义色 + 数值标签）；
+//   tier=false → 单色（调用量/时延是量级不是序数等级，不做 value-ramp）。
+export const PERIOD_MATRIX_METRICS = [
+  { key: 'congestion', i18n: 'serviceQuality.metric.congestion', field: 'avg_congestion', kind: 'ratio', tier: true },
+  { key: 'calls', i18n: 'serviceQuality.period.count', field: 'count', kind: 'num', tier: false },
+  { key: 'error', i18n: 'serviceQuality.metric.error', field: 'error_rate', kind: 'pct', tier: true },
+  { key: 'avg', i18n: 'serviceQuality.metric.avg', field: 'ok_avg_elapsed_ms', kind: 'ms', tier: false },
+]
+
+export function periodMatrixMetricOf(key) {
+  return PERIOD_MATRIX_METRICS.find((m) => m.key === key) || PERIOD_MATRIX_METRICS[0]
+}
+
+// fmtHour 时段标签 "14:00"；-1（无峰谷）返回 '-'。
+export function fmtHour(h) {
+  const v = Number(h)
+  if (!isFinite(v) || v < 0) return '-'
+  return String(v).padStart(2, '0') + ':00'
+}
+
+// fmtHourRange 时段带区间 "09:00–12:00"。
+export function fmtHourRange(start, end) {
+  const s = Number(start)
+  const e = Number(end)
+  if (!isFinite(s) || !isFinite(e)) return '-'
+  return String(s).padStart(2, '0') + ':00–' + String(e).padStart(2, '0') + ':00'
+}
+
+// fmtInt0 整数（不带小数位），用于调用量这类大数值。
+export function fmtInt0(v) {
+  const n = Number(v)
+  if (!isFinite(n)) return '-'
+  return fmtNum(Math.round(n))
+}
+
+// fmtNum1 一位小数（用于日均调用这类可能带小数的量）。
+export function fmtNum1(v) {
+  const n = Number(v)
+  if (!isFinite(n)) return '-'
+  return n.toFixed(1)
+}
+
+// bandOf 找时段带统计对象（按 key）。
+export function findBand(bands, key) {
+  if (!Array.isArray(bands)) return null
+  for (const b of bands) {
+    if (b.key === key) return b
+  }
+  return null
+}
+
+// peakValleyOf 取峰谷对象（模型级或报告级，缺省返回空对象）。
+export function peakValleyOf(obj) {
+  return (obj && obj.peak_valley) || {}
+}

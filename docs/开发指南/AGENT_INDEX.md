@@ -203,7 +203,7 @@
 | [`server_api_user_dst_endpoint.go`](server_api_user_dst_endpoint.go) | 用户源站 API | `userDstEndPointInterfaceHandle` |
 | [`server_api_user_ai_route.go`](server_api_user_ai_route.go) | 用户路由 API | `userAIRouteInterfaceHandle` |
 | [`server_api_user_model_info.go`](server_api_user_model_info.go) | 用户模型信息 API | `userModelInfoInterfaceHandle` |
-| [`server_api_qos_monitor.go`](server_api_qos_monitor.go) | 服务质量监控 API（管理端/用户端） | `qosMonitorInterfaceHandle` |
+| [`server_api_qos_monitor.go`](server_api_qos_monitor.go) | 服务质量监控 API（管理端/用户端；refresh=true 旁路缓存） | `qosMonitorInterfaceHandle` |
 | [`server_api_chat_dialog.go`](server_api_chat_dialog.go) | 对话配置 API | `chatDialogInterfaceHandle` |
 | [`server_web_chat_dialog.go`](server_web_chat_dialog.go) | 对话页面（独立走代理） | `chatDialogHandle` |
 
@@ -216,7 +216,7 @@
 | [`mysql_http_agent_model_info.go`](mysql_http_agent_model_info.go) | 模型信息表 | `TAgentModelInfo` |
 | [`mysql_http_agent_analysis.go`](mysql_http_agent_analysis.go) | Session/Task 分析 + `parseRequestToolsFromBody` | `parseRequestToolsFromBody` |
 | [`mysql_http_agent_tokens.go`](mysql_http_agent_tokens.go) | Tokens 时间段统计 | `GetTokensRangeStats` |
-| [`mysql_http_agent_qos_stats.go`](mysql_http_agent_qos_stats.go) | 源站模型 QoS 聚合（Token 分档基准/拥堵系数/成功口径分位时延/热力图/逐时段桶/固定窗口统计/同时段预测） | `GetQoSMonitorReport` |
+| [`mysql_http_agent_qos_stats.go`](mysql_http_agent_qos_stats.go) | 源站模型 QoS 聚合（Token 分档基准/拥堵系数/成功口径分位时延/热力图/逐时段桶/固定窗口统计/同时段预测/24 小时时段画像/业务时段带/峰谷识别/全站汇总） | `GetQoSMonitorReport` · `GetQoSMonitorReportFresh` |
 | [`mysql_http_agent_sub_table.go`](mysql_http_agent_sub_table.go) | 哈希分表管理 | `QueryAgentHttpTransactions` |
 | [`mysql_http_agent_cache.go`](mysql_http_agent_cache.go) | 内存缓存（零 DB 热路径） | `AgentCache`, `LoadAgentCacheFromDB` |
 | [`mysql_http_stats_cache.go`](mysql_http_stats_cache.go) | 统计查询内存缓存 | — |
@@ -275,6 +275,28 @@
 | [`chat-analysis/useChatAnalysisFilters.js`](../../ClientWeb/src/pages/chat-analysis/useChatAnalysisFilters.js) | 筛选条件 localStorage 持久化 Hook |
 | [`chat-analysis/useChatAnalysisData.js`](../../ClientWeb/src/pages/chat-analysis/useChatAnalysisData.js) | 数据查询 Hook（分页/筛选/加载状态） |
 | [`chat-analysis/constants.js`](../../ClientWeb/src/pages/chat-analysis/constants.js) | 常量定义（localStorage key / 默认值等） |
+
+---
+
+### 十二、前端源码 - ServiceQuality 服务质量监控页面（React + Vite）
+
+> `ClientWeb/src/pages/ServiceQuality.jsx` 为重导出入口；实际代码位于 `ClientWeb/src/pages/service-quality/`。
+> v2.0.86（阶段DA）：统计化重构 —— 无自动刷新、无模型下拉、全模型同屏对比。
+
+| 文件 | 核心功能 |
+|------|----------|
+| [`service-quality/index.jsx`](../../ClientWeb/src/pages/service-quality/index.jsx) | 主页面：置顶筛选行 + KPI + 10 个模块编排（无自动刷新） |
+| [`service-quality/QoSCards.jsx`](../../ClientWeb/src/pages/service-quality/QoSCards.jsx) | 模型状态总览统计卡（24h/7d 双列统计 + 预测 + 峰谷） |
+| [`service-quality/QoSHourProfile.jsx`](../../ClientWeb/src/pages/service-quality/QoSHourProfile.jsx) | 24 小时时段画像与高峰低谷（全站主图 + 每模型小倍数网格） |
+| [`service-quality/QoSBandMatrix.jsx`](../../ClientWeb/src/pages/service-quality/QoSBandMatrix.jsx) | 业务时段带 × 模型 拥堵矩阵（横向比较） |
+| [`service-quality/QoSForecast.jsx`](../../ClientWeb/src/pages/service-quality/QoSForecast.jsx) | 运行经验预测（全模型：下一时段条形 + 明日表 + 小倍数折线） |
+| [`service-quality/QoSPeriodMatrix.jsx`](../../ClientWeb/src/pages/service-quality/QoSPeriodMatrix.jsx) | 时段 × 模型 矩阵（逐时段明细的图形化视图） |
+| [`service-quality/QoSPeriodTable.jsx`](../../ClientWeb/src/pages/service-quality/QoSPeriodTable.jsx) | 全模型逐时段明细长表（模型 × 时段，14 项指标） |
+| [`service-quality/QoSTrendChart.jsx`](../../ClientWeb/src/pages/service-quality/QoSTrendChart.jsx) | 服务质量趋势折线（单轴多指标，窗口联动） |
+| [`service-quality/QoSCompareChart.jsx`](../../ClientWeb/src/pages/service-quality/QoSCompareChart.jsx) | 模型质量对比横向条形（24h/7d × 6 指标） |
+| [`service-quality/QoSHeatmap.jsx`](../../ClientWeb/src/pages/service-quality/QoSHeatmap.jsx) | 拥堵热力图（全模型 7×24 小倍数网格） |
+| [`service-quality/QoSErrorBars.jsx`](../../ClientWeb/src/pages/service-quality/QoSErrorBars.jsx) | 错误堆叠柱状图（429/5xx/其他） |
+| [`service-quality/constants.js`](../../ClientWeb/src/pages/service-quality/constants.js) | 共享常量（状态色/系列色/时段带/指标集/格式化工具） |
 
 ---
 

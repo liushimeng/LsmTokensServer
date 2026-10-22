@@ -1,37 +1,47 @@
-// QoSPeriodTable：单模型「逐时段服务质量明细」。
+// QoSPeriodTable：全模型逐时段明细长表（v2.0.86 阶段DA）。
 //
-// v2.0.84 新增（方案 §5.3）：正面回答「最近 1 天每个小时 / 最近 1 周每一天，
-// 这个源站模型到底差在哪」——趋势图给形状，本表给逐时段数值与样本量。
-//   - 时段粒度跟随页面窗口：1h/24h → 小时桶（1h 视图用分钟桶），7d → 天桶
-//   - 仅展示有请求的时段（空桶在趋势图里已以断线表达，表格不铺零值噪声）
-//   - 进行中时段整行浅色底 + 「进行中」标签，避免被当成完整时段结论
-//   - 系数类指标样本 < MIN_COEFFICIENT_SAMPLES 时显示 — （低样本不伪造结论）
-//   - 列宽拖拽 / 排序 / 排序持久化由通用 DataTable 自动提供
+// v2.0.84 原本是「单模型 + 模型下拉」；v2.0.86 按需求删除模型下拉，
+// 改为**所有模型一起展示**（行 = 模型 × 时段，长表）：
+//   - 每个模型 × 每个时段一行，默认按「模型 → 时段倒序」；
+//   - 保留全部 14 项指标（请求数/成功/时延/P95/ms-Token/系数/卡顿/抖动/错误分类/错误率）；
+//   - 系数类指标样本 < MIN_COEFFICIENT_SAMPLES 时显示 —（低样本不伪造结论）；
+//   - 进行中时段整行浅色底 + 「进行中」标签。
+// 图形化的「时段 × 模型」视图见同目录 QoSPeriodMatrix.jsx。
 import { useMemo } from 'react'
 import DataTable from '../../components/DataTable'
 import {
   windowSeries, fmtMs, fmtPct, fmtRatio, fmtNum, bucketShortLabel, MIN_COEFFICIENT_SAMPLES,
 } from './constants'
 
-export default function QoSPeriodTable({ model, win, t }) {
-  // 1h → 分钟桶（60 行）、24h → 小时桶（24 行）、7d → 天桶（7 行）
-  const series = useMemo(() => windowSeries(model, win), [model, win])
-
-  // 升序桶序列 → 最新在前（运维第一眼看当前时段）
-  const rows = useMemo(
-    () => series.filter((p) => Number(p.count) > 0).slice().reverse().map((p) => ({
-      ...p, label: bucketShortLabel(p.bucket),
-    })),
-    [series],
-  )
+export default function QoSPeriodTable({ models, win, t }) {
+  const rows = useMemo(() => {
+    const out = []
+    for (const m of models) {
+      const series = windowSeries(m, win)
+      // 升序桶序列 → 最新在前（运维第一眼看当前时段）
+      series.filter((p) => Number(p.count) > 0).slice().reverse().forEach((p) => {
+        out.push({
+          ...p,
+          model: m.dst_model_name,
+          label: bucketShortLabel(p.bucket),
+          rowKey: m.dst_model_name + '|' + p.bucket,
+        })
+      })
+    }
+    return out
+  }, [models, win])
 
   const low = (p) => (Number(p.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES
 
   const columns = [
     {
-      key: 'bucket',
-      title: t('serviceQuality.period.bucket'),
-      nowrap: true,
+      key: 'model', title: t('serviceQuality.table.model'), nowrap: true,
+      sortValue: (p) => p.model,
+      render: (_, p) => <b style={{ color: '#0f172a' }}>{p.model}</b>,
+    },
+    {
+      key: 'bucket', title: t('serviceQuality.period.bucket'), nowrap: true,
+      sortValue: (p) => p.bucket,
       render: (_, p) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           {p.bucket}
@@ -109,13 +119,13 @@ export default function QoSPeriodTable({ model, win, t }) {
   return (
     <div>
       <DataTable
-        rowKey="bucket"
+        rowKey="rowKey"
         rows={rows}
         columns={columns}
         empty={t('serviceQuality.period.empty')}
         rowClass={(p) => (p.partial ? 'qos-period-partial' : '')}
       />
-      <div style={{ marginTop: 4, fontSize: 11, color: '#94a3b8' }}>{t('serviceQuality.period.hint')}</div>
+      <div style={{ marginTop: 4, fontSize: 11, color: '#94a3b8' }}>{t('serviceQuality.period.hintAll')}</div>
     </div>
   )
 }
