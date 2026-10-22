@@ -1,17 +1,24 @@
-// 服务质量监控（ServiceQuality）页面主组件（v2.0.84）。
+// 服务质量监控（ServiceQuality）页面主组件（v2.0.85）。
 //
 // 方案：docs/项目迁移解决方案/源站模型服务质量监控页面方案_20261022_113519.md
 //       docs/项目迁移解决方案/源站模型服务质量监控时间维度优化方案_20261022_124609.md
+//       docs/项目迁移解决方案/源站模型服务质量监控统计与预测方案_20261022_132957.md
 //
 // 一次拉取 QoSMonitorInterface（后端单次 7 天扫描出全部视图：实时卡 + 60 分钟 +
-// 24 小时 + 7 天 + 7×24 热力图 + 周分位），前端窗口切换纯客户端切片；
-// 30s 自动刷新（可关）配合服务端 30s 缓存达到分钟级准实时。
+// 24 小时 + 7 天 + 7×24 热力图 + 周分位 + 固定窗口统计 + 运行经验预测），
+// 前端窗口切换纯客户端切片；30s 自动刷新（可关）配合服务端 30s 缓存达到分钟级准实时。
 //
 // 时间维度口径（v2.0.84）：
 //   - 时延一律取成功请求（ok_*），错误单独看图/表；
 //   - 进行中时段（partial）在趋势图用空心端点、在明细表用标签标注；
 //   - 系数类指标样本 < 5 时不取点 / 显示 —，避免小样本伪造结论；
 //   - 统一筛选行（窗口 + 指标）位于所有图表之上，一次切换全部联动。
+//
+// v2.0.85 统计与预测：
+//   - 状态卡带「下一时段预测」行 + 近24h 统计行（stats_24h）；
+//   - 「运行经验预测」卡：今日实际 + 剩余时段预测折线 + 明日预测 + 趋势研判；
+//   - 「模型质量对比」横向条形图（窗口 24h/7d × 指标 6 项）呈现源站质量区别；
+//   - 拥堵热力图升级为全模型小倍数网格，同屏对比。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { post } from '../../shared/api'
 import { isAdminRole } from '../../shared/auth'
@@ -23,6 +30,8 @@ import QoSTrendChart from './QoSTrendChart'
 import QoSHeatmap from './QoSHeatmap'
 import QoSErrorBars from './QoSErrorBars'
 import QoSPeriodTable from './QoSPeriodTable'
+import QoSCompareChart from './QoSCompareChart'
+import QoSForecast from './QoSForecast'
 import {
   STATUS_COLORS, METRICS, MIN_COEFFICIENT_SAMPLES,
   fmtMs, fmtNum, fmtPct, fmtRatio, fmtAgo,
@@ -175,6 +184,30 @@ export default function ServiceQuality() {
             <QoSCards models={models} selected={selectedModel} onSelect={(name) => setSelectedModel(name)} />
           </div>
 
+          {/* 运行经验预测（今日实际 + 剩余预测 / 明日 / 趋势研判） */}
+          <div className="card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <h3 style={{ margin: 0 }}>{t('serviceQuality.forecast.title')}</h3>
+              <select
+                style={{ marginLeft: 'auto', maxWidth: 260, fontSize: 12 }}
+                value={selectedModel || ''}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                aria-label={t('serviceQuality.forecast.selectModel')}
+              >
+                {models.map((m) => (
+                  <option key={m.dst_model_name} value={m.dst_model_name}>{m.dst_model_name}</option>
+                ))}
+              </select>
+            </div>
+            <QoSForecast model={selected} allNames={allNames} t={t} />
+          </div>
+
+          {/* 模型质量对比（全模型固定窗口统计横向条形图） */}
+          <div className="card">
+            <h3>{t('serviceQuality.compare.title')}</h3>
+            <QoSCompareChart models={models} allNames={allNames} t={t} />
+          </div>
+
           {/* 统一筛选行：统辖下方所有图表（窗口 + 趋势指标） */}
           <div className="card" style={{ padding: '10px 14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -239,22 +272,10 @@ export default function ServiceQuality() {
             <QoSPeriodTable model={selected} win={win} t={t} />
           </div>
 
-          {/* 拥堵热力图（近 7 天 × 24 小时） */}
+          {/* 拥堵热力图（全模型小倍数网格对比，近 7 天 × 24 小时） */}
           <div className="card">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-              <h3 style={{ margin: 0 }}>{t('serviceQuality.heatmap.title')}</h3>
-              <select
-                style={{ marginLeft: 'auto', maxWidth: 260, fontSize: 12 }}
-                value={selectedModel || ''}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                aria-label={t('serviceQuality.heatmap.selectModel')}
-              >
-                {models.map((m) => (
-                  <option key={m.dst_model_name} value={m.dst_model_name}>{m.dst_model_name}</option>
-                ))}
-              </select>
-            </div>
-            <QoSHeatmap model={selected} t={t} />
+            <h3>{t('serviceQuality.heatmap.title')}</h3>
+            <QoSHeatmap models={models} selected={selectedModel} onSelect={(name) => setSelectedModel(name)} t={t} />
           </div>
 
           {/* 错误堆叠柱状图（窗口联动） */}

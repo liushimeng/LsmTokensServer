@@ -150,7 +150,7 @@ export function bucketShortLabel(key) {
 export function fmtAgo(ms, t) {
   const v = Number(ms) || 0
   if (!v) return t('serviceQuality.cards.never')
-  const diff = Date.now() - v
+  const diff = Date.now() - ms
   if (diff < 60_000) return t('serviceQuality.cards.justNow')
   const min = Math.floor(diff / 60_000)
   if (min < 60) return t('serviceQuality.cards.minutesAgo', { count: min })
@@ -158,3 +158,65 @@ export function fmtAgo(ms, t) {
   if (hour < 24) return t('serviceQuality.cards.hoursAgo', { count: hour })
   return t('serviceQuality.cards.daysAgo', { count: Math.floor(hour / 24) })
 }
+
+// ---- 阶段CZ v2.0.85：模型质量对比 + 运行经验预测 ----
+
+// COMPARE_METRICS 模型质量对比指标集（窗口 24h/7d × 指标，同一时刻一个轴）。
+//   color: tier（四档状态色）| tier20（≤20% 正常色，以上中度色）| err5（≤5% 正常，
+//   5~20% 轻度，以上严重）| neutral（中性蓝）
+export const COMPARE_METRICS = [
+  { key: 'avg_congestion', i18n: 'serviceQuality.metric.congestion', kind: 'ratio', coefficient: true, color: 'tier' },
+  { key: 'stall_rate', i18n: 'serviceQuality.metric.stall', kind: 'pct', coefficient: true, color: 'tier20' },
+  { key: 'error_rate', i18n: 'serviceQuality.metric.error', kind: 'pct', color: 'err5' },
+  { key: 'ok_ms_per_token', i18n: 'serviceQuality.compare.metricMsPerToken', kind: 'num', color: 'neutral' },
+  { key: 'ok_avg_elapsed_ms', i18n: 'serviceQuality.metric.avg', kind: 'ms', color: 'neutral' },
+  { key: 'ok_p95_ms', i18n: 'serviceQuality.metric.p95', kind: 'ms', color: 'neutral' },
+]
+
+export function compareMetricOf(key) {
+  return COMPARE_METRICS.find((m) => m.key === key) || COMPARE_METRICS[0]
+}
+
+// compareMetricColor 按指标语义着色（阈值色仅承载分档语义，数值标签始终伴随）。
+export function compareMetricColor(metric, value) {
+  const v = Number(value)
+  if (!isFinite(v) || v <= 0) return STATUS_COLORS.idle
+  switch (metric.color) {
+    case 'tier':
+      return (CONGESTION_TIERS.find((tr) => v < tr.max) || CONGESTION_TIERS[CONGESTION_TIERS.length - 1]).color
+    case 'tier20':
+      return v <= 20 ? STATUS_COLORS.ok : STATUS_COLORS.moderate
+    case 'err5':
+      if (v <= 5) return STATUS_COLORS.ok
+      return v <= 20 ? STATUS_COLORS.light : STATUS_COLORS.severe
+    default:
+      return '#2a78d6'
+  }
+}
+
+// fmtCompareValue 对比条形图数值格式化
+export function fmtCompareValue(metric, value) {
+  const v = Number(value)
+  if (!isFinite(v) || v <= 0) return '-'
+  if (metric.kind === 'ms') return fmtMs(v)
+  if (metric.kind === 'pct') return v.toFixed(v >= 10 ? 0 : 1) + '%'
+  if (metric.kind === 'num') return v.toFixed(2)
+  return v.toFixed(2)
+}
+
+// fmtSignedPct 带符号百分比（+12% / -8%），用于今日 vs 周均值偏差
+export function fmtSignedPct(v) {
+  const n = Number(v) || 0
+  return (n > 0 ? '+' : '') + n.toFixed(1) + '%'
+}
+
+// WEEKDAY_KEYS 预测面板星期标签（i18n 键，0=周日；显式数组以便 check:i18n 识别字面量键）
+export const WEEKDAY_KEYS = [
+  'serviceQuality.forecast.weekday.sun',
+  'serviceQuality.forecast.weekday.mon',
+  'serviceQuality.forecast.weekday.tue',
+  'serviceQuality.forecast.weekday.wed',
+  'serviceQuality.forecast.weekday.thu',
+  'serviceQuality.forecast.weekday.fri',
+  'serviceQuality.forecast.weekday.sat',
+]

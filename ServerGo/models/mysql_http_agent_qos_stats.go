@@ -17,6 +17,11 @@
 //   - 429 / 5xx / 其他错误率按状态码分类统计。
 //   - 进行中的分钟/小时/天桶标记 partial，避免与完整桶直接比较。
 //
+// v2.0.85（阶段CZ）：模型状态总览统计化 + 运行经验预测，方案见
+// docs/项目迁移解决方案/源站模型服务质量监控统计与预测方案_20261022_132957.md
+//   - stats_24h / stats_7d：固定窗口统计（小时桶合并后一次 finalize，口径与桶一致）；
+//   - prediction：同时段历史加权均值（next_hour / today_remaining）、
+//     星期模式加权（tomorrow，同星期 ×2）、趋势研判（近24h vs 前24h、今日 vs 周均值）。
 // 实现约束（与既有 All 系列统计一致）：
 //   - 遍历 8 张 TAgentHttpTransactionDataItem 分表，keyset 分页扫描（v2.0.58 模式），
 //     每批 qosScanBatch 行，内存有界
@@ -60,6 +65,10 @@ const (
 	qosLiveMinSamples = 5
 	// qosMinCoefficientSamples 系数类指标的低样本提示阈值（前端同步展示）。
 	qosMinCoefficientSamples = 5
+	// qosForecastHighSamples / qosForecastMediumSamples 预测可信度分档
+	// （历史同时段样本数）：≥30 高、≥10 中、否则低（仅供参考）。
+	qosForecastHighSamples   = 30
+	qosForecastMediumSamples = 10
 )
 
 // 拥堵分档阈值（方案 §3.2）
@@ -125,6 +134,51 @@ type QoSLiveStats struct {
 	LastRequestAtMs    int64   `json:"last_request_at_ms"`
 }
 
+// QoSWindowStats 固定窗口（24h/7d）统计：由窗口内小时桶合并后经 finalizeQoSBucket
+// 一次算出，与小时桶/天桶完全同一套口径（分档基准、成功时延、低样本语义一致）。
+type QoSWindowStats struct {
+	Window             string  `json:"window"` // "24h" | "7d"
+	Calls              int64   `json:"calls"`
+	SuccessRate        float64 `json:"success_rate"` // %
+	AvgCongestion      float64 `json:"avg_congestion"`
+	CoefficientSamples int64  `json:"coefficient_samples"`
+	StallRate          float64 `json:"stall_rate"` // %
+	Jitter             float64 `json:"jitter"`     // %
+	ErrorRate          float64 `json:"error_rate"` // %
+	OkAvgElapsedMs     int64   `json:"ok_avg_elapsed_ms"`
+	OkP95Ms            int64   `json:"ok_p95_ms"`
+	OkMsPerToken       float64 `json:"ok_ms_per_token"`
+}
+
+// QoSHourForecast 未来某小时的预测（源站运行经验：近 7 天同时段加权均值）。
+type QoSHourForecast struct {
+	Hour          int     `json:"hour"` // 0~23 目标小时
+	AvgCongestion float64 `json:"avg_congestion"`
+	ErrorRate     float64 `json:"error_rate"` // %
+	Samples       int64   `json:"samples"`    // 历史同小时系数样本总数（可信度依据）
+	Confidence    string  `json:"confidence"` // high | medium | low
+}
+
+// QoSDayForecast 明日预测（星期模式加权：同星期样本权重 ×2）。
+type QoSDayForecast struct {
+	Date          string  `json:"date"` // YYYY-MM-DD
+	Weekday       int     `json:"weekday"`
+	AvgCongestion float64 `json:"avg_congestion"`
+	ErrorRate     float64 `json:"error_rate"` // %
+	Calls         int64   `json:"calls"`      // 预计调用量
+	Samples       int64   `json:"samples"`
+	Confidence    string  `json:"confidence"` // high | medium | low
+}
+
+// QoSPrediction 运行经验预测：下一时段 / 今日剩余 / 明日 / 趋势研判。
+type QoSPrediction struct {
+	NextHour       QoSHourForecast   `json:"next_hour"`
+	TodayRemaining []QoSHourForecast `json:"today_remaining"` // 当前小时+1 ~ 23 时
+	Tomorrow       QoSDayForecast    `json:"tomorrow"`
+	Trend24h       string            `json:"trend_24h"`     // up | down | flat | unknown
+	TodayVsWeek    float64           `json:"today_vs_week"` // 今日(部分)相对周均值偏差 %
+}
+
 // QoSModelReport 单个目标源站模型的完整 QoS 报告。
 type QoSModelReport struct {
 	DstModelName       string           `json:"dst_model_name"`
@@ -148,6 +202,9 @@ type QoSModelReport struct {
 	OkCalls7d          int64            `json:"ok_calls_7d"`
 	ErrCalls7d         int64            `json:"err_calls_7d"`
 	LastRequestAtMs    int64            `json:"last_request_at_ms"`
+	Stats24h           QoSWindowStats   `json:"stats_24h"`
+	Stats7d            QoSWindowStats   `json:"stats_7d"`
+	Prediction         QoSPrediction    `json:"prediction"`
 }
 
 // QoSMonitorReport 服务质量监控完整响应。
@@ -461,6 +518,9 @@ func buildQoSMonitorReport(userName string, subTableNum int) (*QoSMonitorReport,
 		model.Live = buildQoSLive(m, base, now)
 		model.Live.LastRequestAtMs = m.lastRequestAt.UnixMilli()
 		model.Status, model.Alert = qosStatusOf(model.Live)
+		model.Stats24h = buildQoSWindowStats(m, base, now, "24h", now.Add(-24*time.Hour))
+		model.Stats7d = buildQoSWindowStats(m, base, now, "7d", now.Add(-qosScanWindow))
+		model.Prediction = buildQoSPrediction(m, base, now)
 
 		// 近 24 小时调用量（小时桶尾部求和）
 		for i := len(model.Hours) - 24; i < len(model.Hours); i++ {
@@ -761,6 +821,196 @@ func qosStatusOf(live QoSLiveStats) (status string, alert bool) {
 		}
 		return "ok", alert
 	}
+}
+
+// ---- 固定窗口统计与运行经验预测（阶段CZ v2.0.85） ----
+
+// buildQoSWindowStats 合并 since 之后的小时桶，经 finalizeQoSBucket 一次算出
+// 固定窗口（24h/7d）统计 —— 与小时桶/天桶完全同一套口径，无二次扫描。
+func buildQoSWindowStats(m *qosModelAcc, base qosBaseline, now time.Time, window string, since time.Time) QoSWindowStats {
+	cutKey := since.Format("2006-01-02 15:04")
+	merged := &qosBucketAcc{}
+	for key, b := range m.hours {
+		if key >= cutKey {
+			mergeQoSBuckets(merged, b)
+		}
+	}
+	s := QoSWindowStats{Window: window}
+	if merged.count == 0 {
+		return s
+	}
+	p := finalizeQoSBucket("stats", merged, base, true)
+	s.Calls = p.Count
+	if p.Count > 0 {
+		s.SuccessRate = qosRound2(float64(p.SuccessCount) / float64(p.Count) * 100)
+	}
+	s.AvgCongestion = p.AvgCongestion
+	s.CoefficientSamples = p.CoefficientSamples
+	s.StallRate = p.StallRate
+	s.Jitter = p.Jitter
+	s.ErrorRate = p.ErrorRate
+	s.OkAvgElapsedMs = p.OkAvgElapsedMs
+	s.OkP95Ms = p.OkP95Ms
+	s.OkMsPerToken = p.OkMsPerToken
+	return s
+}
+
+// qosHourPattern 「同时段历史」加权累积：对小时 H，pred = Σ(avg_i × n_i) / Σn_i。
+type qosHourPattern struct {
+	congW float64 // Σ(avg_congestion × coefficient_samples)
+	congN int64
+	errW  float64 // Σ(error_rate × count)
+	errN  int64
+}
+
+// qosForecastConfidence 预测可信度三档：样本 ≥30 高、≥10 中、否则低。
+func qosForecastConfidence(samples int64) string {
+	switch {
+	case samples >= qosForecastHighSamples:
+		return "high"
+	case samples >= qosForecastMediumSamples:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+// qosWeightedCongestionRange 汇总 [start, end) 内小时桶的加权平均拥堵分子/分母。
+// 小时键字典序 == 时间序，直接字符串裁剪。
+func qosWeightedCongestionRange(hours map[string]*qosBucketAcc, base qosBaseline, start, end time.Time) (sumW float64, sumN int64) {
+	startKey := start.Format("2006-01-02 15:04")
+	endKey := end.Format("2006-01-02 15:04")
+	for key, b := range hours {
+		if key < startKey || key >= endKey {
+			continue
+		}
+		pt := finalizeQoSBucket(key, b, base, false)
+		sumW += pt.AvgCongestion * float64(pt.CoefficientSamples)
+		sumN += pt.CoefficientSamples
+	}
+	return
+}
+
+// buildQoSPrediction 运行经验预测（方案 §3.2）：复用同一份 m.hours 桶，无二次扫描。
+func buildQoSPrediction(m *qosModelAcc, base qosBaseline, now time.Time) QoSPrediction {
+	pred := QoSPrediction{
+		Trend24h:       "unknown",
+		TodayRemaining: []QoSHourForecast{},
+	}
+
+	// 第一遍：逐小时模式 + 按天聚合（供明日预测与今日 vs 周均值）
+	hourly := make(map[int]*qosHourPattern, 24)
+	dayAcc := make(map[string]*qosBucketAcc, 7)
+	for key, b := range m.hours {
+		t, err := time.ParseInLocation("2006-01-02 15:04", key, now.Location())
+		if err != nil {
+			continue
+		}
+		pt := finalizeQoSBucket(key, b, base, false)
+		hp := hourly[t.Hour()]
+		if hp == nil {
+			hp = &qosHourPattern{}
+			hourly[t.Hour()] = hp
+		}
+		hp.congW += pt.AvgCongestion * float64(pt.CoefficientSamples)
+		hp.congN += pt.CoefficientSamples
+		hp.errW += pt.ErrorRate * float64(pt.Count)
+		hp.errN += pt.Count
+
+		dayKey := t.Format("2006-01-02")
+		db := dayAcc[dayKey]
+		if db == nil {
+			db = &qosBucketAcc{}
+			dayAcc[dayKey] = db
+		}
+		mergeQoSBuckets(db, b)
+	}
+
+	hourForecast := func(h int) QoSHourForecast {
+		f := QoSHourForecast{Hour: h, Confidence: "low"}
+		hp := hourly[h]
+		if hp == nil || hp.congN == 0 {
+			return f
+		}
+		f.AvgCongestion = qosRound2(hp.congW / float64(hp.congN))
+		if hp.errN > 0 {
+			f.ErrorRate = qosRound2(hp.errW / float64(hp.errN))
+		}
+		f.Samples = hp.congN
+		f.Confidence = qosForecastConfidence(hp.congN)
+		return f
+	}
+
+	// 下一时段（当前小时 +1；跨天回到 0 时仍按「同时段」模式预测）
+	pred.NextHour = hourForecast((now.Hour() + 1) % 24)
+	// 今日剩余时段逐小时预测
+	for h := now.Hour() + 1; h < 24; h++ {
+		pred.TodayRemaining = append(pred.TodayRemaining, hourForecast(h))
+	}
+
+	// 第二遍（按天）：明日预测（星期模式，同星期权重 ×2）+ 今日 vs 周均值
+	todayKey := now.Format("2006-01-02")
+	tomorrow := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, 1)
+	pred.Tomorrow.Date = tomorrow.Format("2006-01-02")
+	pred.Tomorrow.Weekday = int(tomorrow.Weekday())
+	pred.Tomorrow.Confidence = "low" // 无完整天数据时保持 low（可信度兜底）
+	var congW, errW, callsW float64
+	var congN, errN, callsN, sampleN int64
+	var fullW float64 // 近 6 个完整天加权拥堵分子
+	var fullN int64
+	var todayAvg float64
+	var todayN int64
+	for dayKey, db := range dayAcc {
+		dp := finalizeQoSBucket(dayKey, db, base, dayKey == todayKey)
+		if dayKey == todayKey {
+			todayAvg = dp.AvgCongestion
+			todayN = dp.CoefficientSamples
+			continue
+		}
+		w := int64(1)
+		if t, err := time.ParseInLocation("2006-01-02", dayKey, now.Location()); err == nil && int(t.Weekday()) == pred.Tomorrow.Weekday {
+			w = 2 // 星期模式：与明天同星期的历史天权重 ×2
+		}
+		congW += dp.AvgCongestion * float64(dp.CoefficientSamples) * float64(w)
+		congN += dp.CoefficientSamples * w
+		errW += dp.ErrorRate * float64(dp.Count) * float64(w)
+		errN += dp.Count * w
+		callsW += float64(dp.Count) * float64(w)
+		callsN += w
+		sampleN += dp.CoefficientSamples
+		fullW += dp.AvgCongestion * float64(dp.CoefficientSamples)
+		fullN += dp.CoefficientSamples
+	}
+	if congN > 0 {
+		pred.Tomorrow.AvgCongestion = qosRound2(congW / float64(congN))
+		pred.Tomorrow.Samples = sampleN
+		pred.Tomorrow.Confidence = qosForecastConfidence(sampleN)
+	}
+	if errN > 0 {
+		pred.Tomorrow.ErrorRate = qosRound2(errW / float64(errN))
+	}
+	if callsN > 0 {
+		pred.Tomorrow.Calls = int64(math.Round(callsW / float64(callsN)))
+	}
+	if todayN > 0 && fullN > 0 {
+		pred.TodayVsWeek = qosRound2((todayAvg/(fullW/float64(fullN)) - 1) * 100)
+	}
+
+	// 趋势研判：近 24h vs 前 24h 加权平均拥堵系数（比值 >1.1 升、<0.9 降）
+	lastW, lastN := qosWeightedCongestionRange(m.hours, base, now.Add(-24*time.Hour), now)
+	prevW, prevN := qosWeightedCongestionRange(m.hours, base, now.Add(-48*time.Hour), now.Add(-24*time.Hour))
+	if lastN > 0 && prevN > 0 && prevW > 0 {
+		ratio := (lastW / float64(lastN)) / (prevW / float64(prevN))
+		switch {
+		case ratio > 1.1:
+			pred.Trend24h = "up"
+		case ratio < 0.9:
+			pred.Trend24h = "down"
+		default:
+			pred.Trend24h = "flat"
+		}
+	}
+	return pred
 }
 
 // ---- 数值工具 ----

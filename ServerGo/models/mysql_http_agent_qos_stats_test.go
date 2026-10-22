@@ -481,3 +481,188 @@ func TestGetQoSMonitorReport_Cache(t *testing.T) {
 		t.Errorf("second call should hit 60s cache and return the same report instance")
 	}
 }
+
+// v2.0.85 固定窗口统计：stats_24h / stats_7d 与小时桶同一套成功口径。
+func TestQoSMonitorReport_WindowStats(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-winstats-model"
+	// 近 24h：1 笔 200（5000ms/100tok）+ 1 笔 429（50ms 快速失败）
+	insertQoSFixture(t, "qos-u8", "qos-m8", dst, "200 OK", now.Add(-1*time.Minute), 5000, 100)
+	insertQoSFixture(t, "qos-u8", "qos-m8", dst, "429 Too Many Requests", now.Add(-2*time.Minute), 50, 0)
+	// 3 天前的成功请求只进 7d 口径
+	insertQoSFixture(t, "qos-u8", "qos-m8", dst, "200 OK", now.Add(-3*24*time.Hour), 1000, 100)
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	if m.Stats24h.Window != "24h" || m.Stats7d.Window != "7d" {
+		t.Errorf("window tags = %q/%q, want 24h/7d", m.Stats24h.Window, m.Stats7d.Window)
+	}
+	if m.Stats24h.Calls != 2 {
+		t.Errorf("stats24h calls = %v, want 2", m.Stats24h.Calls)
+	}
+	if m.Stats24h.SuccessRate != 50 {
+		t.Errorf("stats24h success rate = %v, want 50", m.Stats24h.SuccessRate)
+	}
+	if m.Stats24h.ErrorRate != 50 {
+		t.Errorf("stats24h error rate = %v, want 50", m.Stats24h.ErrorRate)
+	}
+	if m.Stats24h.OkAvgElapsedMs != 5000 {
+		t.Errorf("stats24h ok avg = %v, want 5000（429 快速失败不得拉低成功时延）", m.Stats24h.OkAvgElapsedMs)
+	}
+	if m.Stats7d.Calls != 3 {
+		t.Errorf("stats7d calls = %v, want 3", m.Stats7d.Calls)
+	}
+	if m.Stats7d.SuccessRate != qosRound2(2.0/3.0*100) {
+		t.Errorf("stats7d success rate = %v, want %.2f", m.Stats7d.SuccessRate, qosRound2(2.0/3.0*100))
+	}
+}
+
+// v2.0.85 下一时段预测：昨天同小时 12 笔同规格请求（系数 1.0，样本 12 → 可信度中）。
+func TestQoSMonitorReport_PredictionNextHour(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-predict-model"
+	nextHour := (now.Hour() + 1) % 24
+	// now-23h = 昨天「当前小时+1」的同一分钟 → 落入目标小时桶
+	yesterdaySameHour := now.Add(-23 * time.Hour)
+	if yesterdaySameHour.Hour() != nextHour {
+		t.Fatalf("fixture hour = %d, want next hour %d", yesterdaySameHour.Hour(), nextHour)
+	}
+	for i := 0; i < 12; i++ {
+		insertQoSFixture(t, "qos-u9", "qos-m9", dst, "200 OK", yesterdaySameHour, 1000, 100)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	if m.Prediction.NextHour.Hour != nextHour {
+		t.Errorf("next hour = %d, want %d", m.Prediction.NextHour.Hour, nextHour)
+	}
+	// 全部样本同规格：band(100tok) 基准 = 全局基准 = 10ms/tok → 系数 = 1.0
+	if m.Prediction.NextHour.AvgCongestion != 1.0 {
+		t.Errorf("next hour congestion = %v, want 1.0", m.Prediction.NextHour.AvgCongestion)
+	}
+	if m.Prediction.NextHour.Samples != 12 {
+		t.Errorf("next hour samples = %v, want 12", m.Prediction.NextHour.Samples)
+	}
+	if m.Prediction.NextHour.Confidence != "medium" {
+		t.Errorf("next hour confidence = %q, want medium（12 ≥ 10）", m.Prediction.NextHour.Confidence)
+	}
+
+	// 今日剩余：长度为 23 - 当前小时，hour 连续递增
+	wantLen := 23 - now.Hour()
+	if len(m.Prediction.TodayRemaining) != wantLen {
+		t.Fatalf("today remaining len = %d, want %d", len(m.Prediction.TodayRemaining), wantLen)
+	}
+	for i, f := range m.Prediction.TodayRemaining {
+		if f.Hour != now.Hour()+1+i {
+			t.Errorf("today remaining[%d].hour = %d, want %d", i, f.Hour, now.Hour()+1+i)
+		}
+	}
+	if len(m.Prediction.TodayRemaining) > 0 && m.Prediction.TodayRemaining[0].AvgCongestion != 1.0 {
+		t.Errorf("today remaining[0] congestion = %v, want 1.0", m.Prediction.TodayRemaining[0].AvgCongestion)
+	}
+
+	// 明日预测：昨天是唯一完整天 → 系数 1.0、样本 12、可信度中、预计调用 12 次
+	tomorrow := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, 1)
+	if m.Prediction.Tomorrow.Date != tomorrow.Format("2006-01-02") {
+		t.Errorf("tomorrow date = %q, want %q", m.Prediction.Tomorrow.Date, tomorrow.Format("2006-01-02"))
+	}
+	if m.Prediction.Tomorrow.Weekday != int(tomorrow.Weekday()) {
+		t.Errorf("tomorrow weekday = %d, want %d", m.Prediction.Tomorrow.Weekday, int(tomorrow.Weekday()))
+	}
+	if m.Prediction.Tomorrow.AvgCongestion != 1.0 {
+		t.Errorf("tomorrow congestion = %v, want 1.0", m.Prediction.Tomorrow.AvgCongestion)
+	}
+	if m.Prediction.Tomorrow.Confidence != "medium" {
+		t.Errorf("tomorrow confidence = %q, want medium", m.Prediction.Tomorrow.Confidence)
+	}
+	if m.Prediction.Tomorrow.Calls != 12 {
+		t.Errorf("tomorrow calls = %v, want 12", m.Prediction.Tomorrow.Calls)
+	}
+}
+
+// v2.0.85 趋势研判：仅近 24h 有数据 → unknown；两窗口等量同规格 → flat。
+func TestQoSMonitorReport_PredictionTrend(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dstA = "qos-trend-a"
+	// 只有近 24h 数据：前 24h 无样本 → unknown
+	for i := 0; i < 5; i++ {
+		insertQoSFixture(t, "qos-ua", "qos-ma", dstA, "200 OK", now.Add(-time.Duration(i+1)*time.Minute), 1000, 100)
+	}
+
+	const dstB = "qos-trend-b"
+	// 近 24h 与前 24h 各 5 笔同规格（系数同为 1.0）→ flat
+	// （前窗样本取 now-24h-5min，避开整点分钟恰好落入后窗的边界）
+	for i := 0; i < 5; i++ {
+		insertQoSFixture(t, "qos-ub", "qos-mb", dstB, "200 OK", now.Add(-time.Duration(i+1)*time.Minute), 1000, 100)
+		insertQoSFixture(t, "qos-ub", "qos-mb", dstB, "200 OK", now.Add(-24*time.Hour-time.Duration(i+1)*5*time.Minute), 1000, 100)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	if got := findQoSReport(t, report, dstA).Prediction.Trend24h; got != "unknown" {
+		t.Errorf("trend A = %q, want unknown（前 24h 无样本）", got)
+	}
+	if got := findQoSReport(t, report, dstB).Prediction.Trend24h; got != "flat" {
+		t.Errorf("trend B = %q, want flat（两窗口同规格等量）", got)
+	}
+}
+
+// v2.0.85 今日 vs 周均值：今日拥堵显著高于完整天 → 正偏差；
+// 只有今天数据的模型 → 明日预测可信度 low 且无系数。
+func TestQoSMonitorReport_PredictionTodayVsWeek(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-today-week-model"
+	// 昨天：1000ms/100tok ×5 + 10000ms/1000tok ×5 → 全局基准 10ms/tok，系数 1.0
+	yesterday := now.Add(-24 * time.Hour)
+	for i := 0; i < 5; i++ {
+		insertQoSFixture(t, "qos-uc", "qos-mc", dst, "200 OK", yesterday.Add(-time.Duration(i)*time.Minute), 1000, 100)
+		insertQoSFixture(t, "qos-uc", "qos-mc", dst, "200 OK", yesterday.Add(-time.Duration(i)*time.Minute), 10000, 1000)
+	}
+	// 今天：2000ms/100tok ×5 → 系数 ≈ 2000/(12.35×100) ≈ 1.62，显著高于昨天 0.81
+	for i := 0; i < 5; i++ {
+		insertQoSFixture(t, "qos-uc", "qos-mc", dst, "200 OK", now.Add(-time.Duration(i+1)*time.Minute), 2000, 100)
+	}
+
+	const dst2 = "qos-only-today"
+	insertQoSFixture(t, "qos-ud", "qos-md", dst2, "200 OK", now.Add(-time.Minute), 1000, 100)
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+	if m.Prediction.TodayVsWeek <= 0 {
+		t.Errorf("today vs week = %v, want > 0（今日 1.62 vs 昨天 0.81）", m.Prediction.TodayVsWeek)
+	}
+
+	m2 := findQoSReport(t, report, dst2)
+	if m2.Prediction.Tomorrow.Confidence != "low" || m2.Prediction.Tomorrow.AvgCongestion != 0 {
+		t.Errorf("no-full-day tomorrow = conf %q cong %v, want low/0",
+			m2.Prediction.Tomorrow.Confidence, m2.Prediction.Tomorrow.AvgCongestion)
+	}
+	if m2.Prediction.Trend24h != "unknown" {
+		t.Errorf("no-full-day trend = %q, want unknown", m2.Prediction.Trend24h)
+	}
+}
