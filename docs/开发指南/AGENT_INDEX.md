@@ -203,6 +203,7 @@
 | [`server_api_user_dst_endpoint.go`](server_api_user_dst_endpoint.go) | 用户源站 API | `userDstEndPointInterfaceHandle` |
 | [`server_api_user_ai_route.go`](server_api_user_ai_route.go) | 用户路由 API | `userAIRouteInterfaceHandle` |
 | [`server_api_user_model_info.go`](server_api_user_model_info.go) | 用户模型信息 API | `userModelInfoInterfaceHandle` |
+| [`server_api_qos_monitor.go`](server_api_qos_monitor.go) | 服务质量监控 API（管理端/用户端） | `qosMonitorInterfaceHandle` |
 | [`server_api_chat_dialog.go`](server_api_chat_dialog.go) | 对话配置 API | `chatDialogInterfaceHandle` |
 | [`server_web_chat_dialog.go`](server_web_chat_dialog.go) | 对话页面（独立走代理） | `chatDialogHandle` |
 
@@ -215,6 +216,7 @@
 | [`mysql_http_agent_model_info.go`](mysql_http_agent_model_info.go) | 模型信息表 | `TAgentModelInfo` |
 | [`mysql_http_agent_analysis.go`](mysql_http_agent_analysis.go) | Session/Task 分析 + `parseRequestToolsFromBody` | `parseRequestToolsFromBody` |
 | [`mysql_http_agent_tokens.go`](mysql_http_agent_tokens.go) | Tokens 时间段统计 | `GetTokensRangeStats` |
+| [`mysql_http_agent_qos_stats.go`](mysql_http_agent_qos_stats.go) | 源站模型 QoS 聚合（拥堵系数/分位时延/热力图） | `GetQoSMonitorReport` |
 | [`mysql_http_agent_sub_table.go`](mysql_http_agent_sub_table.go) | 哈希分表管理 | `QueryAgentHttpTransactions` |
 | [`mysql_http_agent_cache.go`](mysql_http_agent_cache.go) | 内存缓存（零 DB 热路径） | `AgentCache`, `LoadAgentCacheFromDB` |
 | [`mysql_http_stats_cache.go`](mysql_http_stats_cache.go) | 统计查询内存缓存 | — |

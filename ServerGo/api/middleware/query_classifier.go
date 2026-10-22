@@ -87,6 +87,7 @@ var longURLPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`ChatAnalysisTotalInterface$`),
 	regexp.MustCompile(`ProtocolConvertAnalyzerRecords$`),
 	regexp.MustCompile(`ProtocolConvertAnalyzerUsers$`),
+	regexp.MustCompile(`QoSMonitorInterface$`), // v2.0.83：7 天跨分表 QoS 聚合扫描
 }
 
 // detailURLPatterns 命中「大字段按需加载」分类。

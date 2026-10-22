@@ -17,6 +17,7 @@ export const NAV_TREES = {
       { key: 'ModelInfo', label: 'nav.modelInfo' },
       { key: 'AgentInfo', label: 'nav.agentInfo' },
       { key: 'ProtocolConvertAnalyzer', label: 'nav.protocolConvertAnalyzer' },
+      { key: 'ServiceQuality', label: 'nav.serviceQuality' },
     ]},
     { id: 'analysis', label: 'nav.analysis', icon: '💬', items: [
       { key: 'ChatAnalysis', label: 'nav.chatAnalysis' },
@@ -32,8 +33,20 @@ export const NAV_TREES = {
     ]},
   ] : [],
   user: [
+    // v2.0.83：用户树与管理员树结构对齐（仅少管理端专属 UserManage）——
+    // 模型信息 / Agent信息 / 协议分析器 归入「模型与代理」组，源站/路由归入「用户与路由」组。
     { id: 'overview', label: 'nav.overview', icon: '🏠', items: [
       { key: 'Home', label: 'nav.home' },
+    ]},
+    { id: 'user-route', label: 'nav.userRoute', icon: '👥', items: [
+      { key: 'DstEndPointManage', label: 'nav.dstEndPointManage' },
+      { key: 'AIRouteManage', label: 'nav.aiRouteManage' },
+    ]},
+    { id: 'model-proxy', label: 'nav.modelProxy', icon: '🧠', items: [
+      { key: 'ModelInfo', label: 'nav.modelInfo' },
+      { key: 'AgentInfo', label: 'nav.agentInfo' },
+      { key: 'ProtocolConvertAnalyzer', label: 'nav.protocolConvertAnalyzer' },
+      { key: 'ServiceQuality', label: 'nav.serviceQuality' },
     ]},
     { id: 'analysis', label: 'nav.analysis', icon: '💬', items: [
       { key: 'ChatAnalysis', label: 'nav.chatAnalysis' },
@@ -41,13 +54,6 @@ export const NAV_TREES = {
       { key: 'ChatAnalysisSession', label: 'nav.chatAnalysisSession' },
       { key: 'ChatAnalysisTask', label: 'nav.chatAnalysisTask' },
       { key: 'ChatDialog', label: 'nav.chatDialog' },
-    ]},
-    { id: 'route-model', label: 'nav.routeModel', icon: '🧭', items: [
-      { key: 'AIRouteManage', label: 'nav.aiRouteManage' },
-      { key: 'ModelInfo', label: 'nav.modelInfo' },
-      { key: 'AgentInfo', label: 'nav.agentInfo' },
-      { key: 'ProtocolConvertAnalyzer', label: 'nav.protocolConvertAnalyzer' },
-      { key: 'DstEndPointManage', label: 'nav.dstEndPointManage' },
     ]},
     { id: 'spider', label: 'nav.spider', icon: '🕷', items: [
       { key: 'SpiderDataSource', label: 'nav.spiderDataSource' },

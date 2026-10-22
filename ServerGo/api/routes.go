@@ -41,6 +41,7 @@ func RegisterManagerAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ModelInfoInterface", modelInfoInterfaceHandle)
 	mux.HandleFunc("/ModelInfoManageInterface", modelInfoManageInterfaceHandle)
 	mux.HandleFunc("/AgentInfoInterface", agentInfoInterfaceHandle)
+	mux.HandleFunc("/QoSMonitorInterface", qosMonitorInterfaceHandle) // v2.0.83 服务质量监控（全站维度）
 
 	// 管理端首页信息（无登录态，返回管理员标识）
 	mux.HandleFunc("/UserInfoInterface", managerInfoInterfaceHandle)
@@ -124,6 +125,7 @@ func RegisterUserAPIRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/DstEndPointManageInterface", userDstEndPointInterfaceHandle)
 	mux.HandleFunc("/ModelInfoInterface", userModelInfoInterfaceHandle)
 	mux.HandleFunc("/AgentInfoInterface", userAgentInfoInterfaceHandle)
+	mux.HandleFunc("/QoSMonitorInterface", userQoSMonitorInterfaceHandle) // v2.0.83 服务质量监控（本人维度）
 
 	// 系统信息
 	mux.HandleFunc("/GitInfoInterface", gitInfoInterfaceHandle)

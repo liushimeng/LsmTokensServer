@@ -34,6 +34,7 @@ export function timeoutFor(path) {
   if (/AgentInfoInterface\b/.test(path)) return 305_000
   if (/ProtocolConvertAnalyzerRecords\b/.test(path)) return 305_000
   if (/ProtocolConvertAnalyzerUsers\b/.test(path)) return 305_000
+  if (/QoSMonitorInterface\b/.test(path)) return 305_000 // v2.0.83：7 天跨分表 QoS 聚合（60s 缓存，冷启动可重）
   // 短查询
   if (/TimeSpanConfigInterface\b/.test(path)) return 12_000
   if (/UserInfoInterface\b/.test(path)) return 12_000

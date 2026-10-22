@@ -17,6 +17,7 @@ const PAGES = {
   ModelInfo: lazy(() => import('./pages/model-info')),
   AgentInfo: lazy(() => import('./pages/agent-info')),
   ProtocolConvertAnalyzer: lazy(() => import('./pages/ProtocolConvertAnalyzer')),
+  ServiceQuality: lazy(() => import('./pages/service-quality')),
   SpiderDataSource: lazy(() => import('./pages/SpiderDataSource')),
   SpiderDailyInfo: lazy(() => import('./pages/SpiderDailyInfo')),
   CleanupReport: lazy(() => import('./pages/CleanupReport')),
