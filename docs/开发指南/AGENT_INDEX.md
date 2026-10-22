@@ -216,7 +216,7 @@
 | [`mysql_http_agent_model_info.go`](mysql_http_agent_model_info.go) | 模型信息表 | `TAgentModelInfo` |
 | [`mysql_http_agent_analysis.go`](mysql_http_agent_analysis.go) | Session/Task 分析 + `parseRequestToolsFromBody` | `parseRequestToolsFromBody` |
 | [`mysql_http_agent_tokens.go`](mysql_http_agent_tokens.go) | Tokens 时间段统计 | `GetTokensRangeStats` |
-| [`mysql_http_agent_qos_stats.go`](mysql_http_agent_qos_stats.go) | 源站模型 QoS 聚合（Token 分档基准/拥堵系数/成功口径分位时延/热力图/逐时段桶/固定窗口统计/同时段预测/24 小时时段画像/业务时段带/峰谷识别/全站汇总） | `GetQoSMonitorReport` · `GetQoSMonitorReportFresh` |
+| [`mysql_http_agent_qos_stats.go`](mysql_http_agent_qos_stats.go) | 源站模型 QoS 聚合（30 天扫描 / 7 天基准隔离 / Token 分档基准 / 拥堵系数 / 成功口径分位时延 / 热力图 / 逐时段桶 / 24h·7d·30d 固定窗口统计 / 同时段预测 / 窗口化时段画像与时段带 / 峰谷识别 / 全站三窗口汇总） | `GetQoSMonitorReport` · `GetQoSMonitorReportFresh` |
 | [`mysql_http_agent_sub_table.go`](mysql_http_agent_sub_table.go) | 哈希分表管理 | `QueryAgentHttpTransactions` |
 | [`mysql_http_agent_cache.go`](mysql_http_agent_cache.go) | 内存缓存（零 DB 热路径） | `AgentCache`, `LoadAgentCacheFromDB` |
 | [`mysql_http_stats_cache.go`](mysql_http_stats_cache.go) | 统计查询内存缓存 | — |
@@ -282,21 +282,23 @@
 
 > `ClientWeb/src/pages/ServiceQuality.jsx` 为重导出入口；实际代码位于 `ClientWeb/src/pages/service-quality/`。
 > v2.0.86（阶段DA）：统计化重构 —— 无自动刷新、无模型下拉、全模型同屏对比。
+> v2.0.87（阶段DB）：多窗口统计（近 1 天 / 1 周 / 1 月）+ 源站横向差异（较全站中位偏差）。
 
 | 文件 | 核心功能 |
 |------|----------|
-| [`service-quality/index.jsx`](../../ClientWeb/src/pages/service-quality/index.jsx) | 主页面：置顶筛选行 + KPI + 10 个模块编排（无自动刷新） |
-| [`service-quality/QoSCards.jsx`](../../ClientWeb/src/pages/service-quality/QoSCards.jsx) | 模型状态总览统计卡（24h/7d 双列统计 + 预测 + 峰谷） |
-| [`service-quality/QoSHourProfile.jsx`](../../ClientWeb/src/pages/service-quality/QoSHourProfile.jsx) | 24 小时时段画像与高峰低谷（全站主图 + 每模型小倍数网格） |
-| [`service-quality/QoSBandMatrix.jsx`](../../ClientWeb/src/pages/service-quality/QoSBandMatrix.jsx) | 业务时段带 × 模型 拥堵矩阵（横向比较） |
+| [`service-quality/index.jsx`](../../ClientWeb/src/pages/service-quality/index.jsx) | 主页面：置顶筛选行（统计窗口 / 趋势窗口 / 指标）+ KPI + 模块编排（无自动刷新） |
+| [`service-quality/QoSWindowStats.jsx`](../../ClientWeb/src/pages/service-quality/QoSWindowStats.jsx) | 模型状态总览统计图表（全站统计条 + 源站横向比较 + 较全站中位偏差 + 峰谷） |
+| [`service-quality/QoSCards.jsx`](../../ClientWeb/src/pages/service-quality/QoSCards.jsx) | 每模型统计卡（24h / 7d / 30d + 预测 + 峰谷） |
+| [`service-quality/QoSHourProfile.jsx`](../../ClientWeb/src/pages/service-quality/QoSHourProfile.jsx) | 窗口化 24 小时时段画像与高峰低谷（全站主图 + 每模型小倍数网格） |
+| [`service-quality/QoSBandMatrix.jsx`](../../ClientWeb/src/pages/service-quality/QoSBandMatrix.jsx) | 业务时段带 × 模型 拥堵矩阵（窗口化横向比较） |
 | [`service-quality/QoSForecast.jsx`](../../ClientWeb/src/pages/service-quality/QoSForecast.jsx) | 运行经验预测（全模型：下一时段条形 + 明日表 + 小倍数折线） |
 | [`service-quality/QoSPeriodMatrix.jsx`](../../ClientWeb/src/pages/service-quality/QoSPeriodMatrix.jsx) | 时段 × 模型 矩阵（逐时段明细的图形化视图） |
 | [`service-quality/QoSPeriodTable.jsx`](../../ClientWeb/src/pages/service-quality/QoSPeriodTable.jsx) | 全模型逐时段明细长表（模型 × 时段，14 项指标） |
-| [`service-quality/QoSTrendChart.jsx`](../../ClientWeb/src/pages/service-quality/QoSTrendChart.jsx) | 服务质量趋势折线（单轴多指标，窗口联动） |
-| [`service-quality/QoSCompareChart.jsx`](../../ClientWeb/src/pages/service-quality/QoSCompareChart.jsx) | 模型质量对比横向条形（24h/7d × 6 指标） |
+| [`service-quality/QoSTrendChart.jsx`](../../ClientWeb/src/pages/service-quality/QoSTrendChart.jsx) | 服务质量趋势折线（单轴多指标，1h/24h/7d/30d 窗口联动） |
+| [`service-quality/QoSCompareChart.jsx`](../../ClientWeb/src/pages/service-quality/QoSCompareChart.jsx) | 模型质量对比横向条形（统计窗口 × 6 指标） |
 | [`service-quality/QoSHeatmap.jsx`](../../ClientWeb/src/pages/service-quality/QoSHeatmap.jsx) | 拥堵热力图（全模型 7×24 小倍数网格） |
 | [`service-quality/QoSErrorBars.jsx`](../../ClientWeb/src/pages/service-quality/QoSErrorBars.jsx) | 错误堆叠柱状图（429/5xx/其他） |
-| [`service-quality/constants.js`](../../ClientWeb/src/pages/service-quality/constants.js) | 共享常量（状态色/系列色/时段带/指标集/格式化工具） |
+| [`service-quality/constants.js`](../../ClientWeb/src/pages/service-quality/constants.js) | 共享常量（状态色/系列色/时段带/指标集/窗口工具/格式化工具） |
 
 ---
 

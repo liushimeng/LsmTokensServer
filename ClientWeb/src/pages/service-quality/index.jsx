@@ -1,11 +1,20 @@
-// 服务质量监控（ServiceQuality）页面主组件（v2.0.86 阶段DA）。
+// 服务质量监控（ServiceQuality）页面主组件（v2.0.87 阶段DB）。
 //
 // 方案：docs/项目迁移解决方案/源站模型服务质量监控页面方案_20261022_113519.md
 //       docs/项目迁移解决方案/源站模型服务质量监控时间维度优化方案_20261022_124609.md
 //       docs/项目迁移解决方案/源站模型服务质量监控统计与预测方案_20261022_132957.md
 //       docs/项目迁移解决方案/源站模型服务质量监控统计化与峰谷预测方案_20261022_143602.md
+//       docs/项目迁移解决方案/源站模型服务质量监控多窗口统计与源站横向对比方案_20261022_150702.md
 //
-// v2.0.86 变更要点：
+// v2.0.87 变更要点：
+//   1. 统计窗口（近 1 天 / 1 周 / 1 月）与趋势窗口（1h/24h/7d/30d）分离，
+//      统计窗口统辖状态总览 / 时段画像 / 时段带矩阵 / 质量对比；
+//   2. 「模型状态总览」升级为统计图表：全站统计条 + 源站横向比较（拥堵条 +
+//      状态 + 较全站中位偏差 + 错误率/时延/P95/调用量 + 峰谷）+ 最好/最差结论；
+//   3. 新增近 30 天逐日趋势、30 天画像/时段带/峰谷，逐时段明细支持 30d；
+//   4. 每模型统计卡增加「近 30 天」一行。
+//
+// v2.0.86 变更要点（保留）：
 //   1. **删除自动刷新**（30s 轮询 + 勾选框）—— 页面重心由「实时窗口」切到
 //      「统计（近1天/近1周逐时段）+ 未来结果预测」；手动刷新按钮走
 //      {refresh:true} 绕过服务端缓存，确保拿到新快照。
@@ -39,9 +48,10 @@ import QoSCompareChart from './QoSCompareChart'
 import QoSForecast from './QoSForecast'
 import QoSHourProfile from './QoSHourProfile'
 import QoSBandMatrix from './QoSBandMatrix'
+import QoSWindowStats from './QoSWindowStats'
 import {
-  STATUS_COLORS, METRICS, MIN_COEFFICIENT_SAMPLES,
-  fmtMs, fmtNum, fmtPct, fmtAgo, fmtHour,
+  STATUS_COLORS, METRICS, MIN_COEFFICIENT_SAMPLES, WINDOWS, STAT_WINDOWS,
+  fmtMs, fmtNum, fmtPct, fmtAgo, fmtHour, windowStats, statWindowLabelKey,
 } from './constants'
 
 export default function ServiceQuality() {
@@ -51,7 +61,8 @@ export default function ServiceQuality() {
   const [report, setReport] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [win, setWin] = useState('24h')
+  const [win, setWin] = useState('24h') // 趋势窗口：1h/24h/7d/30d
+  const [statWin, setStatWin] = useState('7d') // 统计窗口：24h/7d/30d
   const [metricKey, setMetricKey] = useState('avg')
   const [selectedModel, setSelectedModel] = useState(null) // 状态卡/热力图点击选中（仅高亮联动，不做过滤）
   const [trendSel, setTrendSel] = useState(() => new Set()) // 折线图选中模型
@@ -103,49 +114,25 @@ export default function ServiceQuality() {
     })
   }
 
-  const alertCount = models.filter((m) => (m.stats_24h && m.stats_24h.alert) || m.alert).length
-  const weekOkP95Avg = useMemo(() => {
-    const vals = models.filter((m) => m.week_ok_p95_ms > 0).map((m) => m.week_ok_p95_ms)
-    if (!vals.length) return 0
-    return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)
-  }, [models])
-
-  // 近 24 小时全站错误率（小时桶合计）
-  const err24 = useMemo(() => {
-    let errs = 0
-    let calls = 0
-    for (const m of models) {
-      for (const p of (m.hours || [])) {
-        errs += (Number(p.error_429) || 0) + (Number(p.error_5xx) || 0) + (Number(p.error_other) || 0)
-        calls += Number(p.count) || 0
-      }
-    }
-    return calls > 0 ? errs / calls * 100 : 0
-  }, [models])
-
-  // 全站 24 小时拥堵系数（样本加权）与峰谷
-  const siteCongestion = useMemo(() => {
-    let w = 0
-    let n = 0
-    for (const m of models) {
-      const s = m.stats_24h || {}
-      w += (Number(s.avg_congestion) || 0) * (Number(s.coefficient_samples) || 0)
-      n += Number(s.coefficient_samples) || 0
-    }
-    return n > 0 ? w / n : 0
-  }, [models])
-  const sitePv = useMemo(() => (report && report.peak_valley) || {}, [report])
+  // 当前统计窗口的全站汇总（后端 windows[statWin]，跨模型样本加权）
+  const statView = useMemo(
+    () => (report && report.windows ? report.windows[statWin] : null),
+    [report, statWin],
+  )
+  const statStats = (statView && statView.stats) || {}
+  const sitePv = (statView && statView.peak_valley) || {}
+  const siteCongestion = Number(statStats.avg_congestion) || 0
+  const siteErrorRate = Number(statStats.error_rate) || 0
+  const siteOkP95 = Number(statStats.ok_p95_ms) || 0
+  const alertCount = models.filter((m) => {
+    const s = windowStats(m, statWin)
+    return !!(s && s.alert)
+  }).length
 
   const updatedAt = report && report.generated_at_ms ? new Date(report.generated_at_ms) : null
   const updatedAtText = updatedAt
     ? `${String(updatedAt.getHours()).padStart(2, '0')}:${String(updatedAt.getMinutes()).padStart(2, '0')}:${String(updatedAt.getSeconds()).padStart(2, '0')}`
     : ''
-
-  const windows = [
-    { key: '1h', label: t('serviceQuality.window1h') },
-    { key: '24h', label: t('serviceQuality.window24h') },
-    { key: '7d', label: t('serviceQuality.window7d') },
-  ]
 
   return (
     <div className="page">
@@ -156,7 +143,7 @@ export default function ServiceQuality() {
         info={[
           <span key="sub">{t('serviceQuality.subtitle')}</span>,
           <span key="scope">{isAdmin ? t('serviceQuality.scopeAdmin') : t('serviceQuality.scopeUser')}</span>,
-          <span key="range">{t('serviceQuality.statRange', { days: 7 })}</span>,
+          <span key="range">{t('serviceQuality.statRangeMulti')}</span>,
           updatedAtText ? <span key="at">{t('serviceQuality.updatedAt', { time: updatedAtText })}</span> : null,
         ]}
         actions={(
@@ -175,18 +162,32 @@ export default function ServiceQuality() {
           {/* 统一筛选行（置顶，统辖下方所有图表） */}
           <div className="card" style={{ padding: '10px 14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12, color: '#64748b' }}>{t('serviceQuality.filter.window')}</span>
+              <span style={{ fontSize: 12, color: '#64748b' }}>{t('serviceQuality.filter.statWindow')}</span>
               <span style={{ display: 'inline-flex' }}>
-                {windows.map((w) => (
+                {STAT_WINDOWS.map((w, i) => (
+                  <button
+                    key={w.key}
+                    className={'btn ' + (statWin === w.key ? 'btn-primary' : '')}
+                    style={{
+                      borderRadius: i === 0 ? '6px 0 0 6px' : i === STAT_WINDOWS.length - 1 ? '0 6px 6px 0' : 0,
+                      padding: '2px 12px', fontSize: 12,
+                    }}
+                    onClick={() => setStatWin(w.key)}
+                  >{t(w.i18n)}</button>
+                ))}
+              </span>
+              <span style={{ fontSize: 12, color: '#64748b', marginLeft: 8 }}>{t('serviceQuality.filter.trendWindow')}</span>
+              <span style={{ display: 'inline-flex' }}>
+                {WINDOWS.map((w, i) => (
                   <button
                     key={w.key}
                     className={'btn ' + (win === w.key ? 'btn-primary' : '')}
                     style={{
-                      borderRadius: w.key === '1h' ? '6px 0 0 6px' : w.key === '7d' ? '0 6px 6px 0' : 0,
+                      borderRadius: i === 0 ? '6px 0 0 6px' : i === WINDOWS.length - 1 ? '0 6px 6px 0' : 0,
                       padding: '2px 12px', fontSize: 12,
                     }}
                     onClick={() => setWin(w.key)}
-                  >{w.label}</button>
+                  >{t(w.i18n)}</button>
                 ))}
               </span>
               <span style={{ fontSize: 12, color: '#64748b', marginLeft: 8 }}>{t('serviceQuality.filter.metric')}</span>
@@ -203,22 +204,23 @@ export default function ServiceQuality() {
                   >{t(m.i18n)}</button>
                 ))}
               </span>
-              <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>
-                {t('serviceQuality.filter.scopeHint')}
+              <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto', maxWidth: 420 }}>
+                {t('serviceQuality.filter.scopeHintMulti')}
               </span>
             </div>
           </div>
 
-          {/* KPI 概览 */}
+          {/* KPI 概览（跟随统计窗口） */}
           <div className="card-grid kpi-grid">
             <div className="card"><h3>{t('serviceQuality.kpi.models')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtNum(models.length)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.table.model')}</div></div>
-            <div className="card"><h3>{t('serviceQuality.kpi.calls7d')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtNum(report.total_calls_7d)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.window7d')}</div></div>
+            <div className="card"><h3>{t('serviceQuality.kpi.windowCalls')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtNum(statStats.calls)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t(statWindowLabelKey(statWin))}</div></div>
+            <div className="card"><h3>{t('serviceQuality.kpi.calls30d')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtNum(report.total_calls_30d)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.window30d')}</div></div>
             <div className="card"><h3>{t('serviceQuality.kpi.alerts')}</h3><div style={{ fontSize: 24, fontWeight: 800, color: alertCount ? STATUS_COLORS.severe : undefined }}>{fmtNum(alertCount)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.kpi.alertsHint')}</div></div>
-            <div className="card"><h3>{t('serviceQuality.kpi.weekOkP95')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{weekOkP95Avg ? fmtMs(weekOkP95Avg) : '-'}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.table.weekP95')}</div></div>
-            <div className="card"><h3>{t('serviceQuality.kpi.errorRate24h')}</h3><div style={{ fontSize: 24, fontWeight: 800, color: err24 > 5 ? STATUS_COLORS.severe : undefined }}>{err24 ? err24.toFixed(1) + '%' : '0%'}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.window24h')}</div></div>
+            <div className="card"><h3>{t('serviceQuality.kpi.windowP95')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{siteOkP95 ? fmtMs(siteOkP95) : '-'}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.kpi.windowP95Hint')}</div></div>
+            <div className="card"><h3>{t('serviceQuality.kpi.windowError')}</h3><div style={{ fontSize: 24, fontWeight: 800, color: siteErrorRate > 5 ? STATUS_COLORS.severe : undefined }}>{siteErrorRate ? siteErrorRate.toFixed(1) + '%' : '0%'}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.kpi.windowErrorHint')}</div></div>
             <div className="card">
-              <h3>{t('serviceQuality.kpi.siteCongestion24h')}</h3>
-              <div style={{ fontSize: 24, fontWeight: 800, color: siteCongestion > 2 ? STATUS_COLORS.moderate : undefined }}>
+              <h3>{t('serviceQuality.kpi.windowCongestion')}</h3>
+              <div style={{ fontSize: 24, fontWeight: 800, color: siteCongestion >= 2 ? STATUS_COLORS.moderate : undefined }}>
                 {siteCongestion ? siteCongestion.toFixed(2) : '-'}
               </div>
               <div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.kpi.siteCongestionHint')}</div>
@@ -235,22 +237,26 @@ export default function ServiceQuality() {
             </div>
           </div>
 
-          {/* ① 模型状态总览（统计卡） */}
+          {/* ① 模型状态总览（统计图表 + 每模型统计卡） */}
           <div className="card">
-            <h3>{t('serviceQuality.cards.title')}</h3>
+            <h3>{t('serviceQuality.overview.title')}</h3>
+            <QoSWindowStats report={report} models={models} allNames={allNames} win={statWin} t={t} />
+            <div style={{ marginTop: 14, fontSize: 12, fontWeight: 600, color: '#334155' }}>
+              {t('serviceQuality.cards.title')}
+            </div>
             <QoSCards models={models} selected={selectedModel} onSelect={(name) => setSelectedModel(name)} />
           </div>
 
-          {/* ② 时段画像与高峰低谷 */}
+          {/* ② 时段画像与高峰低谷（跟随统计窗口） */}
           <div className="card">
-            <h3>{t('serviceQuality.profile.title')}</h3>
-            <QoSHourProfile report={report} models={models} t={t} />
+            <h3>{t('serviceQuality.profile.titleWindow', { window: t(statWindowLabelKey(statWin)) })}</h3>
+            <QoSHourProfile report={report} models={models} win={statWin} t={t} />
           </div>
 
-          {/* ③ 时段带 × 模型 矩阵（横向比较） */}
+          {/* ③ 时段带 × 模型 矩阵（横向比较，跟随统计窗口） */}
           <div className="card">
-            <h3>{t('serviceQuality.bandMatrix.title')}</h3>
-            <QoSBandMatrix models={models} allNames={allNames} t={t} />
+            <h3>{t('serviceQuality.bandMatrix.titleWindow', { window: t(statWindowLabelKey(statWin)) })}</h3>
+            <QoSBandMatrix models={models} allNames={allNames} win={statWin} t={t} />
           </div>
 
           {/* ④ 运行经验预测（全模型，无下拉） */}
@@ -259,10 +265,10 @@ export default function ServiceQuality() {
             <QoSForecast models={models} allNames={allNames} t={t} />
           </div>
 
-          {/* ⑤ 模型质量对比（全模型固定窗口统计横向条形图） */}
+          {/* ⑤ 模型质量对比（全模型固定窗口统计横向条形图，跟随统计窗口） */}
           <div className="card">
-            <h3>{t('serviceQuality.compare.title')}</h3>
-            <QoSCompareChart models={models} allNames={allNames} t={t} />
+            <h3>{t('serviceQuality.compare.titleWindow', { window: t(statWindowLabelKey(statWin)) })}</h3>
+            <QoSCompareChart models={models} allNames={allNames} win={statWin} t={t} />
           </div>
 
           {/* ⑥ 服务质量趋势（窗口 + 指标联动） */}
@@ -298,7 +304,7 @@ export default function ServiceQuality() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <h3 style={{ margin: 0 }}>{t('serviceQuality.errors.title')}</h3>
               <span style={{ marginLeft: 'auto', fontSize: 12, color: '#94a3b8' }}>
-                {windows.find((w) => w.key === win) ? windows.find((w) => w.key === win).label : ''}
+                {t((WINDOWS.find((w) => w.key === win) || WINDOWS[1]).i18n)}
               </span>
             </div>
             <QoSErrorBars models={models} win={win} t={t} />
@@ -336,6 +342,11 @@ export default function ServiceQuality() {
                   sortValue: (m) => Number(m.calls_24h) || 0,
                   render: (_, m) => fmtNum(m.calls_24h),
                 },
+                {
+                  key: 'calls30d', title: t('serviceQuality.table.calls30d'), sortable: true, nowrap: true,
+                  sortValue: (m) => Number(m.calls_30d) || 0,
+                  render: (_, m) => fmtNum(m.calls_30d),
+                },
                 { key: 'baseline', title: t('serviceQuality.table.baseline'), nowrap: true, render: (_, m) => m.baseline_ms_per_token > 0 ? m.baseline_ms_per_token.toFixed(2) : '-' },
                 { key: 'bands', title: t('serviceQuality.table.bands'), nowrap: true, render: (_, m) => `${m.baseline_bands || 0}/10` },
                 {
@@ -343,6 +354,17 @@ export default function ServiceQuality() {
                   sortValue: (m) => Number(m.stats_24h && m.stats_24h.avg_congestion) || 0,
                   render: (_, m) => {
                     const s = m.stats_24h || {}
+                    if ((Number(s.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES && Number(s.calls) > 0) {
+                      return <span title={t('serviceQuality.period.lowSample', { count: (Number(s.coefficient_samples) || 0) })}>—</span>
+                    }
+                    return (Number(s.avg_congestion) ? <b>{s.avg_congestion.toFixed(2)}</b> : '-')
+                  },
+                },
+                {
+                  key: 'coeff30d', title: t('serviceQuality.table.coeff30d'), sortable: true, nowrap: true,
+                  sortValue: (m) => Number(m.stats_30d && m.stats_30d.avg_congestion) || 0,
+                  render: (_, m) => {
+                    const s = m.stats_30d || {}
                     if ((Number(s.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES && Number(s.calls) > 0) {
                       return <span title={t('serviceQuality.period.lowSample', { count: (Number(s.coefficient_samples) || 0) })}>—</span>
                     }

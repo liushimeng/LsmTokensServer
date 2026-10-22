@@ -1,4 +1,7 @@
-// QoSBandMatrix：业务时段带 × 源站模型 矩阵（v2.0.86 阶段DA）。
+// QoSBandMatrix：业务时段带 × 源站模型 矩阵（v2.0.86 阶段DA，v2.0.87 窗口化）。
+//
+// v2.0.87：数据源随页面统计窗口（近 1 天 / 1 周 / 1 月）切换，
+// 单元格取 model.windows[win].bands。
 //
 // 横向比较的主视图：行 = 6 个业务时段带（凌晨/早间/上午/午间/下午/晚间），
 // 列 = 各源站模型，单元格 = 该时段带的指标值。
@@ -10,6 +13,7 @@ import { useMemo, useState } from 'react'
 import {
   TIME_BANDS, fmtHourRange, fmtNum, fmtNum1, fmtMetric, fmtPct,
   STATUS_COLORS, CONGESTION_TIERS, tierOfCongestion, modelColor, findBand,
+  windowBands,
 } from './constants'
 
 // BAND_METRICS 时段带矩阵指标集。
@@ -20,20 +24,20 @@ const BAND_METRICS = [
   { key: 'share', i18n: 'serviceQuality.band.metricShare', kind: 'pct', tier: false },
 ]
 
-export default function QoSBandMatrix({ models, allNames, t }) {
+export default function QoSBandMatrix({ models, allNames, win = '7d', t }) {
   const [metricKey, setMetricKey] = useState('congestion')
   const metric = BAND_METRICS.find((m) => m.key === metricKey) || BAND_METRICS[0]
 
-  // 单元格取值：按模型取 bands_7d（近 7 天口径，与时段画像同源）
+  // 单元格取值：按模型取当前统计窗口的时段带（与时段画像同源）
   const cellOf = useMemo(() => {
     const map = new Map() // modelName → { bandKey → band }
     for (const m of models) {
       const byKey = new Map()
-      for (const b of (m.bands_7d || [])) byKey.set(b.key, b)
+      for (const b of windowBands(m, win)) byKey.set(b.key, b)
       map.set(m.dst_model_name, byKey)
     }
     return map
-  }, [models])
+  }, [models, win])
 
   const valueOf = (band) => {
     if (!band) return null
@@ -123,7 +127,7 @@ export default function QoSBandMatrix({ models, allNames, t }) {
                   <td style={{ padding: '6px 8px', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
                     <div style={{ fontWeight: 700, color: '#0f172a' }}>{defLabel}</div>
                     <div style={{ fontSize: 10, color: '#94a3b8' }}>{fmtHourRange(def.start, def.end)}</div>
-                    <BandSummary def={def} models={models} t={t} />
+                    <BandSummary def={def} models={models} win={win} t={t} />
                   </td>
                   {models.map((m) => {
                     const band = (cellOf.get(m.dst_model_name) || new Map()).get(def.key)
@@ -183,12 +187,12 @@ export default function QoSBandMatrix({ models, allNames, t }) {
 }
 
 // BandSummary 行首汇总（全站口径的该时段带调用量与占比）。
-function BandSummary({ def, models, t }) {
+function BandSummary({ def, models, win, t }) {
   let calls = 0
   let perDay = 0
   let share = 0
   for (const m of models) {
-    const b = findBand(m.bands_7d || [], def.key)
+    const b = findBand(windowBands(m, win), def.key)
     if (!b) continue
     calls += Number(b.calls) || 0
     perDay += Number(b.avg_calls_per_day) || 0

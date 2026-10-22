@@ -266,16 +266,18 @@ func TestQoSMonitorReport_TokenBandBaseline(t *testing.T) {
 	if m.BaselineBands != 2 {
 		t.Errorf("calibrated bands = %d, want 2", m.BaselineBands)
 	}
-	// 两类请求各自系数 1.0 → 桶均值 1.0（全局基准会让小请求达 5.35）
-	lastHour := m.Hours[len(m.Hours)-1]
-	if math.Abs(lastHour.AvgCongestion-1.0) > 0.01 {
-		t.Errorf("band-normalized congestion = %v, want 1.0", lastHour.AvgCongestion)
+	// 两类请求各自系数 1.0 → 桶均值 1.0（全局基准会让小请求达 5.35）。
+	// 注意：60 笔样本横跨「当前小时」与「上一小时」（取决于运行时刻的分钟数），
+	// 因此用「今天」天桶断言，避免测试随执行时刻漂移（历史用例曾按 lastHour 断言而偶发失败）。
+	today := m.Days[len(m.Days)-1]
+	if math.Abs(today.AvgCongestion-1.0) > 0.01 {
+		t.Errorf("band-normalized congestion = %v, want 1.0", today.AvgCongestion)
 	}
-	if lastHour.CoefficientSamples != 60 {
-		t.Errorf("coefficient samples = %v, want 60", lastHour.CoefficientSamples)
+	if today.CoefficientSamples != 60 {
+		t.Errorf("coefficient samples = %v, want 60", today.CoefficientSamples)
 	}
-	if lastHour.StallRate != 0 {
-		t.Errorf("stall rate = %v, want 0", lastHour.StallRate)
+	if today.StallRate != 0 {
+		t.Errorf("stall rate = %v, want 0", today.StallRate)
 	}
 }
 
@@ -957,5 +959,208 @@ func TestQoSMonitorReport_WindowStatus(t *testing.T) {
 	}
 	if status, alert := qosStatusOfWindow(1.0, 0, 0); status != "idle" || alert {
 		t.Errorf("qosStatusOfWindow(no call) = %q/%v, want idle/false", status, alert)
+	}
+}
+
+// ===================== v2.0.87 阶段DB：多窗口（24h/7d/30d）与 7 天口径隔离 =====================
+
+// 30 天扫描 + 7 天口径隔离：
+//   - 20 天前的请求只进 30d 统计，不得进入 calls_7d / stats_7d / 7 天基准；
+//   - windows 三窗口齐全，画像/时段带/趋势长度正确。
+func TestQoSMonitorReport_MonthWindowBoundary(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-month-model"
+	// 20 天前：3:30，1000ms/100tok ×3
+	for i := 0; i < 3; i++ {
+		insertQoSFixture(t, "qos-um", "qos-mm", dst, "200 OK", qosDayHour(now, 20, 3).Add(time.Duration(i)*time.Minute), 1000, 100)
+	}
+	// 近 24h：2000ms/100tok ×3（基准应只由这 3 笔决定 = 20ms/tok）
+	for i := 0; i < 3; i++ {
+		insertQoSFixture(t, "qos-um", "qos-mm", dst, "200 OK", now.Add(-time.Duration(i+1)*time.Minute), 2000, 100)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	if m.Calls7d != 3 || m.Calls30d != 6 {
+		t.Errorf("calls 7d/30d = %d/%d, want 3/6", m.Calls7d, m.Calls30d)
+	}
+	if m.Stats24h.Calls != 3 || m.Stats7d.Calls != 3 || m.Stats30d.Calls != 6 {
+		t.Errorf("window calls 24h/7d/30d = %d/%d/%d, want 3/3/6",
+			m.Stats24h.Calls, m.Stats7d.Calls, m.Stats30d.Calls)
+	}
+	if m.BaselineSamples != 3 || m.BaselineMsPerToken != 20 {
+		t.Errorf("baseline samples/value = %d/%v, want 3/20（30 天前的样本不得进入 7 天基准）",
+			m.BaselineSamples, m.BaselineMsPerToken)
+	}
+	if len(m.Days) != 7 || len(m.Days30d) != 30 {
+		t.Errorf("days len = %d / days30d len = %d, want 7 / 30", len(m.Days), len(m.Days30d))
+	}
+	if m.Days30d[0].Bucket != now.AddDate(0, 0, -29).Format("2006-01-02") {
+		t.Errorf("days30d[0] = %q, want 29 days ago", m.Days30d[0].Bucket)
+	}
+
+	for _, win := range []string{"24h", "7d", "30d"} {
+		v, ok := m.Windows[win]
+		if !ok {
+			t.Fatalf("windows[%s] missing", win)
+		}
+		if len(v.HourProfile) != 24 || len(v.Bands) != len(qosTimeBands) {
+			t.Errorf("windows[%s] profile/bands len = %d/%d, want 24/%d",
+				win, len(v.HourProfile), len(v.Bands), len(qosTimeBands))
+		}
+		if v.Stats.Window != win {
+			t.Errorf("windows[%s].stats.window = %q", win, v.Stats.Window)
+		}
+	}
+	if m.Windows["30d"].HourProfile[3].Calls != 3 {
+		t.Errorf("30d profile[3].calls = %d, want 3", m.Windows["30d"].HourProfile[3].Calls)
+	}
+	if m.Windows["7d"].HourProfile[3].Calls != 0 {
+		t.Errorf("7d profile[3].calls = %d, want 0（20 天前样本不得进入 7 天画像）",
+			m.Windows["7d"].HourProfile[3].Calls)
+	}
+	if len(m.Windows["24h"].Trend) != 24 || len(m.Windows["7d"].Trend) != 7 || len(m.Windows["30d"].Trend) != 30 {
+		t.Errorf("trend len 24h/7d/30d = %d/%d/%d, want 24/7/30",
+			len(m.Windows["24h"].Trend), len(m.Windows["7d"].Trend), len(m.Windows["30d"].Trend))
+	}
+}
+
+// 峰谷必须随窗口变化：20 天前的 3 点高峰不能冒充近 7 天高峰。
+func TestQoSMonitorReport_MonthPeakValleyIsolation(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-month-pv"
+	// 20 天前 3:30 ×5 → 30 天口径的峰
+	for i := 0; i < 5; i++ {
+		insertQoSFixture(t, "qos-up", "qos-mp", dst, "200 OK", qosDayHour(now, 20, 3).Add(time.Duration(i)*time.Minute), 1000, 100)
+	}
+	// 近 7 天 14:30 ×1 → 7 天口径的峰
+	insertQoSFixture(t, "qos-up", "qos-mp", dst, "200 OK", qosDayHour(now, 1, 14), 1000, 100)
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+
+	if got := m.Windows["30d"].PeakValley.PeakHour; got != 3 {
+		t.Errorf("30d peak hour = %d, want 3", got)
+	}
+	if got := m.Windows["7d"].PeakValley.PeakHour; got != 14 {
+		t.Errorf("7d peak hour = %d, want 14", got)
+	}
+	if got := m.PeakValley.PeakHour; got != 14 {
+		t.Errorf("compat peak_valley.peak_hour = %d, want 14", got)
+	}
+	if m.Windows["30d"].HourProfile[3].Calls != 5 || m.Windows["7d"].HourProfile[3].Calls != 0 {
+		t.Errorf("profile[3] calls 30d/7d = %d/%d, want 5/0",
+			m.Windows["30d"].HourProfile[3].Calls, m.Windows["7d"].HourProfile[3].Calls)
+	}
+}
+
+// 运行经验预测仍只取近 7 天：20 天前同时段样本不得进入 next_hour。
+func TestQoSMonitorReport_PredictionSevenDayIsolation(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-month-predict"
+	nextHour := (now.Hour() + 1) % 24
+	// 20 天前的「下一小时」样本 ×30：若误入预测，样本数会变成 32
+	for i := 0; i < 30; i++ {
+		ts := qosDayHour(now, 20, nextHour).Add(time.Duration(i) * time.Second)
+		insertQoSFixture(t, "qos-uf", "qos-mf", dst, "200 OK", ts, 1000, 100)
+	}
+	// 昨天同时段（近 7 天）×2
+	yesterday := now.Add(-23 * time.Hour)
+	for i := 0; i < 2; i++ {
+		insertQoSFixture(t, "qos-uf", "qos-mf", dst, "200 OK", yesterday.Add(time.Duration(i)*time.Second), 1000, 100)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+	if m.Prediction.NextHour.Samples != 2 {
+		t.Errorf("next hour samples = %d, want 2（20 天前样本不得进入预测）", m.Prediction.NextHour.Samples)
+	}
+	if m.Prediction.NextHour.Confidence != "low" {
+		t.Errorf("next hour confidence = %q, want low", m.Prediction.NextHour.Confidence)
+	}
+}
+
+// 周分位只取近 7 天：20 天前的超慢请求不得改变 week_ok_p95。
+func TestQoSMonitorReport_WeekPercentileSevenDayIsolation(t *testing.T) {
+	cleanup := initTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	const dst = "qos-month-pct"
+	insertQoSFixture(t, "qos-uw", "qos-mw", dst, "200 OK", qosDayHour(now, 20, 10), 100000, 100)
+	for i := 0; i < 3; i++ {
+		insertQoSFixture(t, "qos-uw", "qos-mw", dst, "200 OK", now.Add(-time.Duration(i+1)*time.Minute), 1000, 100)
+	}
+
+	report, err := buildQoSMonitorReport("", testCfg.DBMysqlSubTableNumber)
+	if err != nil {
+		t.Fatalf("buildQoSMonitorReport failed: %v", err)
+	}
+	m := findQoSReport(t, report, dst)
+	if m.WeekOkP95Ms != 1000 {
+		t.Errorf("week ok p95 = %d, want 1000（20 天前的超慢样本不得进入周分位）", m.WeekOkP95Ms)
+	}
+}
+
+// 全站三窗口加权：两模型 30d 系数 2/4、样本各 10 → 全站 3（样本加权，非算术平均）。
+func TestQoSAggregateWindows_Weighted(t *testing.T) {
+	mk := func(name string, cong float64, samples, calls int64) QoSModelReport {
+		profiles := make([]QoSHourProfile, 24)
+		for h := 0; h < 24; h++ {
+			profiles[h] = QoSHourProfile{Hour: h}
+		}
+		profiles[10] = QoSHourProfile{
+			Hour: 10, Calls: calls, SuccessCount: calls, Days: 30,
+			AvgCongestion: cong, CoefficientSamples: samples, OkAvgElapsedMs: 1000, OkP95Ms: 2000,
+			AvgCallsPerDay: float64(calls) / 30,
+		}
+		stats := QoSWindowStats{
+			Window: "30d", Calls: calls, SuccessRate: 100, AvgCongestion: cong,
+			CoefficientSamples: samples, OkAvgElapsedMs: 1000, OkP95Ms: 2000,
+		}
+		return QoSModelReport{
+			DstModelName: name,
+			Windows: map[string]QoSWindowView{
+				"30d": {Window: "30d", Stats: stats, HourProfile: profiles,
+					Bands: buildQoSTimeBands(qosHourAggsFromProfile(profiles))},
+			},
+		}
+	}
+	models := []QoSModelReport{mk("a", 2, 10, 10), mk("b", 4, 10, 20)}
+	out := aggregateQoSWindows(models)
+	v, ok := out["30d"]
+	if !ok {
+		t.Fatal("windows[30d] missing")
+	}
+	if v.Stats.AvgCongestion != 3 {
+		t.Errorf("30d site congestion = %v, want 3（样本加权）", v.Stats.AvgCongestion)
+	}
+	if v.Stats.Calls != 30 {
+		t.Errorf("30d site calls = %v, want 30", v.Stats.Calls)
+	}
+	if v.HourProfile[10].Calls != 30 {
+		t.Errorf("30d site profile[10].calls = %v, want 30", v.HourProfile[10].Calls)
+	}
+	if v.PeakValley.PeakHour != 10 {
+		t.Errorf("30d site peak hour = %d, want 10", v.PeakValley.PeakHour)
 	}
 }

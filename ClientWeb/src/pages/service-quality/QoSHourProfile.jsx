@@ -1,4 +1,7 @@
-// QoSHourProfile：24 小时时段画像与高峰低谷（v2.0.86 阶段DA）。
+// QoSHourProfile：24 小时时段画像与高峰低谷（v2.0.86 阶段DA，v2.0.87 窗口化）。
+//
+// v2.0.87：随页面统计窗口（近 1 天 / 1 周 / 1 月）切换数据源，
+// 全站画像取 report.windows[win]，每模型画像取 model.windows[win]。
 //
 // 回答「哪个小时是高峰/低谷」「源站在某个时段的典型表现」：
 //   - 上：全站 24 小时柱状图（指标可切换：日均调用量 / 拥堵系数 / 错误率），
@@ -7,7 +10,7 @@
 //
 // 口径说明（与后端一致）：
 //   - 时间轴 = request_start_at（用户发起调用的时刻），不是落库时间；
-//   - 数值 = 近 7 天同时段汇总后的日均调用量（按该小时"有数据的天数"归一）；
+//   - 数值 = 窗口内同时段汇总后的日均调用量（按该小时"有数据的天数"归一）；
 //   - 同一时刻只有一个 Y 轴（禁止双轴），指标靠切换器切换。
 // 颜色仅承载分档语义（四档状态色），永远伴随图例文字与数值标签。
 import { useMemo, useState } from 'react'
@@ -15,6 +18,7 @@ import ResponsiveSvgChart from '../../components/ResponsiveSvgChart'
 import {
   TIME_BANDS, HOUR_PROFILE_METRICS, hourProfileMetricOf, bandOfHour,
   fmtHour, fmtNum1, fmtMetric, STATUS_COLORS, CONGESTION_TIERS, tierOfCongestion,
+  windowProfile, windowPeakValley, statWindowLabelKey,
 } from './constants'
 
 const CHART_H = 240
@@ -27,12 +31,16 @@ const TEXT = '#475569'
 // 单色（调用量/时延等量级指标）—— 不用 value-ramp，避免双重编码
 const PLAIN = '#2a78d6'
 
-export default function QoSHourProfile({ report, models, t }) {
+export default function QoSHourProfile({ report, models, win = '7d', t }) {
   const [metricKey, setMetricKey] = useState('calls')
   const metric = hourProfileMetricOf(metricKey)
 
-  const profile = useMemo(() => (report && Array.isArray(report.hour_profile) ? report.hour_profile : []), [report])
-  const sitePv = useMemo(() => (report && report.peak_valley) || {}, [report])
+  const rv = report && report.windows ? report.windows[win] : null
+  const profile = useMemo(() => {
+    if (rv && Array.isArray(rv.hour_profile)) return rv.hour_profile
+    return report && Array.isArray(report.hour_profile) ? report.hour_profile : []
+  }, [rv, report])
+  const sitePv = useMemo(() => (rv && rv.peak_valley) || (report && report.peak_valley) || {}, [rv, report])
 
   if (!profile.length) {
     return <div style={{ padding: 24, color: '#94a3b8', fontSize: 13 }}>{t('serviceQuality.profile.empty')}</div>
@@ -79,7 +87,7 @@ export default function QoSHourProfile({ report, models, t }) {
           >{t(m.i18n)}</button>
         ))}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>
-          {t('serviceQuality.profile.hint')}
+          {t('serviceQuality.profile.hintWindow', { window: t(statWindowLabelKey(win)) })}
         </span>
       </div>
 
@@ -183,6 +191,7 @@ export default function QoSHourProfile({ report, models, t }) {
             <MiniProfile
               key={m.dst_model_name}
               model={m}
+              win={win}
               metric={metric}
               t={t}
             />
@@ -194,9 +203,9 @@ export default function QoSHourProfile({ report, models, t }) {
 }
 
 // MiniProfile 单模型 24 点迷你柱图（小倍数网格的一格）。
-function MiniProfile({ model, metric, t }) {
-  const profile = Array.isArray(model.hour_profile) ? model.hour_profile : []
-  const pv = (model && model.peak_valley) || {}
+function MiniProfile({ model, win, metric, t }) {
+  const profile = windowProfile(model, win)
+  const pv = windowPeakValley(model, win)
   const vals = profile.map((p) => {
     const v = Number(p[metric.field])
     return isFinite(v) ? v : 0

@@ -7,6 +7,7 @@
 //   │ 24h 拥堵系数 1.38（轻度排队）      ← stats_24h 主导
 //   │ 近24h  2,713 次 · 错误率 0.2% · 成功均值 8.0s · P95 24.0s
 //   │ 近7天  8,097 次 · 拥堵 1.21 · 成功均值 7.6s · 错误率 0.4%
+//   │ 近30天 …（v2.0.87 新增，观察长期趋势）
 //   │ 下一时段预测：正常（可信度高）
 //   │ 峰 14:00（日均 512 次）· 谷 03:00（日均 4 次）
 //   │ 最后请求 2 分钟前
@@ -25,6 +26,7 @@ export default function QoSCards({ models, selected, onSelect }) {
       {models.map((m) => {
         const s24 = m.stats_24h || {}
         const s7d = m.stats_7d || {}
+        const s30 = m.stats_30d || {}
         const status = s24.status || m.status || 'idle'
         const color = STATUS_COLORS[status] || STATUS_COLORS.idle
         const isSel = selected === m.dst_model_name
@@ -96,6 +98,20 @@ export default function QoSCards({ models, selected, onSelect }) {
                     {' · '}{t('serviceQuality.cards.coefficient')} {Number(s7d.avg_congestion) ? s7d.avg_congestion.toFixed(2) : '-'}
                     {' · '}{t('serviceQuality.cards.latency')} {fmtMs(s7d.ok_avg_elapsed_ms)}
                     {' · '}{t('serviceQuality.cards.errorRate')} {Number(s7d.error_rate) ? s7d.error_rate.toFixed(1) + '%' : '0%'}
+                  </>
+                ) : (
+                  <span style={{ color: '#94a3b8' }}>{t('serviceQuality.cards.noTraffic')}</span>
+                )}
+              </div>
+              <div>
+                <span style={{ color: '#94a3b8' }}>{t('serviceQuality.cards.stats30dLabel')}</span>
+                {' '}
+                {Number(s30.calls) > 0 ? (
+                  <>
+                    {fmtNum(s30.calls)}
+                    {' · '}{t('serviceQuality.cards.coefficient')} {Number(s30.avg_congestion) ? s30.avg_congestion.toFixed(2) : '-'}
+                    {' · '}{t('serviceQuality.cards.latency')} {fmtMs(s30.ok_avg_elapsed_ms)}
+                    {' · '}{t('serviceQuality.cards.errorRate')} {Number(s30.error_rate) ? s30.error_rate.toFixed(1) + '%' : '0%'}
                   </>
                 ) : (
                   <span style={{ color: '#94a3b8' }}>{t('serviceQuality.cards.noTraffic')}</span>

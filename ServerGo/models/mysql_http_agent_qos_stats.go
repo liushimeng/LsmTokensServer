@@ -31,6 +31,14 @@
 //   - 报告级 hour_profile / bands / peak_valley：全站汇总（跨模型样本加权，不混算耗时）；
 //   - QoSWindowStats 增 status/alert：窗口口径状态分档（替代实时窗口的抖动状态）。
 //
+// v2.0.87（阶段DB）：多窗口统计（近 1 天 / 1 周 / 1 月）+ 源站横向差异，方案见
+// docs/项目迁移解决方案/源站模型服务质量监控多窗口统计与源站横向对比方案_20261022_150702.md
+//   - 扫描窗口 7d → 30d；基准 / 预测 / 周分位显式固定为近 7 天（防止口径随扫描漂移）；
+//   - 每模型新增 windows{24h,7d,30d}（stats/hour_profile/bands/peak_valley/trend）
+//     与 days_30d / stats_30d / calls_30d，前端一次取数、三窗口切换；
+//   - 报告级新增 windows 全站汇总（跨模型样本加权）与 total_calls_30d；
+//   - 既有字段（stats_24h/stats_7d/hour_profile/bands_*/days）语义不变，保证兼容。
+//
 // 表定义研读结论（TAgentHttpTransactionDataItem，v2.0.86）：
 //   - request_start_at 才是「用户发起调用」的时刻 → 时段/峰谷分析必须用它；
 //     created_at ≈ request_start_at + 响应耗时，用它会让峰谷失真。
@@ -64,8 +72,14 @@ import (
 
 // QoS 聚合常量
 const (
-	// qosScanWindow 聚合窗口：最近 7 天（基准 + 周视图 + 热力图共用一次扫描）。
-	qosScanWindow = 7 * 24 * time.Hour
+	// qosScanWindow 扫描窗口：最近 30 天（v2.0.87 阶段DB 起覆盖「近 1 个月」统计）。
+	// 基准 / 预测 / 周分位仍固定取近 7 天（见 qosBaselineWindow / qosForecastWindow），
+	// 否则同一请求的拥堵系数会随扫描窗口变化，历史对比与 1.2/2/5 阈值全部失真。
+	qosScanWindow = 30 * 24 * time.Hour
+	// qosBaselineWindow 拥堵系数基准窗口：固定 7 天（不受扫描窗口影响）。
+	qosBaselineWindow = 7 * 24 * time.Hour
+	// qosForecastWindow 运行经验预测的历史窗口：固定 7 天同时段。
+	qosForecastWindow = 7 * 24 * time.Hour
 	// qosScanBatch 单批扫描行数（keyset 分页）。
 	qosScanBatch = 5000
 	// qosMinuteBuckets 分钟桶数量（近 1 小时折线视图）。
@@ -87,7 +101,7 @@ const (
 	// （历史同时段样本数）：≥30 高、≥10 中、否则低（仅供参考）。
 	qosForecastHighSamples   = 30
 	qosForecastMediumSamples = 10
-	// qosProfileDays 小时画像的归一化天数（近 7 天窗口）。
+	// qosProfileDays 小时画像的归一化天数（近 7 天窗口；30 天画像按实际有数据天数归一）。
 	qosProfileDays = 7
 )
 
@@ -105,12 +119,12 @@ type qosTimeBandDef struct {
 
 // qosTimeBands 业务时段带（顺序即前端展示顺序）。
 var qosTimeBands = []qosTimeBandDef{
-	{Key: "dawn", StartHour: 0, EndHour: 6},         // 凌晨 00:00-06:00
-	{Key: "morning", StartHour: 6, EndHour: 9},      // 早间 06:00-09:00
+	{Key: "dawn", StartHour: 0, EndHour: 6},        // 凌晨 00:00-06:00
+	{Key: "morning", StartHour: 6, EndHour: 9},     // 早间 06:00-09:00
 	{Key: "forenoon", StartHour: 9, EndHour: 12},   // 上午 09:00-12:00
-	{Key: "noon", StartHour: 12, EndHour: 14},       // 午间 12:00-14:00
-	{Key: "afternoon", StartHour: 14, EndHour: 18},  // 下午 14:00-18:00
-	{Key: "evening", StartHour: 18, EndHour: 24},    // 晚间 18:00-24:00
+	{Key: "noon", StartHour: 12, EndHour: 14},      // 午间 12:00-14:00
+	{Key: "afternoon", StartHour: 14, EndHour: 18}, // 下午 14:00-18:00
+	{Key: "evening", StartHour: 18, EndHour: 24},   // 晚间 18:00-24:00
 }
 
 // 拥堵分档阈值（方案 §3.2）
@@ -183,7 +197,7 @@ type QoSWindowStats struct {
 	Calls              int64   `json:"calls"`
 	SuccessRate        float64 `json:"success_rate"` // %
 	AvgCongestion      float64 `json:"avg_congestion"`
-	CoefficientSamples int64  `json:"coefficient_samples"`
+	CoefficientSamples int64   `json:"coefficient_samples"`
 	StallRate          float64 `json:"stall_rate"` // %
 	Jitter             float64 `json:"jitter"`     // %
 	ErrorRate          float64 `json:"error_rate"` // %
@@ -194,6 +208,23 @@ type QoSWindowStats struct {
 	// 状态卡改用本字段（替代实时窗口状态），避免 5 分钟窗口抖动导致卡片忽绿忽红。
 	Status string `json:"status"` // ok|light|moderate|severe|idle
 	Alert  bool   `json:"alert"`
+}
+
+// QoSWindowView 单个统计窗口（24h/7d/30d）的完整视图（v2.0.87 阶段DB）。
+//
+// 前端按窗口一次取用，避免在三组并列字段间自行拼装：
+//   - Stats：固定窗口统计（与小时桶同一套口径）；
+//   - HourProfile：窗口内「同时段」24 点画像（按该小时有数据的天数归一）；
+//   - Bands：6 个业务时段带（由 HourProfile 归并）；
+//   - PeakValley：该窗口的高峰/低谷（峰谷会随窗口变化，20 天前的峰不应冒充近 7 天峰）；
+//   - Trend：趋势序列（24h → 24 小时桶；7d/30d → 7/30 天桶）。
+type QoSWindowView struct {
+	Window      string           `json:"window"`
+	Stats       QoSWindowStats   `json:"stats"`
+	HourProfile []QoSHourProfile `json:"hour_profile"`
+	Bands       []QoSTimeBand    `json:"bands"`
+	PeakValley  QoSPeakValley    `json:"peak_valley"`
+	Trend       []QoSBucketPoint `json:"trend"`
 }
 
 // QoSHourProfile 单小时画像（v2.0.86）：近 7 天「同时段」汇总，24 点。
@@ -225,6 +256,7 @@ type QoSHourProfile struct {
 //   - AvgCallsPerDay  = 该带每天的调用总量（贡献度）；
 //   - AvgCallsPerHour = 该带平均每小时的调用强度（**跨带可比**）；
 //   - Share           = 调用量占比 %。
+//
 // 直接比 Calls 会被"带越长数越大"误导。
 type QoSTimeBand struct {
 	Key                string  `json:"key"` // dawn|morning|forenoon|noon|afternoon|evening
@@ -306,9 +338,9 @@ type QoSModelReport struct {
 	Status             string           `json:"status"` // ok|light|moderate|severe|idle
 	Alert              bool             `json:"alert"`
 	Live               QoSLiveStats     `json:"live"`
-	Minutes            []QoSBucketPoint `json:"minutes"` // 近 60 分钟（升序）
-	Hours              []QoSBucketPoint `json:"hours"`   // 近 24 小时（升序）
-	Days               []QoSBucketPoint `json:"days"`    // 近 7 天（升序）
+	Minutes            []QoSBucketPoint `json:"minutes"`        // 近 60 分钟（升序）
+	Hours              []QoSBucketPoint `json:"hours"`          // 近 24 小时（升序）
+	Days               []QoSBucketPoint `json:"days"`           // 近 7 天（升序）
 	Heatmap            [][]float64      `json:"heatmap"`        // [7][24] 桶均拥堵系数（-1 = 无数据）
 	HeatmapCounts      [][]int64        `json:"heatmap_counts"` // [7][24] 桶请求数
 	WeekP50Ms          int64            `json:"week_p50_ms"`
@@ -319,15 +351,26 @@ type QoSModelReport struct {
 	Calls7d            int64            `json:"calls_7d"`
 	OkCalls7d          int64            `json:"ok_calls_7d"`
 	ErrCalls7d         int64            `json:"err_calls_7d"`
+	Calls30d           int64            `json:"calls_30d"`
+	OkCalls30d         int64            `json:"ok_calls_30d"`
 	LastRequestAtMs    int64            `json:"last_request_at_ms"`
 	Stats24h           QoSWindowStats   `json:"stats_24h"`
 	Stats7d            QoSWindowStats   `json:"stats_7d"`
+	Stats30d           QoSWindowStats   `json:"stats_30d"`
 	Prediction         QoSPrediction    `json:"prediction"`
-	// 时段画像与峰谷（v2.0.86）
-	HourProfile []QoSHourProfile `json:"hour_profile"` // 24 点（近 7 天同时段汇总）
-	Bands24h    []QoSTimeBand    `json:"bands_24h"`    // 6 个业务时段带（近 24h 口径）
-	Bands7d     []QoSTimeBand    `json:"bands_7d"`     // 6 个业务时段带（近 7 天口径）
-	PeakValley  QoSPeakValley    `json:"peak_valley"`
+	// 时段画像与峰谷（v2.0.86；v2.0.87 增加 24h/30d 两套）
+	HourProfile    []QoSHourProfile `json:"hour_profile"`     // 24 点（近 7 天同时段汇总）
+	HourProfile24h []QoSHourProfile `json:"hour_profile_24h"` // 24 点（近 24h 口径）
+	HourProfile30d []QoSHourProfile `json:"hour_profile_30d"` // 24 点（近 30 天口径）
+	Bands24h       []QoSTimeBand    `json:"bands_24h"`        // 6 个业务时段带（近 24h 口径）
+	Bands7d        []QoSTimeBand    `json:"bands_7d"`         // 6 个业务时段带（近 7 天口径）
+	Bands30d       []QoSTimeBand    `json:"bands_30d"`        // 6 个业务时段带（近 30 天口径）
+	PeakValley     QoSPeakValley    `json:"peak_valley"`      // 近 7 天峰谷（兼容字段）
+	PeakValley24h  QoSPeakValley    `json:"peak_valley_24h"`
+	PeakValley30d  QoSPeakValley    `json:"peak_valley_30d"`
+	Days30d        []QoSBucketPoint `json:"days_30d"` // 近 30 天逐日桶
+	// Windows 按窗口打包（v2.0.87）：24h / 7d / 30d，前端直接按 key 取用。
+	Windows map[string]QoSWindowView `json:"windows"`
 }
 
 // QoSMonitorReport 服务质量监控完整响应。
@@ -335,6 +378,7 @@ type QoSMonitorReport struct {
 	GeneratedAtMs int64            `json:"generated_at_ms"`
 	ModelCount    int              `json:"model_count"`
 	TotalCalls7d  int64            `json:"total_calls_7d"`
+	TotalCalls30d int64            `json:"total_calls_30d"`
 	Models        []QoSModelReport `json:"models"`
 	// 全站汇总（v2.0.86）：跨模型聚合。
 	// 口径：调用量/错误数求和；拥堵系数按各模型系数样本数加权（不做耗时混算，
@@ -343,6 +387,8 @@ type QoSMonitorReport struct {
 	Bands       []QoSTimeBand    `json:"bands"`        // 6 个时段带（近 7 天）
 	BandsToday  []QoSTimeBand    `json:"bands_today"`  // 6 个时段带（今日）
 	PeakValley  QoSPeakValley    `json:"peak_valley"`
+	// Windows 全站口径三窗口视图（v2.0.87）：24h / 7d / 30d。
+	Windows map[string]QoSWindowView `json:"windows"`
 }
 
 // ---- 扫描与聚合 ----
@@ -411,6 +457,8 @@ type qosModelAcc struct {
 	hours         map[string]*qosBucketAcc
 	calls7d       int64
 	okCalls7d     int64
+	calls30d      int64
+	okCalls30d    int64
 	lastRequestAt time.Time
 }
 
@@ -514,8 +562,8 @@ func scanQoSShard(sdb *gorm.DB, tableName, userName string, cutoff time.Time, fn
 //   - userName == ""：全站维度（管理端）
 //   - userName != ""：仅统计该用户的请求（用户端，JWT claims 强制传入）
 //
-// 结果按 (userName, subTableNum) 缓存 qosCacheTTL（30s），
-// 配合前端 30s 自动刷新达到「分钟级准实时」新鲜度。
+// 结果按 (userName, subTableNum) 缓存 qosCacheTTL（60s）。页面已移除自动刷新，
+// 缓存用于保护服务端免受高频 8 分表全量扫描；手动刷新走 GetQoSMonitorReportFresh 旁路。
 func GetQoSMonitorReport(userName string, subTableNum int) (*QoSMonitorReport, error) {
 	userName = strings.TrimSpace(userName)
 	subTableNum = normalizeSubTableNum(subTableNum)
@@ -552,6 +600,8 @@ func GetQoSMonitorReportFresh(userName string, subTableNum int) (*QoSMonitorRepo
 func buildQoSMonitorReport(userName string, subTableNum int) (*QoSMonitorReport, error) {
 	now := time.Now()
 	cutoff := now.Add(-qosScanWindow)
+	// 基准 / 7 天指标固定以 weekStart 为界：扫描窗口 30 天，但「近 7 天」口径不得被摊大。
+	weekStart := now.Add(-qosBaselineWindow)
 
 	acc := make(map[string]*qosModelAcc)
 
@@ -585,17 +635,25 @@ func buildQoSMonitorReport(userName string, subTableNum int) (*QoSMonitorReport,
 
 						cls := qosStatusClass(r.ResponseStatus)
 						ts := qosBucketTs(r)
-						m.calls7d++
+						m.calls30d++
 						if cls == 0 {
-							m.okCalls7d++
+							m.okCalls30d++
+						}
+						inWeek := !ts.Before(weekStart)
+						if inWeek {
+							m.calls7d++
+							if cls == 0 {
+								m.okCalls7d++
+							}
 						}
 						if ts.After(m.lastRequestAt) {
 							m.lastRequestAt = ts
 						}
 
-						// 基准：7 天成功请求（2xx 且 output>0 且 elapsed>0），
-						// 同时累计全局与 Token 分档两边。
-						if cls == 0 && r.TokensOutput > 0 && r.ElapsedMs > 0 {
+						// 基准：仅近 7 天成功请求（2xx 且 output>0 且 elapsed>0），
+						// 同时累计全局与 Token 分档两边。30 天前的样本只进月统计，
+						// 不得改变基准 —— 否则同一请求的拥堵系数会随扫描窗口漂移。
+						if inWeek && cls == 0 && r.TokensOutput > 0 && r.ElapsedMs > 0 {
 							m.baseElapsed += r.ElapsedMs
 							m.baseTokens += r.TokensOutput
 							m.baseSamples++
@@ -606,7 +664,7 @@ func buildQoSMonitorReport(userName string, subTableNum int) (*QoSMonitorReport,
 							m.bandSamples[band]++
 						}
 
-						// 小时桶（7 天窗口内全部记录）
+						// 小时桶（30 天扫描窗口内全部记录，供 24h/7d/30d 三套视图复用）
 						hourKey := statsTimeBucketKey(ts, "hour")
 						hb := m.hours[hourKey]
 						if hb == nil {
@@ -653,29 +711,51 @@ func buildQoSMonitorReport(userName string, subTableNum int) (*QoSMonitorReport,
 			Calls7d:            m.calls7d,
 			OkCalls7d:          m.okCalls7d,
 			ErrCalls7d:         m.calls7d - m.okCalls7d,
+			Calls30d:           m.calls30d,
+			OkCalls30d:         m.okCalls30d,
 			LastRequestAtMs:    m.lastRequestAt.UnixMilli(),
 		}
 
 		model.Minutes = buildQoSMinuteSeries(m, base, now)
 		model.Hours = buildQoSHourSeries(m, base, now)
-		model.Days = buildQoSDaySeries(m, base, now)
+		model.Days = buildQoSDaySeriesN(m, base, now, 7)
+		model.Days30d = buildQoSDaySeriesN(m, base, now, 30)
 		model.Heatmap, model.HeatmapCounts = buildQoSHeatmap(m, base, now)
-		model.WeekP50Ms, model.WeekP95Ms, model.WeekOkP50Ms, model.WeekOkP95Ms = qosWeekPercentiles(m)
+		model.WeekP50Ms, model.WeekP95Ms, model.WeekOkP50Ms, model.WeekOkP95Ms = qosWeekPercentiles(m, now)
 		model.Live = buildQoSLive(m, base, now)
 		model.Live.LastRequestAtMs = m.lastRequestAt.UnixMilli()
 		model.Status, model.Alert = qosStatusOf(model.Live)
 		model.Stats24h = buildQoSWindowStats(m, base, now, "24h", now.Add(-24*time.Hour))
-		model.Stats7d = buildQoSWindowStats(m, base, now, "7d", now.Add(-qosScanWindow))
+		model.Stats7d = buildQoSWindowStats(m, base, now, "7d", now.Add(-qosBaselineWindow))
+		model.Stats30d = buildQoSWindowStats(m, base, now, "30d", now.Add(-qosScanWindow))
 		model.Prediction = buildQoSPrediction(m, base, now)
 
-		// 时段画像 / 时段带 / 峰谷（v2.0.86）
-		//   - 小时画像：近 7 天同时段汇总（复用 m.hours，无二次扫描）
-		//   - 时段带 7d：按 7 天画像归并；时段带 24h：按近 24 小时桶归并
-		//   - 峰谷：日均调用量极值 + 今日剩余时段预测峰 + 明日高峰时段带
-		model.HourProfile = buildQoSHourProfile(m, base, now)
+		// 时段画像 / 时段带 / 峰谷（v2.0.86 → v2.0.87 三窗口）
+		//   - 小时画像：窗口内同时段汇总（复用 m.hours，无二次扫描）
+		//   - 时段带：由各窗口画像归并；峰谷：各窗口独立识别（20 天前的峰不得冒充近 7 天峰）
+		model.HourProfile24h = buildQoSHourProfileRange(m, base, now, now.Add(-24*time.Hour))
+		model.HourProfile = buildQoSHourProfileRange(m, base, now, now.Add(-qosBaselineWindow))
+		model.HourProfile30d = buildQoSHourProfileRange(m, base, now, now.Add(-qosScanWindow))
+		model.Bands24h = buildQoSTimeBands(qosHourAggsFromProfile(model.HourProfile24h))
 		model.Bands7d = buildQoSTimeBands(qosHourAggsFromProfile(model.HourProfile))
-		model.Bands24h = buildQoSTimeBands(qosHourAggsFromPoints(model.Hours))
+		model.Bands30d = buildQoSTimeBands(qosHourAggsFromProfile(model.HourProfile30d))
+		model.PeakValley24h = buildQoSPeakValley(model.HourProfile24h, model.Bands24h, nil)
 		model.PeakValley = buildQoSPeakValley(model.HourProfile, model.Bands7d, model.Prediction.TodayRemaining)
+		model.PeakValley30d = buildQoSPeakValley(model.HourProfile30d, model.Bands30d, nil)
+		model.Windows = map[string]QoSWindowView{
+			"24h": {
+				Window: "24h", Stats: model.Stats24h, HourProfile: model.HourProfile24h,
+				Bands: model.Bands24h, PeakValley: model.PeakValley24h, Trend: model.Hours,
+			},
+			"7d": {
+				Window: "7d", Stats: model.Stats7d, HourProfile: model.HourProfile,
+				Bands: model.Bands7d, PeakValley: model.PeakValley, Trend: model.Days,
+			},
+			"30d": {
+				Window: "30d", Stats: model.Stats30d, HourProfile: model.HourProfile30d,
+				Bands: model.Bands30d, PeakValley: model.PeakValley30d, Trend: model.Days30d,
+			},
+		}
 
 		// 近 24 小时调用量（小时桶尾部求和）
 		for i := len(model.Hours) - 24; i < len(model.Hours); i++ {
@@ -684,6 +764,7 @@ func buildQoSMonitorReport(userName string, subTableNum int) (*QoSMonitorReport,
 			}
 		}
 		report.TotalCalls7d += m.calls7d
+		report.TotalCalls30d += m.calls30d
 		report.Models = append(report.Models, model)
 	}
 
@@ -698,6 +779,8 @@ func buildQoSMonitorReport(userName string, subTableNum int) (*QoSMonitorReport,
 	// 全站汇总（v2.0.86）：跨模型指标级再聚合（耗时不做混算）
 	report.HourProfile, report.Bands, report.BandsToday, report.PeakValley =
 		aggregateQoSReport(report.Models, now)
+	// 全站三窗口汇总（v2.0.87）：24h / 7d / 30d
+	report.Windows = aggregateQoSWindows(report.Models)
 	return report, nil
 }
 
@@ -822,11 +905,19 @@ func buildQoSHourSeries(m *qosModelAcc, base qosBaseline, now time.Time) []QoSBu
 // qosDayKeys 返回近 7 天日期键（升序，末位为今天）与日期→行下标映射。
 // 用日期算术（AddDate）而非 Hours()/24 推导，避免跨月/夏令时误差。
 func qosDayKeys(now time.Time) ([]string, map[string]int) {
+	return qosDayKeysN(now, 7)
+}
+
+// qosDayKeysN 返回近 days 天日期键（升序，末位为今天）与日期→行下标映射。
+func qosDayKeysN(now time.Time, days int) ([]string, map[string]int) {
+	if days <= 0 {
+		days = 7
+	}
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	keys := make([]string, 0, 7)
-	index := make(map[string]int, 7)
-	for i := 0; i < 7; i++ {
-		key := today.AddDate(0, 0, i-6).Format("2006-01-02")
+	keys := make([]string, 0, days)
+	index := make(map[string]int, days)
+	for i := 0; i < days; i++ {
+		key := today.AddDate(0, 0, i-(days-1)).Format("2006-01-02")
 		keys = append(keys, key)
 		index[key] = i
 	}
@@ -845,9 +936,9 @@ func mergeQoSBuckets(dst *qosBucketAcc, src *qosBucketAcc) {
 	dst.okTokens += src.okTokens
 }
 
-// buildQoSDaySeries 近 7 天连续天桶。天桶由小时桶 pairs 直接合并，
+// buildQoSDaySeriesN 近 days 天连续天桶。天桶由小时桶 pairs 直接合并，
 // 保证分位数/均值与逐行重算完全一致，无需二次扫描。
-func buildQoSDaySeries(m *qosModelAcc, base qosBaseline, now time.Time) []QoSBucketPoint {
+func buildQoSDaySeriesN(m *qosModelAcc, base qosBaseline, now time.Time, days int) []QoSBucketPoint {
 	dayBuckets := make(map[string]*qosBucketAcc)
 	for key, b := range m.hours {
 		t, err := time.ParseInLocation("2006-01-02 15:04", key, now.Location())
@@ -863,7 +954,7 @@ func buildQoSDaySeries(m *qosModelAcc, base qosBaseline, now time.Time) []QoSBuc
 		mergeQoSBuckets(db, b)
 	}
 
-	keys, _ := qosDayKeys(now)
+	keys, _ := qosDayKeysN(now, days)
 	points := make([]QoSBucketPoint, 0, len(keys))
 	for _, key := range keys {
 		if b, ok := dayBuckets[key]; ok {
@@ -906,10 +997,15 @@ func buildQoSHeatmap(m *qosModelAcc, base qosBaseline, now time.Time) ([][]float
 
 // qosWeekPercentiles 周级 P50/P95（全量口径 + 成功口径）。
 // 从小时桶 pairs 汇总，不额外保留全量 elapsed 切片（降低内存占用）。
-func qosWeekPercentiles(m *qosModelAcc) (p50, p95, okP50, okP95 int64) {
+func qosWeekPercentiles(m *qosModelAcc, now time.Time) (p50, p95, okP50, okP95 int64) {
 	all := make([]int64, 0, 1024)
 	ok := make([]int64, 0, 1024)
-	for _, b := range m.hours {
+	// 扫描窗口已扩到 30 天，但「周分位」必须只统计近 7 天（v2.0.87）。
+	cutKey := now.Add(-qosBaselineWindow).Format("2006-01-02 15:04")
+	for key, b := range m.hours {
+		if key < cutKey {
+			continue
+		}
 		for _, pair := range b.pairs {
 			all = append(all, pair.elapsed)
 			if pair.ok {
@@ -1060,9 +1156,15 @@ func buildQoSPrediction(m *qosModelAcc, base qosBaseline, now time.Time) QoSPred
 	}
 
 	// 第一遍：逐小时模式 + 按天聚合（供明日预测与今日 vs 周均值）
+	// v2.0.87：扫描窗口已扩到 30 天，运行经验预测必须仍只取近 7 天同时段，
+	// 否则「经验」会被 20 天前的旧模式稀释，可信度样本也会虚高。
+	forecastCutKey := now.Add(-qosForecastWindow).Format("2006-01-02 15:04")
 	hourly := make(map[int]*qosHourPattern, 24)
 	dayAcc := make(map[string]*qosBucketAcc, 7)
 	for key, b := range m.hours {
+		if key < forecastCutKey {
+			continue
+		}
 		t, err := time.ParseInLocation("2006-01-02 15:04", key, now.Location())
 		if err != nil {
 			continue
@@ -1189,22 +1291,27 @@ type qosHourAgg struct {
 	p95Ms   int64
 }
 
-// buildQoSHourProfile 近 7 天「同时段」小时画像（24 点）。
+// buildQoSHourProfileRange 窗口内「同时段」小时画像（24 点，v2.0.87 泛化）。
 //
-// 复用 m.hours（近 7 天 × 24 = ≤168 个小时桶，**无二次扫描**）：按小时归并 7 天
-// 的桶 → mergeQoSBuckets → 一次 finalizeQoSBucket，与小时桶/天桶/窗口统计
-// 完全同一套口径（分档基准、成功口径、低样本语义一致）。
+// 复用 m.hours（扫描窗口 ≤30 天 × 24 = ≤720 个小时桶，**无二次扫描**）：按小时归并
+// [since, now] 内的桶 → mergeQoSBuckets → 一次 finalizeQoSBucket，与小时桶/天桶/
+// 窗口统计完全同一套口径（分档基准、成功口径、低样本语义一致）。
+// 24h / 7d / 30d 三套画像只是 since 不同，算法完全一致。
 //
-// Days 统计「该小时有数据的天数」：日均调用用 Days 归一而非固定 7，
+// Days 统计「该小时有数据的天数」：日均调用用 Days 归一而非固定天数，
 // 避免"某模型只在一天有流量"时被摊薄成假低谷。
-func buildQoSHourProfile(m *qosModelAcc, base qosBaseline, now time.Time) []QoSHourProfile {
+func buildQoSHourProfileRange(m *qosModelAcc, base qosBaseline, now, since time.Time) []QoSHourProfile {
 	accs := make([]*qosBucketAcc, 24)
 	daySets := make([]map[string]struct{}, 24)
 	for i := 0; i < 24; i++ {
 		accs[i] = &qosBucketAcc{}
 		daySets[i] = make(map[string]struct{})
 	}
+	cutKey := since.Format("2006-01-02 15:04")
 	for key, b := range m.hours {
+		if key < cutKey {
+			continue // 窗口外（30 天扫描时，7d/24h 画像必须只取窗口内）
+		}
 		t, err := time.ParseInLocation("2006-01-02 15:04", key, now.Location())
 		if err != nil {
 			continue
@@ -1299,6 +1406,7 @@ func qosHourFromBucketKey(key string) int {
 //   - 错误率：调用加权（Σ(错误率×调用)/Σ调用）；
 //   - 成功平均时延：成功数加权；
 //   - P95：取带内最差小时（保守口径，代表"该时段带最差体验"）。
+//
 // Share = 该带调用 / 全部小时调用 × 100。
 func buildQoSTimeBands(aggs []qosHourAgg) []QoSTimeBand {
 	bands := make([]QoSTimeBand, 0, len(qosTimeBands))
@@ -1553,6 +1661,198 @@ func aggregateQoSReport(models []QoSModelReport, now time.Time) ([]QoSHourProfil
 	// 全站峰谷：以全站小时画像的日均调用量取极值
 	pv := buildQoSPeakValley(profiles, bands7d, nil)
 	return profiles, bands7d, bandsToday, pv
+}
+
+// aggregateQoSWindows 全站三窗口汇总（v2.0.87）。
+//
+// 以各模型 windows[win] 为输入做指标级再聚合（跨源站耗时不可混算）：
+//   - 调用量 / 成功数 / 错误数：求和；
+//   - 拥堵系数：Σ(模型系数 × 模型样本) / Σ 模型样本；
+//   - 错误率：Σ(模型错误率 × 模型调用) / Σ 模型调用；
+//   - 成功平均时延：成功数加权；P95 取各模型最大（最差体验，保守口径）；
+//   - 小时画像 / 时段带 / 峰谷：由聚合后画像重算；
+//   - 趋势：按桶做同样的指标级加权合并。
+func aggregateQoSWindows(models []QoSModelReport) map[string]QoSWindowView {
+	out := make(map[string]QoSWindowView, 3)
+	for _, win := range []string{"24h", "7d", "30d"} {
+		profileAgg := make([]qosHourAgg, 24)
+		for h := 0; h < 24; h++ {
+			profileAgg[h].hour = h
+		}
+
+		var calls, samples int64
+		var congW, errW, okW float64
+		var okN int64
+		var p95 int64
+
+		type pointAgg struct {
+			count, success           int64
+			err429, err5xx, errOther int64
+			tokens                   uint64
+			congW                    float64
+			congN                    int64
+			errW                     float64
+			errN                     int64
+			okW                      float64
+			okN                      int64
+			p95                      int64
+			partial                  bool
+		}
+		trend := make(map[string]*pointAgg)
+
+		for i := range models {
+			v, ok := models[i].Windows[win]
+			if !ok {
+				continue
+			}
+			for _, p := range v.HourProfile {
+				if p.Hour < 0 || p.Hour > 23 {
+					continue
+				}
+				a := &profileAgg[p.Hour]
+				a.calls += p.Calls
+				a.cong += p.AvgCongestion * float64(p.CoefficientSamples)
+				a.samples += p.CoefficientSamples
+				a.errRate += p.ErrorRate * float64(p.Calls)
+				a.okAvgMs += int64(float64(p.OkAvgElapsedMs) * float64(p.SuccessCount))
+				a.okCount += p.SuccessCount
+				if p.Days > a.days {
+					a.days = p.Days
+				}
+				if p.OkP95Ms > a.p95Ms {
+					a.p95Ms = p.OkP95Ms
+				}
+			}
+
+			s := v.Stats
+			calls += s.Calls
+			samples += s.CoefficientSamples
+			congW += s.AvgCongestion * float64(s.CoefficientSamples)
+			errW += s.ErrorRate * float64(s.Calls)
+			okCalls := int64(math.Round(s.SuccessRate / 100 * float64(s.Calls)))
+			okW += float64(s.OkAvgElapsedMs) * float64(okCalls)
+			okN += okCalls
+			if s.OkP95Ms > p95 {
+				p95 = s.OkP95Ms
+			}
+
+			for _, tp := range v.Trend {
+				pa := trend[tp.Bucket]
+				if pa == nil {
+					pa = &pointAgg{}
+					trend[tp.Bucket] = pa
+				}
+				pa.count += tp.Count
+				pa.success += tp.SuccessCount
+				pa.err429 += tp.Error429
+				pa.err5xx += tp.Error5xx
+				pa.errOther += tp.ErrorOther
+				pa.tokens += tp.TokensOutput
+				pa.congW += tp.AvgCongestion * float64(tp.CoefficientSamples)
+				pa.congN += tp.CoefficientSamples
+				pa.errW += tp.ErrorRate * float64(tp.Count)
+				pa.errN += tp.Count
+				pa.okW += float64(tp.OkAvgElapsedMs) * float64(tp.SuccessCount)
+				pa.okN += tp.SuccessCount
+				if tp.OkP95Ms > pa.p95 {
+					pa.p95 = tp.OkP95Ms
+				}
+				pa.partial = pa.partial || tp.Partial
+			}
+		}
+
+		// 归一化小时聚合
+		for i := range profileAgg {
+			a := &profileAgg[i]
+			if a.samples > 0 {
+				a.cong /= float64(a.samples)
+			} else {
+				a.cong = 0
+			}
+			if a.calls > 0 {
+				a.errRate /= float64(a.calls)
+			} else {
+				a.errRate = 0
+			}
+			if a.okCount > 0 {
+				a.okAvgMs /= a.okCount
+			} else {
+				a.okAvgMs = 0
+			}
+		}
+
+		profiles := make([]QoSHourProfile, 0, 24)
+		for h := 0; h < 24; h++ {
+			a := profileAgg[h]
+			p := QoSHourProfile{
+				Hour:               h,
+				Calls:              a.calls,
+				SuccessCount:       a.okCount,
+				Days:               a.days,
+				AvgCongestion:      qosRound2(a.cong),
+				ErrorRate:          qosRound2(a.errRate),
+				OkAvgElapsedMs:     a.okAvgMs,
+				OkP95Ms:            a.p95Ms,
+				CoefficientSamples: a.samples,
+				Confidence:         qosForecastConfidence(a.samples),
+			}
+			if a.days > 0 {
+				p.AvgCallsPerDay = qosRound2(float64(a.calls) / float64(a.days))
+			}
+			profiles = append(profiles, p)
+		}
+
+		bands := buildQoSTimeBands(profileAgg)
+		pv := buildQoSPeakValley(profiles, bands, nil)
+
+		stats := QoSWindowStats{Window: win, Calls: calls, CoefficientSamples: samples, OkP95Ms: p95}
+		if calls > 0 {
+			stats.ErrorRate = qosRound2(errW / float64(calls))
+			errCount := int64(math.Round(errW / 100))
+			stats.SuccessRate = qosRound2(float64(calls-errCount) / float64(calls) * 100)
+		}
+		if samples > 0 {
+			stats.AvgCongestion = qosRound2(congW / float64(samples))
+		}
+		if okN > 0 {
+			stats.OkAvgElapsedMs = int64(okW / float64(okN))
+		}
+		stats.Status, stats.Alert = qosStatusOfWindow(stats.AvgCongestion, stats.ErrorRate, stats.Calls)
+
+		// 趋势桶排序（键字典序 == 时间序）
+		keys := make([]string, 0, len(trend))
+		for k := range trend {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		points := make([]QoSBucketPoint, 0, len(keys))
+		for _, k := range keys {
+			pa := trend[k]
+			p := QoSBucketPoint{
+				Bucket: k, Partial: pa.partial,
+				Count: pa.count, SuccessCount: pa.success,
+				Error429: pa.err429, Error5xx: pa.err5xx, ErrorOther: pa.errOther,
+				TokensOutput: pa.tokens, OkP95Ms: pa.p95,
+			}
+			if pa.count > 0 {
+				p.ErrorRate = qosRound2(pa.errW / float64(pa.count))
+			}
+			if pa.congN > 0 {
+				p.AvgCongestion = qosRound2(pa.congW / float64(pa.congN))
+				p.CoefficientSamples = pa.congN
+			}
+			if pa.okN > 0 {
+				p.OkAvgElapsedMs = int64(pa.okW / float64(pa.okN))
+			}
+			points = append(points, p)
+		}
+
+		out[win] = QoSWindowView{
+			Window: win, Stats: stats, HourProfile: profiles,
+			Bands: bands, PeakValley: pv, Trend: points,
+		}
+	}
+	return out
 }
 
 // qosStatusOfWindow 按窗口统计口径给出状态分档与告警（阈值与实时窗口一致）。

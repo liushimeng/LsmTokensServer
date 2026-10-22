@@ -1,6 +1,6 @@
-// QoSCompareChart：模型质量对比（全模型横向条形图，v2.0.85）。
-// 统计窗口（近24h/近7d）× 对比指标（6 项）双切换，数据取后端 stats_24h / stats_7d
-// 固定窗口统计（与小时桶同一套成功口径）。
+// QoSCompareChart：模型质量对比（全模型横向条形图，v2.0.85 / v2.0.87）。
+// 统计窗口（近 1 天 / 1 周 / 1 月）由页面顶部统一控制，本组件只切换对比指标（6 项），
+// 数据取后端 model.windows[win].stats（与小时桶同一套成功口径）。
 // 按值降序排列，阈值类指标按语义着色（四档状态色），数值标签始终伴随；
 // 系数类指标样本 < 5 的模型灰条 + 「—」+ tooltip 低样本说明，不伪造结论；
 // 窗口内零调用的模型不出现在图中（图下脚注说明数量）。
@@ -8,17 +8,17 @@ import { useMemo, useState } from 'react'
 import {
   MIN_COEFFICIENT_SAMPLES,
   COMPARE_METRICS, compareMetricOf, compareMetricColor, fmtCompareValue, fmtNum, modelColor,
+  windowStats, statWindowLabelKey,
 } from './constants'
 
-export default function QoSCompareChart({ models, allNames, t }) {
-  const [win, setWin] = useState('24h')
+export default function QoSCompareChart({ models, allNames, win = '24h', t }) {
   const [metricKey, setMetricKey] = useState('avg_congestion')
   const metric = compareMetricOf(metricKey)
 
   const rows = useMemo(() => {
     const out = []
     for (const m of models) {
-      const s = win === '24h' ? m.stats_24h : m.stats_7d
+      const s = windowStats(m, win)
       if (!s || !s.calls) continue
       const lowSample = !!metric.coefficient && (Number(s.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES
       out.push({
@@ -43,17 +43,10 @@ export default function QoSCompareChart({ models, allNames, t }) {
 
   return (
     <div>
-      {/* 筛选行：统计窗口 + 对比指标（统辖本图） */}
+      {/* 筛选行：统计窗口由页面顶部统一控制，本图只保留对比指标 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
-        <span style={{ display: 'inline-flex' }}>
-          {[{ k: '24h', l: t('serviceQuality.window24h') }, { k: '7d', l: t('serviceQuality.window7d') }].map((w, i, arr) => (
-            <button
-              key={w.k}
-              className={'btn ' + (win === w.k ? 'btn-primary' : '')}
-              style={{ borderRadius: i === 0 ? '6px 0 0 6px' : '0 6px 6px 0', padding: '2px 12px', fontSize: 12 }}
-              onClick={() => setWin(w.k)}
-            >{w.l}</button>
-          ))}
+        <span style={{ fontSize: 11, color: '#64748b', padding: '2px 8px', border: '1px solid #e2e8f0', borderRadius: 999 }}>
+          {t(statWindowLabelKey(win))}
         </span>
         <select
           style={{ maxWidth: 200, fontSize: 12 }}

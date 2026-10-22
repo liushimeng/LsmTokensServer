@@ -127,12 +127,84 @@ export function metricValue(point, metric) {
   return v
 }
 
-// windowSeries 按窗口取桶序列
+// ---- v2.0.87 阶段DB：多窗口（统计窗口 + 趋势窗口） ----
+
+// WINDOWS 趋势窗口（趋势图 / 逐时段明细 / 错误分布共用）。
+export const WINDOWS = [
+  { key: '1h', i18n: 'serviceQuality.window1h' },
+  { key: '24h', i18n: 'serviceQuality.window24h' },
+  { key: '7d', i18n: 'serviceQuality.window7d' },
+  { key: '30d', i18n: 'serviceQuality.window30d' },
+]
+
+// STAT_WINDOWS 统计窗口（状态总览 / 时段画像 / 时段带矩阵 / 质量对比共用）。
+export const STAT_WINDOWS = [
+  { key: '24h', i18n: 'serviceQuality.statWin1d' },
+  { key: '7d', i18n: 'serviceQuality.statWin7d' },
+  { key: '30d', i18n: 'serviceQuality.statWin30d' },
+]
+
+// windowSeries 按趋势窗口取桶序列（30d → 近 30 天逐日桶）
 export function windowSeries(model, win) {
   if (!model) return []
   if (win === '1h') return model.minutes || []
   if (win === '7d') return model.days || []
+  if (win === '30d') return model.days_30d || []
   return model.hours || []
+}
+
+// windowView 取模型的三窗口视图（后端 windows{24h,7d,30d}）。
+export function windowView(model, win) {
+  if (!model || !model.windows) return null
+  return model.windows[win] || null
+}
+
+// windowStats 取窗口统计（windows[win].stats，回退旧 stats_xx 字段）。
+export function windowStats(model, win) {
+  const v = windowView(model, win)
+  if (v && v.stats) return v.stats
+  if (!model) return null
+  if (win === '24h') return model.stats_24h || null
+  if (win === '7d') return model.stats_7d || null
+  if (win === '30d') return model.stats_30d || null
+  return null
+}
+
+// windowProfile 取窗口内 24 点时段画像。
+export function windowProfile(model, win) {
+  const v = windowView(model, win)
+  if (v && Array.isArray(v.hour_profile)) return v.hour_profile
+  if (!model) return []
+  if (win === '24h') return model.hour_profile_24h || []
+  if (win === '30d') return model.hour_profile_30d || []
+  return model.hour_profile || []
+}
+
+// windowBands 取窗口内 6 个业务时段带。
+export function windowBands(model, win) {
+  const v = windowView(model, win)
+  if (v && Array.isArray(v.bands)) return v.bands
+  if (!model) return []
+  if (win === '24h') return model.bands_24h || []
+  if (win === '30d') return model.bands_30d || []
+  return model.bands_7d || []
+}
+
+// windowPeakValley 取窗口内峰谷。
+export function windowPeakValley(model, win) {
+  const v = windowView(model, win)
+  if (v && v.peak_valley) return v.peak_valley
+  if (!model) return {}
+  if (win === '24h') return model.peak_valley_24h || {}
+  if (win === '30d') return model.peak_valley_30d || {}
+  return model.peak_valley || {}
+}
+
+// statWindowLabel 统计窗口的展示文案（用于提示行）。
+export function statWindowLabelKey(win) {
+  if (win === '24h') return 'serviceQuality.statWin1d'
+  if (win === '30d') return 'serviceQuality.statWin30d'
+  return 'serviceQuality.statWin7d'
 }
 
 // bucketShortLabel 桶键短标签：分钟桶 "HH:MM"、小时桶 "MM-DD HH"、天桶 "MM-DD"
