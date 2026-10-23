@@ -82,6 +82,8 @@ LsmTokensServer 是开源 AI Tokens 代理与管理服务，前后端分离架�
 
 **ChatAnalysis「Agent工具定义」**：列表列与详情块数据源均为交易表 `RequestTools` 字段（`request_tools`，请求体解析出的工具列表，逗号分隔）；详情块中该项独占一行、多行换行完整展示。
 
+**服务质量监控页（`ClientWeb/src/pages/service-quality/`）**：统计窗口 / 趋势窗口 / 趋势指标三组筛选按钮与「全模型逐时段明细表」折叠状态均以 localStorage 记忆（key 前缀 `lsm:serviceQuality:`，按角色 `manager`/`user` 隔离，记忆纯函数见 `prefs.js`）；方案见 [`docs/项目迁移解决方案/源站模型服务质量监控逐时段明细矩阵与筛选记忆方案_20261023_101030.md`](docs/项目迁移解决方案/源站模型服务质量监控逐时段明细矩阵与筛选记忆方案_20261023_101030.md)。
+
 **DataTable 两套行内语义（勿混用）**：`collapsedIds + renderCollapsedRow` = 摘要行**替换**整行（AIRouteManage 紧凑摘要）；`expandedIds + renderExpandedRow` = 原数据行**保留**、详情在该行下方整行展开（ChatAnalysis 对话详情）。把展开集合传给 `collapsedIds` 会让数据行消失、收起入口不对称。
 
 **对话详情「全屏」**：走 Element Fullscreen API（`shared/fullscreen.js` 适配层 + `shared/useFullscreen.js` 状态机），面板进入 top layer 铺满整屏；浏览器不支持或被 reject 时自动降级为页面内最大化。状态以 `document.fullscreenElement` 为唯一事实来源，原生全屏下**不要**注册 Esc 按键（交给浏览器退出）。

@@ -41,7 +41,12 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, on
     }
   }), [shown, win, allNames, metric])
 
-  const bucketCount = series.length ? series[0].pts.length : 0
+  // 桶数取各系列最大值：不同模型的桶数可能不同（后端补零但极端情况下不一致），
+  // 用 series[0] 会把后段点裁出坐标轴（v2.0.88 阶段DC 修复 D1）。
+  const bucketCount = useMemo(
+    () => series.reduce((mx, s) => Math.max(mx, s.pts.length), 0),
+    [series],
+  )
 
   const yMax = useMemo(() => {
     let max = 0
@@ -55,6 +60,15 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, on
     return max * 1.15
   }, [series, metric])
 
+  // 参考系列（桶数最多的那条）：用于取桶键（X 轴刻度 / tooltip 标题）
+  const refSeries = useMemo(() => {
+    let best = null
+    for (const s of series) {
+      if (!best || s.pts.length > best.pts.length) best = s
+    }
+    return best
+  }, [series])
+
   const xLabels = useMemo(() => {
     const n = Math.min(6, bucketCount)
     const out = []
@@ -62,11 +76,11 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, on
     const step = (bucketCount - 1) / Math.max(1, n - 1)
     for (let i = 0; i < n; i++) {
       const idx = Math.round(i * step)
-      const key = series[0] && series[0].pts[idx] ? series[0].pts[idx].bucket : ''
+      const key = refSeries && refSeries.pts[idx] ? refSeries.pts[idx].bucket : ''
       out.push({ idx, label: bucketShortLabel(key) })
     }
     return out
-  }, [bucketCount, series])
+  }, [bucketCount, refSeries])
 
   if (!series.length || !bucketCount) {
     return <div style={{ padding: 24, color: MUTED, fontSize: 13 }}>{t('serviceQuality.trend.empty')}</div>
@@ -225,8 +239,8 @@ export default function QoSTrendChart({ models, allNames, selected, onToggle, on
             pointerEvents: 'none', minWidth: 250, maxWidth: 320,
           }}>
             <div style={{ color: MUTED, marginBottom: 4 }}>
-              {series[0] && series[0].pts[hoverIdx] ? series[0].pts[hoverIdx].bucket : ''}
-              {series[0] && series[0].pts[hoverIdx] && series[0].pts[hoverIdx].partial
+              {refSeries && refSeries.pts[hoverIdx] ? refSeries.pts[hoverIdx].bucket : ''}
+              {refSeries && refSeries.pts[hoverIdx] && refSeries.pts[hoverIdx].partial
                 ? ` · ${t('serviceQuality.period.partial')}` : ''}
             </div>
             {series.map((s) => {

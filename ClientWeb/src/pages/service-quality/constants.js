@@ -207,6 +207,14 @@ export function statWindowLabelKey(win) {
   return 'serviceQuality.statWin7d'
 }
 
+// trendWindowLabelKey 趋势窗口的展示文案（用于提示行 / 模块标题）。
+export function trendWindowLabelKey(win) {
+  if (win === '1h') return 'serviceQuality.window1h'
+  if (win === '7d') return 'serviceQuality.window7d'
+  if (win === '30d') return 'serviceQuality.window30d'
+  return 'serviceQuality.window24h'
+}
+
 // bucketShortLabel 桶键短标签：分钟桶 "HH:MM"、小时桶 "MM-DD HH"、天桶 "MM-DD"
 export function bucketShortLabel(key) {
   if (!key) return ''
@@ -330,13 +338,18 @@ export function hourProfileMetricOf(key) {
   return HOUR_PROFILE_METRICS.find((m) => m.key === key) || HOUR_PROFILE_METRICS[0]
 }
 
-// PERIOD_MATRIX_METRICS 「时段 × 模型」矩阵指标集。
-//   tier=true → 按拥堵四档着色（语义色 + 数值标签）；
-//   tier=false → 单色（调用量/时延是量级不是序数等级，不做 value-ramp）。
+// PERIOD_MATRIX_METRICS 「时段 × 模型」矩阵的四维定序（v2.0.88 阶段DC）。
+//
+// 需求：「拥堵系数 / 请求数 / 错误率 / 平均时延」按钮删除，四个维度**同表同屏**显示。
+// 因此这里从「单选指标集」改为「固定四维列集」，列顺序即子表头顺序：
+//   tier=true  → 按拥堵四档着色（仅拥堵系数：语义色 + 数值标注，色不单独传意）；
+//   alert=N    → 数值超阈值时文字标红（错误率；只改文字色，不铺背景色，
+//                 避免一张表里出现两套背景色阶造成误读）；
+//   其余（请求数 / 平均时延）是**量级**不是序数等级 → 单色，不做 value-ramp。
 export const PERIOD_MATRIX_METRICS = [
-  { key: 'congestion', i18n: 'serviceQuality.metric.congestion', field: 'avg_congestion', kind: 'ratio', tier: true },
   { key: 'calls', i18n: 'serviceQuality.period.count', field: 'count', kind: 'num', tier: false },
-  { key: 'error', i18n: 'serviceQuality.metric.error', field: 'error_rate', kind: 'pct', tier: true },
+  { key: 'congestion', i18n: 'serviceQuality.period.coeff', field: 'avg_congestion', kind: 'ratio', tier: true },
+  { key: 'error', i18n: 'serviceQuality.period.errorRate', field: 'error_rate', kind: 'pct', tier: false, alert: 5 },
   { key: 'avg', i18n: 'serviceQuality.metric.avg', field: 'ok_avg_elapsed_ms', kind: 'ms', tier: false },
 ]
 

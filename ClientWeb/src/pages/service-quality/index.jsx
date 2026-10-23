@@ -6,6 +6,16 @@
 //       docs/项目迁移解决方案/源站模型服务质量监控统计化与峰谷预测方案_20261022_143602.md
 //       docs/项目迁移解决方案/源站模型服务质量监控多窗口统计与源站横向对比方案_20261022_150702.md
 //
+// v2.0.88 变更要点（阶段DC）：
+//   1. 逐时段明细模块重构：「时段 × 模型」矩阵改为**四维分组列**（每个模型下同时
+//      显示 请求数 / 拥堵系数 / 错误率 / 成功平均时延），删除指标切换按钮；
+//      外层去掉竖向滚动（表格随页面撑满），首列（时段）横向滚动时粘性；新增合计行。
+//   2. 「全模型逐时段明细表」支持折叠/展开，**默认折叠隐藏**，状态 localStorage 记忆。
+//   3. 统计窗口 / 趋势窗口 / 趋势指标三组筛选按钮状态 **localStorage 记忆**
+//      （key 前缀 lsm:serviceQuality:，按构建角色 manager/user 隔离，见 prefs.js）。
+//   4. 修复：D1 趋势图桶数取各系列最大值；D2 错误分布图首模型无桶时崩溃；
+//      D3 ⑩ 全模型明细表状态/系数/时延列跟随统计窗口；D4 告警卡提示跟随统计窗口。
+//
 // v2.0.87 变更要点：
 //   1. 统计窗口（近 1 天 / 1 周 / 1 月）与趋势窗口（1h/24h/7d/30d）分离，
 //      统计窗口统辖状态总览 / 时段画像 / 时段带矩阵 / 质量对比；
@@ -34,7 +44,7 @@
 //   - 系数类指标样本 < 5 时不取点 / 显示 —，避免小样本伪造结论。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { post } from '../../shared/api'
-import { isAdminRole } from '../../shared/auth'
+import { isAdminRole, currentRole } from '../../shared/auth'
 import PageHeader from '../../components/PageHeader'
 import DataTable from '../../components/DataTable'
 import { useI18n } from '../../i18n'
@@ -49,10 +59,29 @@ import QoSForecast from './QoSForecast'
 import QoSHourProfile from './QoSHourProfile'
 import QoSBandMatrix from './QoSBandMatrix'
 import QoSWindowStats from './QoSWindowStats'
+import { qosPrefKey, loadQosPref, saveQosPref } from './prefs'
 import {
   STATUS_COLORS, METRICS, MIN_COEFFICIENT_SAMPLES, WINDOWS, STAT_WINDOWS,
-  fmtMs, fmtNum, fmtPct, fmtAgo, fmtHour, windowStats, statWindowLabelKey,
+  fmtMs, fmtNum, fmtPct, fmtAgo, fmtHour, windowStats, windowSeries, windowPeakValley,
+  statWindowLabelKey, trendWindowLabelKey,
 } from './constants'
+
+// ---- 状态记忆（v2.0.88 阶段DC）----
+// key 按构建角色隔离：管理员端 manager / 用户端 user（同一份源码、两套构建产物）。
+const ROLE = currentRole()
+const PREF_KEYS = {
+  statWin: qosPrefKey(ROLE, 'statWin'),
+  trendWin: qosPrefKey(ROLE, 'trendWin'),
+  trendMetric: qosPrefKey(ROLE, 'trendMetric'),
+  periodTableOpen: qosPrefKey(ROLE, 'periodTableOpen'),
+}
+const STAT_WIN_KEYS = STAT_WINDOWS.map((w) => w.key)
+const TREND_WIN_KEYS = WINDOWS.map((w) => w.key)
+const METRIC_KEYS = METRICS.map((m) => m.key)
+// 两张 DataTable 的排序记忆键必须分开：DataTable 默认按「角色 + 路径」生成 key，
+// 同页多表会共享（如同名列 model 互相串味），此处显式区分。
+const SORT_KEY_PERIOD_TABLE = `lsm:serviceQuality:sort:periodTable:${ROLE}`
+const SORT_KEY_MODEL_TABLE = `lsm:serviceQuality:sort:modelTable:${ROLE}`
 
 export default function ServiceQuality() {
   const { t } = useI18n()
@@ -61,11 +90,19 @@ export default function ServiceQuality() {
   const [report, setReport] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [win, setWin] = useState('24h') // 趋势窗口：1h/24h/7d/30d
-  const [statWin, setStatWin] = useState('7d') // 统计窗口：24h/7d/30d
-  const [metricKey, setMetricKey] = useState('avg')
+  // 三组筛选按钮 + 明细表折叠状态：初始化读 localStorage，变更即写盘（v2.0.88）
+  const [win, setWin] = useState(() => loadQosPref(PREF_KEYS.trendWin, TREND_WIN_KEYS, '24h')) // 趋势窗口：1h/24h/7d/30d
+  const [statWin, setStatWin] = useState(() => loadQosPref(PREF_KEYS.statWin, STAT_WIN_KEYS, '7d')) // 统计窗口：24h/7d/30d
+  const [metricKey, setMetricKey] = useState(() => loadQosPref(PREF_KEYS.trendMetric, METRIC_KEYS, 'avg'))
+  const [periodTableOpen, setPeriodTableOpen] = useState(() => loadQosPref(PREF_KEYS.periodTableOpen, null, false) === true)
   const [selectedModel, setSelectedModel] = useState(null) // 状态卡/热力图点击选中（仅高亮联动，不做过滤）
   const [trendSel, setTrendSel] = useState(() => new Set()) // 折线图选中模型
+
+  // 筛选状态写盘（低频操作，直接写，无需 debounce）
+  useEffect(() => { saveQosPref(PREF_KEYS.trendWin, win) }, [win])
+  useEffect(() => { saveQosPref(PREF_KEYS.statWin, statWin) }, [statWin])
+  useEffect(() => { saveQosPref(PREF_KEYS.trendMetric, metricKey) }, [metricKey])
+  useEffect(() => { saveQosPref(PREF_KEYS.periodTableOpen, periodTableOpen) }, [periodTableOpen])
 
   const seqRef = useRef(0)
 
@@ -128,6 +165,17 @@ export default function ServiceQuality() {
     const s = windowStats(m, statWin)
     return !!(s && s.alert)
   }).length
+
+  // 逐时段明细表的行数（折叠态提示用；口径与 QoSPeriodTable 一致：仅统计有请求的时段）
+  const periodRowCount = useMemo(() => {
+    let n = 0
+    for (const m of models) {
+      for (const p of windowSeries(m, win)) {
+        if (Number(p.count) > 0) n++
+      }
+    }
+    return n
+  }, [models, win])
 
   const updatedAt = report && report.generated_at_ms ? new Date(report.generated_at_ms) : null
   const updatedAtText = updatedAt
@@ -215,7 +263,7 @@ export default function ServiceQuality() {
             <div className="card"><h3>{t('serviceQuality.kpi.models')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtNum(models.length)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.table.model')}</div></div>
             <div className="card"><h3>{t('serviceQuality.kpi.windowCalls')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtNum(statStats.calls)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t(statWindowLabelKey(statWin))}</div></div>
             <div className="card"><h3>{t('serviceQuality.kpi.calls30d')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{fmtNum(report.total_calls_30d)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.window30d')}</div></div>
-            <div className="card"><h3>{t('serviceQuality.kpi.alerts')}</h3><div style={{ fontSize: 24, fontWeight: 800, color: alertCount ? STATUS_COLORS.severe : undefined }}>{fmtNum(alertCount)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.kpi.alertsHint')}</div></div>
+            <div className="card"><h3>{t('serviceQuality.kpi.alerts')}</h3><div style={{ fontSize: 24, fontWeight: 800, color: alertCount ? STATUS_COLORS.severe : undefined }}>{fmtNum(alertCount)}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.kpi.alertsHintWindow')}</div></div>
             <div className="card"><h3>{t('serviceQuality.kpi.windowP95')}</h3><div style={{ fontSize: 24, fontWeight: 800 }}>{siteOkP95 ? fmtMs(siteOkP95) : '-'}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.kpi.windowP95Hint')}</div></div>
             <div className="card"><h3>{t('serviceQuality.kpi.windowError')}</h3><div style={{ fontSize: 24, fontWeight: 800, color: siteErrorRate > 5 ? STATUS_COLORS.severe : undefined }}>{siteErrorRate ? siteErrorRate.toFixed(1) + '%' : '0%'}</div><div style={{ fontSize: 12, color: '#94a3b8' }}>{t('serviceQuality.kpi.windowErrorHint')}</div></div>
             <div className="card">
@@ -283,14 +331,43 @@ export default function ServiceQuality() {
             />
           </div>
 
-          {/* ⑦ 逐时段明细（时段 × 模型 矩阵 + 全模型长表，无下拉） */}
+          {/* ⑦ 逐时段明细（四维分组列矩阵 + 可折叠的全模型长表，无下拉） */}
           <div className="card">
             <h3>{t('serviceQuality.period.titleAll')}</h3>
-            <QoSPeriodMatrix models={models} allNames={allNames} win={win} t={t} />
-            <div style={{ marginTop: 14, fontSize: 12, fontWeight: 600, color: '#334155' }}>
-              {t('serviceQuality.period.tableTitleAll')}
+            <div style={{ marginTop: 2, marginBottom: 8, fontSize: 12, fontWeight: 600, color: '#334155' }}>
+              {t('serviceQuality.period.matrixTitle', { window: t(trendWindowLabelKey(win)) })}
             </div>
-            <QoSPeriodTable models={models} win={win} t={t} />
+            <QoSPeriodMatrix models={models} allNames={allNames} win={win} t={t} />
+
+            {/* 全模型逐时段明细表：默认折叠隐藏（状态 localStorage 记忆） */}
+            <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>
+                {t('serviceQuality.period.tableTitleAll')}
+              </span>
+              <button
+                className={'btn ' + (periodTableOpen ? '' : 'btn-primary')}
+                style={{ padding: '2px 12px', fontSize: 12 }}
+                onClick={() => setPeriodTableOpen((v) => !v)}
+                aria-expanded={periodTableOpen}
+              >
+                {periodTableOpen
+                  ? t('serviceQuality.period.tableCollapse')
+                  : t('serviceQuality.period.tableExpand')}
+              </button>
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                {t('serviceQuality.period.tableRowCount', { count: fmtNum(periodRowCount) })}
+              </span>
+              {!periodTableOpen ? (
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                  {t('serviceQuality.period.tableCollapsedHint')}
+                </span>
+              ) : null}
+            </div>
+            {periodTableOpen ? (
+              <div style={{ marginTop: 8 }}>
+                <QoSPeriodTable models={models} win={win} t={t} sortStorageKey={SORT_KEY_PERIOD_TABLE} />
+              </div>
+            ) : null}
           </div>
 
           {/* ⑧ 拥堵热力图（全模型小倍数网格对比，近 7 天 × 24 小时） */}
@@ -312,15 +389,17 @@ export default function ServiceQuality() {
 
           {/* ⑩ 全模型明细表（低对比色系的表格视图出口） */}
           <div className="card">
-            <h3>{t('serviceQuality.table.title')}</h3>
+            <h3>{t('serviceQuality.table.titleWindow', { window: t(statWindowLabelKey(statWin)) })}</h3>
             <DataTable
               rowKey="dst_model_name"
               rows={models}
+              sortStorageKey={SORT_KEY_MODEL_TABLE}
               columns={[
                 { key: 'model', title: t('serviceQuality.table.model'), render: (_, m) => <b>{m.dst_model_name}</b> },
                 { key: 'status', title: t('serviceQuality.table.status'), render: (_, m) => {
-                  const st = (m.stats_24h && m.stats_24h.status) || m.status || 'idle'
-                  const al = (m.stats_24h && m.stats_24h.alert) || m.alert
+                  const s = windowStats(m, statWin) || {}
+                  const st = s.status || m.status || 'idle'
+                  const al = s.alert || m.alert
                   return (
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                       <span style={{ width: 8, height: 8, borderRadius: 999, background: STATUS_COLORS[st] || STATUS_COLORS.idle }} />
@@ -350,10 +429,10 @@ export default function ServiceQuality() {
                 { key: 'baseline', title: t('serviceQuality.table.baseline'), nowrap: true, render: (_, m) => m.baseline_ms_per_token > 0 ? m.baseline_ms_per_token.toFixed(2) : '-' },
                 { key: 'bands', title: t('serviceQuality.table.bands'), nowrap: true, render: (_, m) => `${m.baseline_bands || 0}/10` },
                 {
-                  key: 'live_coeff', title: t('serviceQuality.table.coeff24h'), sortable: true, nowrap: true,
-                  sortValue: (m) => Number(m.stats_24h && m.stats_24h.avg_congestion) || 0,
+                  key: 'live_coeff', title: t('serviceQuality.table.coeffWindow', { window: t(statWindowLabelKey(statWin)) }), sortable: true, nowrap: true,
+                  sortValue: (m) => Number((windowStats(m, statWin) || {}).avg_congestion) || 0,
                   render: (_, m) => {
-                    const s = m.stats_24h || {}
+                    const s = windowStats(m, statWin) || {}
                     if ((Number(s.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES && Number(s.calls) > 0) {
                       return <span title={t('serviceQuality.period.lowSample', { count: (Number(s.coefficient_samples) || 0) })}>—</span>
                     }
@@ -361,30 +440,19 @@ export default function ServiceQuality() {
                   },
                 },
                 {
-                  key: 'coeff30d', title: t('serviceQuality.table.coeff30d'), sortable: true, nowrap: true,
-                  sortValue: (m) => Number(m.stats_30d && m.stats_30d.avg_congestion) || 0,
-                  render: (_, m) => {
-                    const s = m.stats_30d || {}
-                    if ((Number(s.coefficient_samples) || 0) < MIN_COEFFICIENT_SAMPLES && Number(s.calls) > 0) {
-                      return <span title={t('serviceQuality.period.lowSample', { count: (Number(s.coefficient_samples) || 0) })}>—</span>
-                    }
-                    return (Number(s.avg_congestion) ? <b>{s.avg_congestion.toFixed(2)}</b> : '-')
-                  },
-                },
-                {
-                  key: 'avg', title: t('serviceQuality.table.okAvgMs'), sortable: true, nowrap: true,
-                  sortValue: (m) => Number(m.stats_24h && m.stats_24h.ok_avg_elapsed_ms) || 0,
-                  render: (_, m) => fmtMs(m.stats_24h && m.stats_24h.ok_avg_elapsed_ms),
+                  key: 'avg', title: t('serviceQuality.table.avgWindow', { window: t(statWindowLabelKey(statWin)) }), sortable: true, nowrap: true,
+                  sortValue: (m) => Number((windowStats(m, statWin) || {}).ok_avg_elapsed_ms) || 0,
+                  render: (_, m) => fmtMs((windowStats(m, statWin) || {}).ok_avg_elapsed_ms),
                 },
                 { key: 'p50', title: t('serviceQuality.table.weekP50'), nowrap: true, render: (_, m) => fmtMs(m.week_ok_p50_ms) },
-                { key: 'p95', title: t('serviceQuality.table.p95ms'), nowrap: true, sortValue: (m) => Number(m.week_ok_p95_ms) || 0, render: (_, m) => fmtMs(m.week_ok_p95_ms) },
+                { key: 'p95', title: t('serviceQuality.table.p95Window', { window: t(statWindowLabelKey(statWin)) }), nowrap: true, sortValue: (m) => Number((windowStats(m, statWin) || {}).ok_p95_ms) || 0, render: (_, m) => fmtMs((windowStats(m, statWin) || {}).ok_p95_ms) },
                 {
                   key: 'peak', title: t('serviceQuality.table.peakHour'), nowrap: true,
-                  render: (_, m) => fmtHour(m.peak_valley && m.peak_valley.peak_hour),
+                  render: (_, m) => fmtHour((windowPeakValley(m, statWin) || {}).peak_hour),
                 },
                 {
                   key: 'valley', title: t('serviceQuality.table.valleyHour'), nowrap: true,
-                  render: (_, m) => fmtHour(m.peak_valley && m.peak_valley.valley_hour),
+                  render: (_, m) => fmtHour((windowPeakValley(m, statWin) || {}).valley_hour),
                 },
                 { key: 'e429', title: t('serviceQuality.table.e429'), nowrap: true, render: (_, m) => errRate24h(m, ['error_429']) },
                 { key: 'e5xx', title: t('serviceQuality.table.e5xx'), nowrap: true, render: (_, m) => errRate24h(m, ['error_5xx']) },

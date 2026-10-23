@@ -283,22 +283,25 @@
 > `ClientWeb/src/pages/ServiceQuality.jsx` 为重导出入口；实际代码位于 `ClientWeb/src/pages/service-quality/`。
 > v2.0.86（阶段DA）：统计化重构 —— 无自动刷新、无模型下拉、全模型同屏对比。
 > v2.0.87（阶段DB）：多窗口统计（近 1 天 / 1 周 / 1 月）+ 源站横向差异（较全站中位偏差）。
+> v2.0.88（阶段DC）：逐时段明细四维分组列矩阵（去竖向滚动 + 合计行）+ 筛选状态 localStorage 记忆 + 全模型明细表默认折叠。
 
 | 文件 | 核心功能 |
 |------|----------|
-| [`service-quality/index.jsx`](../../ClientWeb/src/pages/service-quality/index.jsx) | 主页面：置顶筛选行（统计窗口 / 趋势窗口 / 指标）+ KPI + 模块编排（无自动刷新） |
+| [`service-quality/index.jsx`](../../ClientWeb/src/pages/service-quality/index.jsx) | 主页面：置顶筛选行（统计窗口 / 趋势窗口 / 指标）+ KPI + 模块编排（无自动刷新）；筛选状态（统计窗口 / 趋势窗口 / 趋势指标）localStorage 记忆 |
 | [`service-quality/QoSWindowStats.jsx`](../../ClientWeb/src/pages/service-quality/QoSWindowStats.jsx) | 模型状态总览统计图表（全站统计条 + 源站横向比较 + 较全站中位偏差 + 峰谷） |
 | [`service-quality/QoSCards.jsx`](../../ClientWeb/src/pages/service-quality/QoSCards.jsx) | 每模型统计卡（24h / 7d / 30d + 预测 + 峰谷） |
 | [`service-quality/QoSHourProfile.jsx`](../../ClientWeb/src/pages/service-quality/QoSHourProfile.jsx) | 窗口化 24 小时时段画像与高峰低谷（全站主图 + 每模型小倍数网格） |
 | [`service-quality/QoSBandMatrix.jsx`](../../ClientWeb/src/pages/service-quality/QoSBandMatrix.jsx) | 业务时段带 × 模型 拥堵矩阵（窗口化横向比较） |
 | [`service-quality/QoSForecast.jsx`](../../ClientWeb/src/pages/service-quality/QoSForecast.jsx) | 运行经验预测（全模型：下一时段条形 + 明日表 + 小倍数折线） |
-| [`service-quality/QoSPeriodMatrix.jsx`](../../ClientWeb/src/pages/service-quality/QoSPeriodMatrix.jsx) | 时段 × 模型 矩阵（逐时段明细的图形化视图） |
-| [`service-quality/QoSPeriodTable.jsx`](../../ClientWeb/src/pages/service-quality/QoSPeriodTable.jsx) | 全模型逐时段明细长表（模型 × 时段，14 项指标） |
+| [`service-quality/QoSPeriodMatrix.jsx`](../../ClientWeb/src/pages/service-quality/QoSPeriodMatrix.jsx) | 时段 × 模型 四维分组列矩阵（每模型 4 子列：请求数 / 拥堵系数 / 错误率 / 平均时延）+ 合计行 + 首列粘性 + 无竖向滚动 |
+| [`service-quality/QoSPeriodTable.jsx`](../../ClientWeb/src/pages/service-quality/QoSPeriodTable.jsx) | 全模型逐时段明细长表（模型 × 时段，14 项指标）；默认折叠隐藏（可展开，状态 localStorage 记忆） |
 | [`service-quality/QoSTrendChart.jsx`](../../ClientWeb/src/pages/service-quality/QoSTrendChart.jsx) | 服务质量趋势折线（单轴多指标，1h/24h/7d/30d 窗口联动） |
 | [`service-quality/QoSCompareChart.jsx`](../../ClientWeb/src/pages/service-quality/QoSCompareChart.jsx) | 模型质量对比横向条形（统计窗口 × 6 指标） |
 | [`service-quality/QoSHeatmap.jsx`](../../ClientWeb/src/pages/service-quality/QoSHeatmap.jsx) | 拥堵热力图（全模型 7×24 小倍数网格） |
 | [`service-quality/QoSErrorBars.jsx`](../../ClientWeb/src/pages/service-quality/QoSErrorBars.jsx) | 错误堆叠柱状图（429/5xx/其他） |
 | [`service-quality/constants.js`](../../ClientWeb/src/pages/service-quality/constants.js) | 共享常量（状态色/系列色/时段带/指标集/窗口工具/格式化工具） |
+| [`service-quality/prefs.js`](../../ClientWeb/src/pages/service-quality/prefs.js) | 服务质量监控页面状态记忆纯函数（统计窗口 / 趋势窗口 / 趋势指标 / 明细表折叠的 localStorage 持久化，node 可直跑自检） |
+| [`service-quality/prefs.test.js`](../../ClientWeb/src/pages/service-quality/prefs.test.js) | 偏好记忆纯函数自检脚本（node 直跑） |
 
 ---
 

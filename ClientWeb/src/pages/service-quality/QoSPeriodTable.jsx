@@ -1,4 +1,4 @@
-// QoSPeriodTable：全模型逐时段明细长表（v2.0.86 阶段DA）。
+// QoSPeriodTable：全模型逐时段明细长表（v2.0.86 阶段DA；v2.0.88 阶段DC 默认折叠）。
 //
 // v2.0.84 原本是「单模型 + 模型下拉」；v2.0.86 按需求删除模型下拉，
 // 改为**所有模型一起展示**（行 = 模型 × 时段，长表）：
@@ -6,6 +6,8 @@
 //   - 保留全部 14 项指标（请求数/成功/时延/P95/ms-Token/系数/卡顿/抖动/错误分类/错误率）；
 //   - 系数类指标样本 < MIN_COEFFICIENT_SAMPLES 时显示 —（低样本不伪造结论）；
 //   - 进行中时段整行浅色底 + 「进行中」标签。
+// v2.0.88：默认**折叠隐藏**（由 index.jsx 控制展开状态，状态 localStorage 记忆）；
+// 排序记忆 key 由父组件传入（与页面另一张 DataTable 隔离，避免同名列互相串味）。
 // 图形化的「时段 × 模型」视图见同目录 QoSPeriodMatrix.jsx。
 import { useMemo } from 'react'
 import DataTable from '../../components/DataTable'
@@ -13,7 +15,7 @@ import {
   windowSeries, fmtMs, fmtPct, fmtRatio, fmtNum, bucketShortLabel, MIN_COEFFICIENT_SAMPLES,
 } from './constants'
 
-export default function QoSPeriodTable({ models, win, t }) {
+export default function QoSPeriodTable({ models, win, t, sortStorageKey }) {
   const rows = useMemo(() => {
     const out = []
     for (const m of models) {
@@ -124,6 +126,7 @@ export default function QoSPeriodTable({ models, win, t }) {
         columns={columns}
         empty={t('serviceQuality.period.empty')}
         rowClass={(p) => (p.partial ? 'qos-period-partial' : '')}
+        sortStorageKey={sortStorageKey}
       />
       <div style={{ marginTop: 4, fontSize: 11, color: '#94a3b8' }}>{t('serviceQuality.period.hintAll')}</div>
     </div>

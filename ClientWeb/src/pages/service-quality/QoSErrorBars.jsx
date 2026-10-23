@@ -17,11 +17,13 @@ export default function QoSErrorBars({ models, win, t }) {
 
   const buckets = useMemo(() => {
     if (!models.length) return []
-    const n = windowSeries(models[0], win).length
+    const seriesList = models.map((m) => windowSeries(m, win))
+    // 桶数取各模型序列最大值：此前取 models[0] 的长度，模型桶数不一致时会截断其它模型
+    // （v2.0.88 阶段DC 修复 D2）
+    const n = seriesList.reduce((mx, s) => Math.max(mx, s.length), 0)
     const out = []
     for (let i = 0; i < n; i++) out.push({ e429: 0, e5xx: 0, other: 0, total: 0, partial: false })
-    for (const m of models) {
-      const pts = windowSeries(m, win)
+    for (const pts of seriesList) {
       for (let i = 0; i < Math.min(n, pts.length); i++) {
         out[i].e429 += Number(pts[i].error_429) || 0
         out[i].e5xx += Number(pts[i].error_5xx) || 0
@@ -31,6 +33,17 @@ export default function QoSErrorBars({ models, win, t }) {
       }
     }
     return out
+  }, [models, win])
+
+  // 参考序列（桶数最多的模型）：用于取桶键（首尾时间标注 / tooltip 标题）。
+  // 此前直接取 models[0]，当首个模型无桶时会抛异常导致整页崩溃（修复 D2）。
+  const refSeries = useMemo(() => {
+    let best = null
+    for (const m of models) {
+      const pts = windowSeries(m, win)
+      if (!best || pts.length > best.length) best = pts
+    }
+    return best || []
   }, [models, win])
 
   const total = useMemo(
@@ -122,11 +135,11 @@ export default function QoSErrorBars({ models, win, t }) {
                 })}
                 {/* 首尾桶时间标注 */}
                 <text x={xOf(0)} y={CHART_H - 6} fontSize={10} fill={AXIS} textAnchor="start">
-                  {bucketShortLabel(windowSeries(models[0], win)[0].bucket)}
+                  {refSeries[0] ? bucketShortLabel(refSeries[0].bucket) : ''}
                 </text>
                 <text x={xOf(buckets.length - 1) + barW} y={CHART_H - 6}
                   fontSize={10} fill={AXIS} textAnchor="end">
-                  {bucketShortLabel(windowSeries(models[0], win)[buckets.length - 1].bucket)}
+                  {refSeries[buckets.length - 1] ? bucketShortLabel(refSeries[buckets.length - 1].bucket) : ''}
                 </text>
               </svg>
             )
@@ -142,7 +155,7 @@ export default function QoSErrorBars({ models, win, t }) {
             pointerEvents: 'none', color: TEXT,
           }}>
             <div style={{ color: '#94a3b8', marginBottom: 2 }}>
-              {windowSeries(models[0], win)[hoverIdx].bucket}
+              {refSeries[hoverIdx] ? refSeries[hoverIdx].bucket : ''}
               {buckets[hoverIdx].partial ? ` · ${t('serviceQuality.period.partial')}` : ''}
             </div>
             {legend.map((l) => (
